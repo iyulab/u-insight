@@ -12,7 +12,7 @@ categories = ["algorithms", "science"]
 
 [dependencies]
 u-analytics = { version = "0.1", path = "../../algorithms/u-analytics" }
-u-numflow = { version = "0.1", path = "../../foundation/u-numflow" }
+u-numflow = { version = "0.2", path = "../../foundation/u-numflow" }
 rand = "0.9"
 
 [build-dependencies]
