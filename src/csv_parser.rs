@@ -1,6 +1,6 @@
 //! CSV parser with automatic type inference.
 //!
-//! Parses CSV files into a [`DataFrame`](crate::dataframe::DataFrame)
+//! Parses CSV files into a [`DataFrame`]
 //! with column types automatically inferred from content. The inference
 //! priority is: Numeric → Boolean → Categorical → Text.
 //!

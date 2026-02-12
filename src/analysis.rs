@@ -3,7 +3,7 @@
 //! Unlike the [`profiling`](crate::profiling) module which tolerates dirty data,
 //! the analysis module **requires** clean numeric data with no missing values.
 //! If missing values are detected, it returns
-//! [`InsightError::MissingValues`](crate::error::InsightError::MissingValues).
+//! [`InsightError::MissingValues`].
 //!
 //! # Correlation Analysis
 //!

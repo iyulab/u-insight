@@ -76,7 +76,7 @@ pub struct PcaResult {
     /// Component loadings: n_components rows × d columns.
     /// Row i is the eigenvector (loading) for component i.
     pub loadings: Vec<Vec<f64>>,
-    /// Projected scores: one Vec<f64> per data point (n × n_components).
+    /// Projected scores: one `Vec<f64>` per data point (n × n_components).
     pub scores: Vec<Vec<f64>>,
     /// Feature means used for centering (length d).
     pub means: Vec<f64>,

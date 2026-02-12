@@ -594,7 +594,7 @@ pub struct DbscanResult {
 /// - [`InsightError::InsufficientData`] if data is empty or min_samples < 2
 /// - [`InsightError::DimensionMismatch`] if points have different dimensions
 /// - [`InsightError::NonNumericColumn`] if data contains NaN or infinite values
-/// - [`InsightError::InvalidParameter`] if epsilon <= 0
+/// - [`InsightError::InsufficientData`] if epsilon <= 0
 ///
 /// # Example
 ///
