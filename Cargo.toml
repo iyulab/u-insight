@@ -1,0 +1,23 @@
+[package]
+name = "u-insight"
+version = "0.1.0"
+edition = "2021"
+authors = ["iyulab"]
+license = "MIT"
+repository = "https://github.com/iyulab/u-insight"
+description = "Statistical analysis and data profiling engine with C FFI bindings."
+readme = "README.md"
+keywords = ["statistics", "profiling", "analytics", "ffi"]
+categories = ["algorithms", "science"]
+
+[dependencies]
+u-analytics = { version = "0.1", path = "../../algorithms/u-analytics" }
+u-numflow = { version = "0.1", path = "../../foundation/u-numflow" }
+rand = "0.9"
+
+[dev-dependencies]
+proptest = "1.4"
+
+[lib]
+name = "u_insight"
+crate-type = ["lib", "cdylib", "staticlib"]

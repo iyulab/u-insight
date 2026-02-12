@@ -1,2 +1,9 @@
+# Build
+target/
+
 # Local
 dev-docs/
+claudedocs/
+
+# IDE
+debug/
