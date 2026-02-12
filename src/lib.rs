@@ -13,15 +13,15 @@
 //! - [`dataframe`] — Column-major tabular data model (DataFrame, Column, DataType)
 //! - [`csv_parser`] — CSV parsing with automatic type inference
 //! - [`profiling`] — Column-level and dataset-level data profiling
-//! - [`analysis`] — Correlation and regression analysis on clean data
-//! - [`clustering`] — K-Means (with auto-K), DBSCAN, and Hierarchical Agglomerative clustering
-//! - [`distribution`] — Distribution analysis: ECDF, histogram, QQ-plot, normality tests
+//! - [`analysis`] — Correlation (Pearson/Spearman), regression (simple/multiple OLS), Cramér's V
+//! - [`clustering`] — K-Means++ (auto-K, Gap Statistic), Mini-Batch K-Means, DBSCAN, Hierarchical (4 linkages), HDBSCAN
+//! - [`distribution`] — ECDF, histogram, QQ-plot, normality tests (KS, JB, Shapiro-Wilk, Anderson-Darling), Grubbs, distribution fitting
 //! - [`pca`] — Principal Component Analysis (dimensionality reduction)
-//! - [`isolation_forest`] — Isolation Forest anomaly detection
+//! - [`isolation_forest`] — Isolation Forest anomaly detection (Liu et al. 2008)
 //! - [`lof`] — Local Outlier Factor (LOF) density-based anomaly detection
 //! - [`mahalanobis`] — Mahalanobis distance multivariate outlier detection
-//! - [`feature_importance`] — Feature importance analysis and selection
-//! - [`ffi`] — C FFI bindings for cross-language interop
+//! - [`feature_importance`] — Composite importance, ANOVA F-test, Mutual Information, Permutation Importance
+//! - [`ffi`] — C FFI bindings (32 functions, 20 structs, auto-generated C header via cbindgen)
 //! - [`error`] — Error types
 //!
 //! ## Quick Start

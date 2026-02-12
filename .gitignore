@@ -1,6 +1,10 @@
 # Build
 target/
 
+# .NET
+bin/
+obj/
+
 # Local
 dev-docs/
 claudedocs/

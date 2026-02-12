@@ -15,6 +15,9 @@ u-analytics = { version = "0.1", path = "../../algorithms/u-analytics" }
 u-numflow = { version = "0.1", path = "../../foundation/u-numflow" }
 rand = "0.9"
 
+[build-dependencies]
+cbindgen = "0.27"
+
 [dev-dependencies]
 proptest = "1.4"
 
