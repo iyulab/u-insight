@@ -294,7 +294,10 @@ mod tests {
         let config = LofConfig::default().k(5).threshold(2.0);
         let result = lof(&data, &config).expect("should compute");
 
-        assert!(result.anomalies[20], "outlier should be classified as anomaly");
+        assert!(
+            result.anomalies[20],
+            "outlier should be classified as anomaly"
+        );
         assert!(result.anomaly_count >= 1, "at least one anomaly");
         assert!(result.anomaly_fraction > 0.0);
     }

@@ -1638,7 +1638,11 @@ pub unsafe extern "C" fn insight_mutual_info(
 
         let names: Vec<String> = (0..nf).map(|i| format!("f{}", i)).collect();
         let target_usize: Vec<usize> = target_raw.iter().map(|&t| t as usize).collect();
-        let bins = if n_bins == 0 { None } else { Some(n_bins as usize) };
+        let bins = if n_bins == 0 {
+            None
+        } else {
+            Some(n_bins as usize)
+        };
 
         match mutual_info_classif(&features, &names, &target_usize, bins) {
             Ok(mi_result) => {
@@ -1731,16 +1735,23 @@ pub unsafe extern "C" fn insight_mini_batch_kmeans(
 
         let config = MiniBatchKMeansConfig {
             k: k as usize,
-            batch_size: if batch_size == 0 { 100 } else { batch_size as usize },
-            max_iter: if max_iter == 0 { 100 } else { max_iter as usize },
+            batch_size: if batch_size == 0 {
+                100
+            } else {
+                batch_size as usize
+            },
+            max_iter: if max_iter == 0 {
+                100
+            } else {
+                max_iter as usize
+            },
             tol: 1e-4,
             seed: Some(seed),
         };
 
         match mini_batch_kmeans(&rows, &config) {
             Ok(km_result) => {
-                let mut labels: Vec<u32> =
-                    km_result.labels.iter().map(|&l| l as u32).collect();
+                let mut labels: Vec<u32> = km_result.labels.iter().map(|&l| l as u32).collect();
                 let labels_len = labels.len() as u32;
                 let labels_ptr = labels.as_mut_ptr();
                 std::mem::forget(labels);
@@ -1975,10 +1986,7 @@ pub unsafe extern "C" fn insight_permutation_importance(
 /// # Safety
 /// `ptr` must have been returned by `insight_permutation_importance` with matching `count`.
 #[no_mangle]
-pub unsafe extern "C" fn insight_free_perm_features(
-    ptr: *mut CPermImportanceFeature,
-    count: u32,
-) {
+pub unsafe extern "C" fn insight_free_perm_features(ptr: *mut CPermImportanceFeature, count: u32) {
     if !ptr.is_null() && count > 0 {
         let _ = Vec::from_raw_parts(ptr, count as usize, count as usize);
     }
@@ -2093,8 +2101,12 @@ mod tests {
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_components, 1);
 
-        let evr = unsafe { slice::from_raw_parts(result.explained_variance, result.n_variance as usize) };
-        assert!((evr[0] - 1.0).abs() < 1e-10, "PC1 should explain all variance");
+        let evr =
+            unsafe { slice::from_raw_parts(result.explained_variance, result.n_variance as usize) };
+        assert!(
+            (evr[0] - 1.0).abs() < 1e-10,
+            "PC1 should explain all variance"
+        );
 
         unsafe { insight_free_f64_array(result.explained_variance, result.n_variance) };
     }
@@ -2169,8 +2181,8 @@ mod tests {
     fn ffi_distribution_basic() {
         // Roughly normal data
         let data: Vec<f64> = vec![
-            -2.5, -2.0, -1.8, -1.5, -1.2, -1.0, -0.8, -0.5, -0.3, -0.1,
-            0.1, 0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.0, 2.5,
+            -2.5, -2.0, -1.8, -1.5, -1.2, -1.0, -0.8, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.8, 1.0,
+            1.2, 1.5, 1.8, 2.0, 2.5,
         ];
 
         let mut result = CDistributionResult {
@@ -2223,16 +2235,8 @@ mod tests {
     fn ffi_feature_importance_basic() {
         // 3 features, 10 rows (row-major)
         let data: Vec<f64> = vec![
-            1.0, 2.0, 5.0,
-            2.0, 4.0, 4.0,
-            3.0, 6.0, 3.0,
-            4.0, 8.0, 2.0,
-            5.0, 10.0, 1.0,
-            6.0, 12.0, 6.0,
-            7.0, 14.0, 5.0,
-            8.0, 16.0, 4.0,
-            9.0, 18.0, 3.0,
-            10.0, 20.0, 2.0,
+            1.0, 2.0, 5.0, 2.0, 4.0, 4.0, 3.0, 6.0, 3.0, 4.0, 8.0, 2.0, 5.0, 10.0, 1.0, 6.0, 12.0,
+            6.0, 7.0, 14.0, 5.0, 8.0, 16.0, 4.0, 9.0, 18.0, 3.0, 10.0, 20.0, 2.0,
         ];
 
         let mut result = CFeatureImportanceResult {
@@ -2247,8 +2251,7 @@ mod tests {
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_scores, 3);
 
-        let scores =
-            unsafe { slice::from_raw_parts(result.scores, result.n_scores as usize) };
+        let scores = unsafe { slice::from_raw_parts(result.scores, result.n_scores as usize) };
         // All scores should be in [0, 1]
         for &s in scores {
             assert!((0.0..=1.0).contains(&s), "score {s} out of range");
@@ -2324,8 +2327,7 @@ mod tests {
             anomaly_count: 0,
             threshold: 0.0,
         };
-        let rc =
-            unsafe { insight_isolation_forest(ptr::null(), 10, 2, 50, 0.1, 42, &mut result) };
+        let rc = unsafe { insight_isolation_forest(ptr::null(), 10, 2, 50, 0.1, 42, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
@@ -2409,8 +2411,7 @@ mod tests {
         assert_eq!(result.n_merges, 5); // n-1 merges
 
         // Verify labels
-        let labels =
-            unsafe { slice::from_raw_parts(result.labels, result.n_labels as usize) };
+        let labels = unsafe { slice::from_raw_parts(result.labels, result.n_labels as usize) };
         assert_eq!(labels[0], labels[1]);
         assert_eq!(labels[3], labels[4]);
         assert_ne!(labels[0], labels[3]);
@@ -2442,9 +2443,8 @@ mod tests {
     #[test]
     fn ffi_hdbscan_basic() {
         let data: Vec<f64> = vec![
-            0.0, 0.0, 0.1, 0.0, 0.0, 0.1, 0.1, 0.1, 0.05, 0.05,
-            10.0, 10.0, 10.1, 10.0, 10.0, 10.1, 10.1, 10.1, 10.05, 10.05,
-            50.0, 50.0, // noise
+            0.0, 0.0, 0.1, 0.0, 0.0, 0.1, 0.1, 0.1, 0.05, 0.05, 10.0, 10.0, 10.1, 10.0, 10.0, 10.1,
+            10.1, 10.1, 10.05, 10.05, 50.0, 50.0, // noise
         ];
         let mut result = CHdbscanResult {
             n_clusters: 0,
@@ -2495,11 +2495,7 @@ mod tests {
     fn ffi_correlation_basic() {
         // 3 columns, 5 rows (row-major): c0 and c1 correlated, c2 independent
         let data: Vec<f64> = vec![
-            1.0, 2.0, 5.0,
-            2.0, 4.0, 3.0,
-            3.0, 6.0, 7.0,
-            4.0, 8.0, 1.0,
-            5.0, 10.0, 4.0,
+            1.0, 2.0, 5.0, 2.0, 4.0, 3.0, 3.0, 6.0, 7.0, 4.0, 8.0, 1.0, 5.0, 10.0, 4.0,
         ];
 
         let mut result = CCorrelationResult {
@@ -2566,9 +2562,21 @@ mod tests {
 
         let rc = unsafe { insight_regression(x.as_ptr(), y.as_ptr(), 5, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
-        assert!((result.intercept - 1.0).abs() < 1e-6, "intercept = {}", result.intercept);
-        assert!((result.slope - 2.0).abs() < 1e-6, "slope = {}", result.slope);
-        assert!((result.r_squared - 1.0).abs() < 1e-6, "R² = {}", result.r_squared);
+        assert!(
+            (result.intercept - 1.0).abs() < 1e-6,
+            "intercept = {}",
+            result.intercept
+        );
+        assert!(
+            (result.slope - 2.0).abs() < 1e-6,
+            "slope = {}",
+            result.slope
+        );
+        assert!(
+            (result.r_squared - 1.0).abs() < 1e-6,
+            "R² = {}",
+            result.r_squared
+        );
     }
 
     #[test]
@@ -2688,14 +2696,7 @@ mod tests {
     #[test]
     fn ffi_anova_select_basic() {
         // 6 points, 2 features (row-major), 2 classes
-        let data: Vec<f64> = vec![
-            1.0, 3.0,
-            1.1, 3.1,
-            1.2, 2.9,
-            5.0, 3.0,
-            5.1, 3.1,
-            5.2, 2.9,
-        ];
+        let data: Vec<f64> = vec![1.0, 3.0, 1.1, 3.1, 1.2, 2.9, 5.0, 3.0, 5.1, 3.1, 5.2, 2.9];
         let target: Vec<u32> = vec![0, 0, 0, 1, 1, 1];
 
         let mut result = CAnovaSelectionResult {
@@ -2705,9 +2706,7 @@ mod tests {
         };
 
         let rc = unsafe {
-            insight_anova_select(
-                data.as_ptr(), 6, 2, target.as_ptr(), 0.05, &mut result,
-            )
+            insight_anova_select(data.as_ptr(), 6, 2, target.as_ptr(), 0.05, &mut result)
         };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_features, 2);
@@ -2723,9 +2722,7 @@ mod tests {
             n_features: 0,
             n_selected: 0,
         };
-        let rc = unsafe {
-            insight_anova_select(ptr::null(), 6, 2, ptr::null(), 0.05, &mut result)
-        };
+        let rc = unsafe { insight_anova_select(ptr::null(), 6, 2, ptr::null(), 0.05, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
@@ -2734,9 +2731,7 @@ mod tests {
     #[test]
     fn ffi_mutual_info_basic() {
         // 6 points, 2 features, 2 classes; feature 0 separates classes, feature 1 does not
-        let data: Vec<f64> = vec![
-            1.0, 5.0, 1.1, 5.1, 1.2, 4.9, 5.0, 5.0, 5.1, 5.1, 5.2, 4.9,
-        ];
+        let data: Vec<f64> = vec![1.0, 5.0, 1.1, 5.1, 1.2, 4.9, 5.0, 5.0, 5.1, 5.1, 5.2, 4.9];
         let target: Vec<u32> = vec![0, 0, 0, 1, 1, 1];
 
         let mut result = CMutualInfoResult {
@@ -2744,9 +2739,8 @@ mod tests {
             n_features: 0,
         };
 
-        let rc = unsafe {
-            insight_mutual_info(data.as_ptr(), 6, 2, target.as_ptr(), 0, &mut result)
-        };
+        let rc =
+            unsafe { insight_mutual_info(data.as_ptr(), 6, 2, target.as_ptr(), 0, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_features, 2);
 
@@ -2759,9 +2753,7 @@ mod tests {
             features: ptr::null_mut(),
             n_features: 0,
         };
-        let rc = unsafe {
-            insight_mutual_info(ptr::null(), 6, 2, ptr::null(), 0, &mut result)
-        };
+        let rc = unsafe { insight_mutual_info(ptr::null(), 6, 2, ptr::null(), 0, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
@@ -2770,9 +2762,7 @@ mod tests {
     #[test]
     fn ffi_mini_batch_kmeans_basic() {
         // Two obvious clusters
-        let data: Vec<f64> = vec![
-            0.0, 0.0, 0.1, 0.1, 0.2, 0.0, 5.0, 5.0, 5.1, 5.1, 5.2, 5.0,
-        ];
+        let data: Vec<f64> = vec![0.0, 0.0, 0.1, 0.1, 0.2, 0.0, 5.0, 5.0, 5.1, 5.1, 5.2, 5.0];
         let mut result = CKMeansResult {
             k: 0,
             wcss: 0.0,
@@ -2781,9 +2771,8 @@ mod tests {
             n_labels: 0,
         };
 
-        let rc = unsafe {
-            insight_mini_batch_kmeans(data.as_ptr(), 6, 2, 2, 3, 50, 42, &mut result)
-        };
+        let rc =
+            unsafe { insight_mini_batch_kmeans(data.as_ptr(), 6, 2, 2, 3, 50, 42, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.k, 2);
         assert_eq!(result.n_labels, 6);
@@ -2800,9 +2789,7 @@ mod tests {
             labels: ptr::null_mut(),
             n_labels: 0,
         };
-        let rc = unsafe {
-            insight_mini_batch_kmeans(ptr::null(), 6, 2, 2, 3, 50, 42, &mut result)
-        };
+        let rc = unsafe { insight_mini_batch_kmeans(ptr::null(), 6, 2, 2, 3, 50, 42, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
@@ -2812,8 +2799,7 @@ mod tests {
     fn ffi_gap_statistic_basic() {
         // Two clusters
         let data: Vec<f64> = vec![
-            0.0, 0.0, 0.1, 0.1, 0.2, 0.0, 0.0, 0.2,
-            5.0, 5.0, 5.1, 5.1, 5.2, 5.0, 5.0, 5.2,
+            0.0, 0.0, 0.1, 0.1, 0.2, 0.0, 0.0, 0.2, 5.0, 5.0, 5.1, 5.1, 5.2, 5.0, 5.0, 5.2,
         ];
         let mut result = CGapStatResult {
             best_k: 0,
@@ -2822,9 +2808,7 @@ mod tests {
             std_errors: ptr::null_mut(),
         };
 
-        let rc = unsafe {
-            insight_gap_statistic(data.as_ptr(), 8, 2, 1, 4, 3, 42, &mut result)
-        };
+        let rc = unsafe { insight_gap_statistic(data.as_ptr(), 8, 2, 1, 4, 3, 42, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert!(result.best_k >= 1 && result.best_k <= 4);
         assert!(result.n_values > 0);
@@ -2843,9 +2827,7 @@ mod tests {
             gap_values: ptr::null_mut(),
             std_errors: ptr::null_mut(),
         };
-        let rc = unsafe {
-            insight_gap_statistic(ptr::null(), 8, 2, 1, 4, 3, 42, &mut result)
-        };
+        let rc = unsafe { insight_gap_statistic(ptr::null(), 8, 2, 1, 4, 3, 42, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
@@ -2854,9 +2836,7 @@ mod tests {
     #[test]
     fn ffi_permutation_importance_basic() {
         // y = 2*x0 + noise; x1 = noise
-        let data: Vec<f64> = vec![
-            1.0, 0.5, 2.0, 0.3, 3.0, 0.8, 4.0, 0.1, 5.0, 0.9,
-        ];
+        let data: Vec<f64> = vec![1.0, 0.5, 2.0, 0.3, 3.0, 0.8, 4.0, 0.1, 5.0, 0.9];
         let target: Vec<f64> = vec![2.1, 4.0, 6.2, 7.9, 10.1];
 
         let mut result = CPermImportanceResult {
@@ -2866,9 +2846,7 @@ mod tests {
         };
 
         let rc = unsafe {
-            insight_permutation_importance(
-                data.as_ptr(), 5, 2, target.as_ptr(), 5, 42, &mut result,
-            )
+            insight_permutation_importance(data.as_ptr(), 5, 2, target.as_ptr(), 5, 42, &mut result)
         };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_features, 2);

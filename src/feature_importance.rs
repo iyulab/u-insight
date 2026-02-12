@@ -236,7 +236,10 @@ pub fn feature_analysis(
         .collect();
 
     // Step 2: Correlation matrix
-    let means: Vec<f64> = features.iter().map(|f| f.iter().sum::<f64>() / n as f64).collect();
+    let means: Vec<f64> = features
+        .iter()
+        .map(|f| f.iter().sum::<f64>() / n as f64)
+        .collect();
     let stds: Vec<f64> = variances.iter().map(|v| v.sqrt()).collect();
 
     let mut correlation_matrix = vec![vec![0.0; p]; p];
@@ -486,10 +489,7 @@ fn compute_condition_number(corr: &[Vec<f64>], p: usize) -> f64 {
                 .iter()
                 .copied()
                 .fold(f64::NEG_INFINITY, f64::max);
-            let min_ev = eigenvalues
-                .iter()
-                .copied()
-                .fold(f64::INFINITY, f64::min);
+            let min_ev = eigenvalues.iter().copied().fold(f64::INFINITY, f64::min);
 
             if min_ev.abs() < 1e-10 || min_ev <= 0.0 {
                 // Near-zero eigenvalue → near-singular → infinite condition number
@@ -684,9 +684,12 @@ mod tests {
             vec![1.0, 2.0, 3.0, 4.0],
             vec![5.0, 5.0, 5.0, 5.0], // constant
         ];
-        let result =
-            feature_analysis(&features, &names(&["vary", "const"]), &FeatureConfig::default())
-                .unwrap();
+        let result = feature_analysis(
+            &features,
+            &names(&["vary", "const"]),
+            &FeatureConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(result.low_variance.len(), 1);
         assert_eq!(result.low_variance[0].name, "const");
@@ -695,10 +698,7 @@ mod tests {
 
     #[test]
     fn all_varying_no_flags() {
-        let features = vec![
-            vec![1.0, 2.0, 3.0, 4.0],
-            vec![10.0, 20.0, 30.0, 40.0],
-        ];
+        let features = vec![vec![1.0, 2.0, 3.0, 4.0], vec![10.0, 20.0, 30.0, 40.0]];
         let result =
             feature_analysis(&features, &names(&["a", "b"]), &FeatureConfig::default()).unwrap();
 
@@ -712,8 +712,7 @@ mod tests {
             vec![1.0, 2.0, 3.0, 4.0],
         ];
         let config = FeatureConfig::default().variance_threshold(0.01);
-        let result =
-            feature_analysis(&features, &names(&["low", "high"]), &config).unwrap();
+        let result = feature_analysis(&features, &names(&["low", "high"]), &config).unwrap();
 
         assert_eq!(result.low_variance.len(), 1);
         assert_eq!(result.low_variance[0].name, "low");
@@ -728,9 +727,12 @@ mod tests {
             vec![2.0, 4.0, 6.0, 8.0, 10.0], // perfect correlation
             vec![5.0, 3.0, 7.0, 1.0, 9.0],  // independent
         ];
-        let result =
-            feature_analysis(&features, &names(&["a", "b", "c"]), &FeatureConfig::default())
-                .unwrap();
+        let result = feature_analysis(
+            &features,
+            &names(&["a", "b", "c"]),
+            &FeatureConfig::default(),
+        )
+        .unwrap();
 
         assert!(!result.high_correlations.is_empty());
         let pair = &result.high_correlations[0];
@@ -865,10 +867,7 @@ mod tests {
 
     #[test]
     fn scores_in_range() {
-        let features = vec![
-            vec![1.0, 2.0, 3.0, 4.0],
-            vec![5.0, 3.0, 7.0, 1.0],
-        ];
+        let features = vec![vec![1.0, 2.0, 3.0, 4.0], vec![5.0, 3.0, 7.0, 1.0]];
         let result =
             feature_analysis(&features, &names(&["a", "b"]), &FeatureConfig::default()).unwrap();
 
@@ -893,7 +892,9 @@ mod tests {
     #[test]
     fn name_count_mismatch() {
         let features = vec![vec![1.0, 2.0]];
-        assert!(feature_analysis(&features, &names(&["a", "b"]), &FeatureConfig::default()).is_err());
+        assert!(
+            feature_analysis(&features, &names(&["a", "b"]), &FeatureConfig::default()).is_err()
+        );
     }
 
     #[test]
@@ -926,10 +927,7 @@ mod tests {
 
     #[test]
     fn result_metadata() {
-        let features = vec![
-            vec![1.0, 2.0, 3.0, 4.0],
-            vec![5.0, 6.0, 7.0, 8.0],
-        ];
+        let features = vec![vec![1.0, 2.0, 3.0, 4.0], vec![5.0, 6.0, 7.0, 8.0]];
         let result =
             feature_analysis(&features, &names(&["a", "b"]), &FeatureConfig::default()).unwrap();
 
@@ -974,14 +972,8 @@ mod tests {
         ];
         let target: Vec<f64> = features[0].iter().map(|&x| x * 3.0).collect();
 
-        let result = permutation_importance(
-            &features,
-            &["a".into(), "b".into()],
-            &target,
-            3,
-            42,
-        )
-        .unwrap();
+        let result =
+            permutation_importance(&features, &["a".into(), "b".into()], &target, 3, 42).unwrap();
 
         for f in &result.features {
             assert!(f.std_dev >= 0.0, "{} std_dev={}", f.name, f.std_dev);
@@ -994,14 +986,8 @@ mod tests {
         let f2: Vec<f64> = vec![5.0, 3.0, 7.0, 1.0, 8.0, 2.0, 6.0, 4.0, 9.0, 0.0];
         let target: Vec<f64> = f1.iter().map(|&x| x * 2.0).collect();
 
-        let result = permutation_importance(
-            &[f1, f2],
-            &["f1".into(), "f2".into()],
-            &target,
-            3,
-            42,
-        )
-        .unwrap();
+        let result =
+            permutation_importance(&[f1, f2], &["f1".into(), "f2".into()], &target, 3, 42).unwrap();
 
         for i in 1..result.features.len() {
             assert!(result.features[i].importance <= result.features[i - 1].importance);

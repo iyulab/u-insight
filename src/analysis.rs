@@ -40,10 +40,7 @@ use crate::error::InsightError;
 /// let dirty = vec![vec![1.0, f64::NAN, 3.0]];
 /// assert!(validate_clean_data(&dirty, &["a".into()]).is_err());
 /// ```
-pub fn validate_clean_data(
-    columns: &[Vec<f64>],
-    names: &[String],
-) -> Result<(), InsightError> {
+pub fn validate_clean_data(columns: &[Vec<f64>], names: &[String]) -> Result<(), InsightError> {
     if columns.is_empty() {
         return Err(InsightError::InsufficientData {
             min_required: 1,
@@ -67,10 +64,7 @@ pub fn validate_clean_data(
             });
         }
 
-        let name = names
-            .get(i)
-            .cloned()
-            .unwrap_or_else(|| format!("col_{i}"));
+        let name = names.get(i).cloned().unwrap_or_else(|| format!("col_{i}"));
 
         // Check for NaN or infinite values
         let nan_count = col.iter().filter(|v| v.is_nan()).count();
@@ -298,13 +292,11 @@ pub fn regression_analysis(
 
     if predictors.len() == 1 {
         // Simple linear regression
-        let result = u_analytics::regression::simple_linear_regression(
-            &predictors[0], target,
-        )
-        .ok_or(InsightError::InsufficientData {
-            min_required: 3,
-            actual: n,
-        })?;
+        let result = u_analytics::regression::simple_linear_regression(&predictors[0], target)
+            .ok_or(InsightError::InsufficientData {
+                min_required: 3,
+                actual: n,
+            })?;
 
         Ok(RegressionAnalysis {
             target_name: target_name.to_string(),
@@ -319,13 +311,12 @@ pub fn regression_analysis(
     } else {
         // Multiple linear regression
         let x_refs: Vec<&[f64]> = predictors.iter().map(|c| c.as_slice()).collect();
-        let result = u_analytics::regression::multiple_linear_regression(
-            &x_refs, target,
-        )
-        .ok_or(InsightError::InsufficientData {
-            min_required: predictors.len() + 2,
-            actual: n,
-        })?;
+        let result = u_analytics::regression::multiple_linear_regression(&x_refs, target).ok_or(
+            InsightError::InsufficientData {
+                min_required: predictors.len() + 2,
+                actual: n,
+            },
+        )?;
 
         Ok(RegressionAnalysis {
             target_name: target_name.to_string(),
@@ -700,11 +691,8 @@ pub fn mutual_info_classif(
     }
 
     // Class index map
-    let class_map: std::collections::HashMap<usize, usize> = classes
-        .iter()
-        .enumerate()
-        .map(|(i, &c)| (c, i))
-        .collect();
+    let class_map: std::collections::HashMap<usize, usize> =
+        classes.iter().enumerate().map(|(i, &c)| (c, i)).collect();
 
     // p(y) — class marginal
     let mut class_counts = vec![0usize; n_classes];
@@ -787,10 +775,7 @@ pub fn mutual_info_classif(
     }
 
     // Sort by MI descending
-    results.sort_by(|a, b| {
-        b.mi.partial_cmp(&a.mi)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    results.sort_by(|a, b| b.mi.partial_cmp(&a.mi).unwrap_or(std::cmp::Ordering::Equal));
 
     Ok(MutualInfoResult { features: results })
 }
@@ -898,8 +883,8 @@ mod tests {
     fn high_correlation_filtering() {
         let data = vec![
             vec![1.0, 2.0, 3.0, 4.0, 5.0],
-            vec![2.0, 4.0, 6.0, 8.0, 10.0],  // r ≈ 1.0 with x
-            vec![3.1, 2.9, 3.0, 3.2, 2.8],   // nearly uncorrelated with x
+            vec![2.0, 4.0, 6.0, 8.0, 10.0], // r ≈ 1.0 with x
+            vec![3.1, 2.9, 3.0, 3.2, 2.8],  // nearly uncorrelated with x
         ];
         let names = vec!["x".into(), "y".into(), "noise".into()];
         let config = CorrelationConfig {
@@ -949,13 +934,8 @@ mod tests {
             .collect();
 
         let predictors = vec![x1, x2];
-        let result = regression_analysis(
-            &predictors,
-            &["x1".into(), "x2".into()],
-            &y,
-            "y",
-        )
-        .unwrap();
+        let result =
+            regression_analysis(&predictors, &["x1".into(), "x2".into()], &y, "y").unwrap();
 
         assert!(result.r_squared > 0.99);
         assert_eq!(result.coefficients.len(), 3); // intercept + 2 predictors
@@ -1032,7 +1012,7 @@ mod tests {
         // Feature A clearly separates classes; Feature B does not
         let features = vec![
             vec![1.0, 1.1, 1.2, 5.0, 5.1, 5.2], // A
-            vec![3.0, 3.1, 2.9, 3.0, 3.1, 2.9],  // B
+            vec![3.0, 3.1, 2.9, 3.0, 3.1, 2.9], // B
         ];
         let names = vec!["A".into(), "B".into()];
         let target = vec![0, 0, 0, 1, 1, 1];
@@ -1065,9 +1045,7 @@ mod tests {
     #[test]
     fn anova_multiple_classes() {
         // 3 classes, feature clearly separates them
-        let features = vec![vec![
-            1.0, 1.1, 1.2, 5.0, 5.1, 5.2, 10.0, 10.1, 10.2,
-        ]];
+        let features = vec![vec![1.0, 1.1, 1.2, 5.0, 5.1, 5.2, 10.0, 10.1, 10.2]];
         let names = vec!["f0".into()];
         let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
 
@@ -1127,9 +1105,7 @@ mod tests {
     #[test]
     fn mi_perfect_dependence() {
         // Perfect dependence: feature bins map 1:1 to classes
-        let features = vec![vec![
-            0.0, 0.1, 0.2, 5.0, 5.1, 5.2, 10.0, 10.1, 10.2,
-        ]];
+        let features = vec![vec![0.0, 0.1, 0.2, 5.0, 5.1, 5.2, 10.0, 10.1, 10.2]];
         let names = vec!["f0".into()];
         let target = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
 

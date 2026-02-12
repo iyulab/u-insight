@@ -281,19 +281,17 @@ pub fn distribution_analysis(
         }
     });
 
-    let jarque_bera =
-        u_analytics::testing::jarque_bera_test(data).map(|r| NormalityTestResult {
-            statistic: r.statistic,
-            p_value: r.p_value,
-            rejected: r.p_value < alpha,
-        });
+    let jarque_bera = u_analytics::testing::jarque_bera_test(data).map(|r| NormalityTestResult {
+        statistic: r.statistic,
+        p_value: r.p_value,
+        rejected: r.p_value < alpha,
+    });
 
-    let shapiro_wilk =
-        u_analytics::testing::shapiro_wilk_test(data).map(|r| NormalityTestResult {
-            statistic: r.w,
-            p_value: r.p_value,
-            rejected: r.p_value < alpha,
-        });
+    let shapiro_wilk = u_analytics::testing::shapiro_wilk_test(data).map(|r| NormalityTestResult {
+        statistic: r.w,
+        p_value: r.p_value,
+        rejected: r.p_value < alpha,
+    });
 
     let anderson_darling =
         u_analytics::testing::anderson_darling_test(data).map(|r| NormalityTestResult {
@@ -578,15 +576,12 @@ pub fn grubbs_test(data: &[f64], alpha: f64) -> Option<GrubbsResult> {
     }
 
     // Find the point with maximum deviation from mean
-    let (outlier_index, outlier_value) = data
-        .iter()
-        .enumerate()
-        .max_by(|a, b| {
-            (a.1 - mean)
-                .abs()
-                .partial_cmp(&(b.1 - mean).abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })?;
+    let (outlier_index, outlier_value) = data.iter().enumerate().max_by(|a, b| {
+        (a.1 - mean)
+            .abs()
+            .partial_cmp(&(b.1 - mean).abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })?;
 
     let statistic = (outlier_value - mean).abs() / std_dev;
 
@@ -616,8 +611,8 @@ mod tests {
     fn nearly_normal_data() -> Vec<f64> {
         // Roughly normal-looking data (symmetric around 0)
         vec![
-            -2.5, -2.0, -1.8, -1.5, -1.2, -1.0, -0.8, -0.5, -0.3, -0.1,
-            0.1, 0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.0, 2.5,
+            -2.5, -2.0, -1.8, -1.5, -1.2, -1.0, -0.8, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.8, 1.0,
+            1.2, 1.5, 1.8, 2.0, 2.5,
         ]
     }
 
@@ -863,7 +858,12 @@ mod tests {
         assert!(!fits.is_empty());
         // Should be sorted by AIC
         for w in fits.windows(2) {
-            assert!(w[0].aic <= w[1].aic, "AIC not sorted: {} > {}", w[0].aic, w[1].aic);
+            assert!(
+                w[0].aic <= w[1].aic,
+                "AIC not sorted: {} > {}",
+                w[0].aic,
+                w[1].aic
+            );
         }
         // Each fit should have valid fields
         for f in &fits {

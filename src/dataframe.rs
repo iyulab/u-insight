@@ -73,7 +73,11 @@ impl ValidityBitmap {
     /// Returns `true` if the value at `idx` is valid (not null).
     #[inline]
     pub fn is_valid(&self, idx: usize) -> bool {
-        debug_assert!(idx < self.len, "index {idx} out of bounds (len={})", self.len);
+        debug_assert!(
+            idx < self.len,
+            "index {idx} out of bounds (len={})",
+            self.len
+        );
         let (word, bit) = (idx / 64, idx % 64);
         (self.bits[word] >> bit) & 1 == 1
     }
@@ -81,7 +85,11 @@ impl ValidityBitmap {
     /// Marks position `idx` as valid.
     #[inline]
     pub fn set_valid(&mut self, idx: usize) {
-        debug_assert!(idx < self.len, "index {idx} out of bounds (len={})", self.len);
+        debug_assert!(
+            idx < self.len,
+            "index {idx} out of bounds (len={})",
+            self.len
+        );
         let (word, bit) = (idx / 64, idx % 64);
         self.bits[word] |= 1u64 << bit;
     }
@@ -89,7 +97,11 @@ impl ValidityBitmap {
     /// Marks position `idx` as invalid (null).
     #[inline]
     pub fn set_invalid(&mut self, idx: usize) {
-        debug_assert!(idx < self.len, "index {idx} out of bounds (len={})", self.len);
+        debug_assert!(
+            idx < self.len,
+            "index {idx} out of bounds (len={})",
+            self.len
+        );
         let (word, bit) = (idx / 64, idx % 64);
         self.bits[word] &= !(1u64 << bit);
     }
@@ -328,10 +340,7 @@ impl Column {
     pub fn valid_numeric_values(&self) -> Option<Vec<f64>> {
         match self {
             Self::Numeric { values, validity } => {
-                let result: Vec<f64> = validity
-                    .valid_indices()
-                    .map(|i| values[i])
-                    .collect();
+                let result: Vec<f64> = validity.valid_indices().map(|i| values[i]).collect();
                 Some(result)
             }
             _ => None,
@@ -474,7 +483,10 @@ impl DataFrame {
 
     /// Returns an iterator over (name, column) pairs.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Column)> {
-        self.names.iter().map(|s| s.as_str()).zip(self.columns.iter())
+        self.names
+            .iter()
+            .map(|s| s.as_str())
+            .zip(self.columns.iter())
     }
 
     /// Returns a summary of column data types.
@@ -780,6 +792,9 @@ mod tests {
         .unwrap();
 
         let pairs: Vec<(&str, DataType)> = df.iter().map(|(n, c)| (n, c.data_type())).collect();
-        assert_eq!(pairs, vec![("x", DataType::Numeric), ("y", DataType::Numeric)]);
+        assert_eq!(
+            pairs,
+            vec![("x", DataType::Numeric), ("y", DataType::Numeric)]
+        );
     }
 }

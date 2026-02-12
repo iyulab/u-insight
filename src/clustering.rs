@@ -449,19 +449,16 @@ fn kmeans_single(
 ///
 /// Reference: Arthur & Vassilvitskii (2007). "k-means++: The advantages
 /// of careful seeding."
-fn kmeans_plus_plus(
-    data: &[Vec<f64>],
-    k: usize,
-    _d: usize,
-    seed: Option<u64>,
-) -> Vec<Vec<f64>> {
+fn kmeans_plus_plus(data: &[Vec<f64>], k: usize, _d: usize, seed: Option<u64>) -> Vec<Vec<f64>> {
     let n = data.len();
     let mut centroids: Vec<Vec<f64>> = Vec::with_capacity(k);
 
     // Simple LCG-based random number generator for reproducibility
     let mut rng_state = seed.unwrap_or(12345);
     let mut next_rand = || -> f64 {
-        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng_state = rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (rng_state >> 33) as f64 / (1u64 << 31) as f64
     };
 
@@ -1105,7 +1102,10 @@ fn cut_dendrogram_k(merges: &[Merge], n: usize, k: usize) -> Vec<usize> {
     }
 
     for merge in merges.iter().take(n_merges_to_apply) {
-        let new_id = n + merges.iter().position(|m| std::ptr::eq(m, merge)).unwrap_or(0);
+        let new_id = n + merges
+            .iter()
+            .position(|m| std::ptr::eq(m, merge))
+            .unwrap_or(0);
         // Actually we know merge ids: cluster_a and cluster_b are already
         // in the sequential id scheme (0..n original, n.. merged)
         let ra = find(&mut parent, merge.cluster_a);
@@ -1268,10 +1268,7 @@ pub struct HdbscanResult {
 /// assert_eq!(result.n_clusters, 2);
 /// assert!(result.labels[10].is_none()); // outlier is noise
 /// ```
-pub fn hdbscan(
-    data: &[Vec<f64>],
-    config: &HdbscanConfig,
-) -> Result<HdbscanResult, InsightError> {
+pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResult, InsightError> {
     let n = data.len();
     let min_cluster_size = config.min_cluster_size;
     let min_samples = config.min_samples.unwrap_or(min_cluster_size);
@@ -1342,9 +1339,10 @@ pub fn hdbscan(
         core_dists[i] = if k <= 1 {
             dists_from_i.first().copied().unwrap_or(0.0)
         } else {
-            dists_from_i.get(k - 2).copied().unwrap_or(
-                dists_from_i.last().copied().unwrap_or(0.0),
-            )
+            dists_from_i
+                .get(k - 2)
+                .copied()
+                .unwrap_or(dists_from_i.last().copied().unwrap_or(0.0))
         };
     }
 
@@ -1353,9 +1351,7 @@ pub fn hdbscan(
     let mut mreach = vec![0.0_f64; n * n];
     for i in 0..n {
         for j in (i + 1)..n {
-            let d_val = dist_matrix[i * n + j]
-                .max(core_dists[i])
-                .max(core_dists[j]);
+            let d_val = dist_matrix[i * n + j].max(core_dists[i]).max(core_dists[j]);
             mreach[i * n + j] = d_val;
             mreach[j * n + i] = d_val;
         }
@@ -1395,7 +1391,11 @@ pub fn hdbscan(
     // Phase 6: Extract clusters using EOM
     let (labels, probabilities) = extract_eom_clusters(&condensed, n);
 
-    let n_clusters = labels.iter().flatten().collect::<std::collections::HashSet<_>>().len();
+    let n_clusters = labels
+        .iter()
+        .flatten()
+        .collect::<std::collections::HashSet<_>>()
+        .len();
     let noise_count = labels.iter().filter(|l| l.is_none()).count();
     let mut cluster_sizes = vec![0_usize; n_clusters];
     for c in labels.iter().flatten() {
@@ -1654,10 +1654,7 @@ fn add_falling_points(
 }
 
 /// Extract clusters from condensed tree using Excess of Mass (EOM).
-fn extract_eom_clusters(
-    condensed: &[CondensedNode],
-    n: usize,
-) -> (Vec<Option<usize>>, Vec<f64>) {
+fn extract_eom_clusters(condensed: &[CondensedNode], n: usize) -> (Vec<Option<usize>>, Vec<f64>) {
     if condensed.is_empty() {
         return (vec![None; n], vec![0.0; n]);
     }
@@ -1672,8 +1669,7 @@ fn extract_eom_clusters(
     }
 
     // Compute birth lambda for each cluster (minimum lambda among its condensed entries)
-    let mut birth_lambda: std::collections::HashMap<usize, f64> =
-        std::collections::HashMap::new();
+    let mut birth_lambda: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
     for node in condensed {
         let entry = birth_lambda.entry(node.parent).or_insert(1e300);
         if node.lambda_val < *entry {
@@ -1683,8 +1679,7 @@ fn extract_eom_clusters(
 
     // Compute stability for each cluster
     // S(C) = Σ_p (λ_death(p) - λ_birth(C)) for individual points in C
-    let mut stability: std::collections::HashMap<usize, f64> =
-        std::collections::HashMap::new();
+    let mut stability: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
     for &cid in &cluster_ids {
         stability.insert(cid, 0.0);
     }
@@ -1742,15 +1737,17 @@ fn extract_eom_clusters(
                 if ch.iter().all(|c| processed.contains(c)) {
                     // All children processed: compare stability
                     let s_parent = stability.get(&cid).copied().unwrap_or(0.0);
-                    let s_children: f64 =
-                        ch.iter().map(|c| stability.get(c).copied().unwrap_or(0.0)).sum();
+                    let s_children: f64 = ch
+                        .iter()
+                        .map(|c| stability.get(c).copied().unwrap_or(0.0))
+                        .sum();
 
                     if s_parent > s_children {
                         // Parent more stable: select parent, deselect children subtrees
                         selected.insert(cid);
                         deselect_subtree(cid, &cluster_children, &mut selected);
                         selected.insert(cid); // re-insert after deselect_subtree
-                        // Propagate parent stability upward
+                                              // Propagate parent stability upward
                     } else {
                         // Children more stable: keep children selected
                         // Propagate children stability upward
@@ -2266,7 +2263,9 @@ fn sample_indices(n: usize, count: usize, state: &mut u64) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..n).collect();
     // Partial Fisher-Yates shuffle
     for i in 0..count {
-        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let j = i + (*state >> 33) as usize % (n - i);
         indices.swap(i, j);
     }
@@ -2458,7 +2457,9 @@ fn generate_uniform_data(
         let mut point = Vec::with_capacity(d);
         for j in 0..d {
             // LCG for random float in [min, max]
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u = (*state >> 11) as f64 / (1u64 << 53) as f64; // [0, 1)
             point.push(mins[j] + u * (maxs[j] - mins[j]));
         }
@@ -2611,7 +2612,10 @@ mod tests {
         let data = make_two_clusters();
         let labels = vec![0, 0, 0, 0, 1, 1, 1, 1];
         let score = silhouette_score(&data, &labels, 2);
-        assert!(score > 0.9, "well-separated clusters should have high silhouette: {score}");
+        assert!(
+            score > 0.9,
+            "well-separated clusters should have high silhouette: {score}"
+        );
     }
 
     #[test]
@@ -2620,7 +2624,10 @@ mod tests {
         // Assign alternating labels (bad clustering)
         let labels = vec![0, 1, 0, 1, 0, 1, 0, 1];
         let score = silhouette_score(&data, &labels, 2);
-        assert!(score < 0.5, "poor clustering should have low silhouette: {score}");
+        assert!(
+            score < 0.5,
+            "poor clustering should have low silhouette: {score}"
+        );
     }
 
     #[test]
@@ -2761,11 +2768,7 @@ mod tests {
     #[test]
     fn dbscan_all_noise() {
         // Points too far apart for any cluster
-        let data = vec![
-            vec![0.0, 0.0],
-            vec![100.0, 0.0],
-            vec![0.0, 100.0],
-        ];
+        let data = vec![vec![0.0, 0.0], vec![100.0, 0.0], vec![0.0, 100.0]];
         let result = dbscan(&data, &DbscanConfig::new(1.0, 3)).unwrap();
 
         assert_eq!(result.n_clusters, 0);
@@ -2793,10 +2796,10 @@ mod tests {
     fn dbscan_core_and_border_points() {
         // With min_samples=3, only densely connected points are core.
         let data = vec![
-            vec![0.0],  // border: neighbors [0,1] = 2 < 3
-            vec![0.5],  // core: neighbors [0,1,2] = 3
-            vec![1.0],  // core: neighbors [1,2,3] = 3
-            vec![1.5],  // border: neighbors [2,3] = 2 < 3
+            vec![0.0], // border: neighbors [0,1] = 2 < 3
+            vec![0.5], // core: neighbors [0,1,2] = 3
+            vec![1.0], // core: neighbors [1,2,3] = 3
+            vec![1.5], // border: neighbors [2,3] = 2 < 3
         ];
         let result = dbscan(&data, &DbscanConfig::new(0.6, 3)).unwrap();
 
@@ -2804,10 +2807,10 @@ mod tests {
         assert_eq!(result.noise_count, 0);
         // Points 1,2 are core; points 0,3 are border
         assert!(!result.core_points[0]); // border
-        assert!(result.core_points[1]);  // core
-        assert!(result.core_points[2]);  // core
+        assert!(result.core_points[1]); // core
+        assert!(result.core_points[2]); // core
         assert!(!result.core_points[3]); // border
-        // All assigned to same cluster
+                                         // All assigned to same cluster
         assert!(result.labels.iter().all(|l| *l == Some(0)));
     }
 
@@ -2825,8 +2828,11 @@ mod tests {
     #[test]
     fn dbscan_cluster_sizes_sum_correctly() {
         let data = vec![
-            vec![0.0, 0.0], vec![0.5, 0.0], vec![0.0, 0.5],
-            vec![10.0, 10.0], vec![10.5, 10.0],
+            vec![0.0, 0.0],
+            vec![0.5, 0.0],
+            vec![0.0, 0.5],
+            vec![10.0, 10.0],
+            vec![10.5, 10.0],
             vec![50.0, 50.0], // noise
         ];
         let result = dbscan(&data, &DbscanConfig::new(1.5, 2)).unwrap();
@@ -2922,8 +2928,12 @@ mod tests {
     fn hierarchical_single_linkage_chaining() {
         // Single linkage should chain nearby points into one cluster
         let data = vec![
-            vec![0.0], vec![1.0], vec![2.0], vec![3.0], // chain
-            vec![100.0], vec![101.0],                     // separate cluster
+            vec![0.0],
+            vec![1.0],
+            vec![2.0],
+            vec![3.0], // chain
+            vec![100.0],
+            vec![101.0], // separate cluster
         ];
         let config = HierarchicalConfig::with_k(2).linkage(Linkage::Single);
         let result = hierarchical(&data, &config).unwrap();
@@ -3039,25 +3049,17 @@ mod tests {
         // Too few points
         assert!(hierarchical(&[vec![1.0]], &HierarchicalConfig::with_k(1)).is_err());
         // k = 0
-        assert!(hierarchical(
-            &[vec![1.0], vec![2.0]],
-            &HierarchicalConfig::with_k(0)
-        ).is_err());
+        assert!(hierarchical(&[vec![1.0], vec![2.0]], &HierarchicalConfig::with_k(0)).is_err());
         // k > n
-        assert!(hierarchical(
-            &[vec![1.0], vec![2.0]],
-            &HierarchicalConfig::with_k(5)
-        ).is_err());
+        assert!(hierarchical(&[vec![1.0], vec![2.0]], &HierarchicalConfig::with_k(5)).is_err());
         // NaN data
-        assert!(hierarchical(
-            &[vec![f64::NAN], vec![1.0]],
-            &HierarchicalConfig::with_k(1)
-        ).is_err());
+        assert!(
+            hierarchical(&[vec![f64::NAN], vec![1.0]], &HierarchicalConfig::with_k(1)).is_err()
+        );
         // Dimension mismatch
-        assert!(hierarchical(
-            &[vec![1.0, 2.0], vec![3.0]],
-            &HierarchicalConfig::with_k(1)
-        ).is_err());
+        assert!(
+            hierarchical(&[vec![1.0, 2.0], vec![3.0]], &HierarchicalConfig::with_k(1)).is_err()
+        );
     }
 
     #[test]
@@ -3077,11 +3079,21 @@ mod tests {
     fn hdbscan_two_dense_clusters_with_noise() {
         let data = vec![
             // Cluster 1: tight group around (0,0)
-            vec![0.0, 0.0], vec![0.1, 0.0], vec![0.0, 0.1], vec![0.1, 0.1],
-            vec![0.05, 0.05], vec![0.02, 0.08], vec![0.08, 0.02],
+            vec![0.0, 0.0],
+            vec![0.1, 0.0],
+            vec![0.0, 0.1],
+            vec![0.1, 0.1],
+            vec![0.05, 0.05],
+            vec![0.02, 0.08],
+            vec![0.08, 0.02],
             // Cluster 2: tight group around (10,10)
-            vec![10.0, 10.0], vec![10.1, 10.0], vec![10.0, 10.1], vec![10.1, 10.1],
-            vec![10.05, 10.05], vec![10.02, 10.08], vec![10.08, 10.02],
+            vec![10.0, 10.0],
+            vec![10.1, 10.0],
+            vec![10.0, 10.1],
+            vec![10.1, 10.1],
+            vec![10.05, 10.05],
+            vec![10.02, 10.08],
+            vec![10.08, 10.02],
             // Noise point far away
             vec![50.0, 50.0],
         ];
@@ -3089,7 +3101,11 @@ mod tests {
         let result = hdbscan(&data, &HdbscanConfig::new(3)).unwrap();
 
         // Should find 2 clusters
-        assert!(result.n_clusters >= 2, "expected >=2 clusters, got {}", result.n_clusters);
+        assert!(
+            result.n_clusters >= 2,
+            "expected >=2 clusters, got {}",
+            result.n_clusters
+        );
         // Last point should be noise
         assert!(result.labels[14].is_none(), "outlier should be noise");
         assert!(result.noise_count >= 1);
@@ -3165,15 +3181,9 @@ mod tests {
         // min_cluster_size < 2
         assert!(hdbscan(&[vec![1.0], vec![2.0]], &HdbscanConfig::new(1)).is_err());
         // NaN data
-        assert!(hdbscan(
-            &[vec![f64::NAN], vec![1.0]],
-            &HdbscanConfig::new(2)
-        ).is_err());
+        assert!(hdbscan(&[vec![f64::NAN], vec![1.0]], &HdbscanConfig::new(2)).is_err());
         // Dimension mismatch
-        assert!(hdbscan(
-            &[vec![1.0, 2.0], vec![3.0]],
-            &HdbscanConfig::new(2)
-        ).is_err());
+        assert!(hdbscan(&[vec![1.0, 2.0], vec![3.0]], &HdbscanConfig::new(2)).is_err());
     }
 
     #[test]
@@ -3221,19 +3231,28 @@ mod tests {
     #[test]
     fn calinski_harabasz_well_separated() {
         let data = vec![
-            vec![0.0, 0.0], vec![0.1, 0.1], vec![0.2, 0.0],
-            vec![10.0, 10.0], vec![10.1, 10.1], vec![10.2, 10.0],
+            vec![0.0, 0.0],
+            vec![0.1, 0.1],
+            vec![0.2, 0.0],
+            vec![10.0, 10.0],
+            vec![10.1, 10.1],
+            vec![10.2, 10.0],
         ];
         let labels = vec![0, 0, 0, 1, 1, 1];
         let ch = calinski_harabasz(&data, &labels, 2);
-        assert!(ch > 50.0, "CH = {ch}; well-separated clusters should score high");
+        assert!(
+            ch > 50.0,
+            "CH = {ch}; well-separated clusters should score high"
+        );
     }
 
     #[test]
     fn calinski_harabasz_with_kmeans() {
         let data = vec![
-            vec![0.0, 0.0], vec![1.0, 1.0],
-            vec![10.0, 10.0], vec![11.0, 11.0],
+            vec![0.0, 0.0],
+            vec![1.0, 1.0],
+            vec![10.0, 10.0],
+            vec![11.0, 11.0],
         ];
         let result = kmeans(&data, &KMeansConfig::new(2)).unwrap();
         let ch = calinski_harabasz(&data, &result.labels, result.k);
@@ -3263,20 +3282,29 @@ mod tests {
     #[test]
     fn davies_bouldin_well_separated() {
         let data = vec![
-            vec![0.0, 0.0], vec![0.1, 0.1], vec![0.2, 0.0],
-            vec![10.0, 10.0], vec![10.1, 10.1], vec![10.2, 10.0],
+            vec![0.0, 0.0],
+            vec![0.1, 0.1],
+            vec![0.2, 0.0],
+            vec![10.0, 10.0],
+            vec![10.1, 10.1],
+            vec![10.2, 10.0],
         ];
         let labels = vec![0, 0, 0, 1, 1, 1];
         let db = davies_bouldin(&data, &labels, 2);
-        assert!(db < 0.5, "DB = {db}; well-separated clusters should have low DB");
+        assert!(
+            db < 0.5,
+            "DB = {db}; well-separated clusters should have low DB"
+        );
         assert!(db >= 0.0);
     }
 
     #[test]
     fn davies_bouldin_with_kmeans() {
         let data = vec![
-            vec![0.0, 0.0], vec![1.0, 1.0],
-            vec![10.0, 10.0], vec![11.0, 11.0],
+            vec![0.0, 0.0],
+            vec![1.0, 1.0],
+            vec![10.0, 10.0],
+            vec![11.0, 11.0],
         ];
         let result = kmeans(&data, &KMeansConfig::new(2)).unwrap();
         let db = davies_bouldin(&data, &result.labels, result.k);
@@ -3300,12 +3328,19 @@ mod tests {
     fn davies_bouldin_overlapping_clusters() {
         // Overlapping clusters should have higher DB
         let data = vec![
-            vec![0.0], vec![1.0], vec![2.0],
-            vec![2.5], vec![3.0], vec![4.0],
+            vec![0.0],
+            vec![1.0],
+            vec![2.0],
+            vec![2.5],
+            vec![3.0],
+            vec![4.0],
         ];
         let labels = vec![0, 0, 0, 1, 1, 1];
         let db = davies_bouldin(&data, &labels, 2);
-        assert!(db > 0.5, "DB = {db}; overlapping clusters should have higher DB");
+        assert!(
+            db > 0.5,
+            "DB = {db}; overlapping clusters should have higher DB"
+        );
     }
 
     // ── Mini-Batch K-Means ──────────────────────────────────────

@@ -215,15 +215,9 @@ pub fn profile_column(name: &str, col: &Column) -> ColumnProfile {
 
 // ── Internal profiling helpers ────────────────────────────────────────
 
-fn profile_numeric(
-    values: &[f64],
-    validity: &crate::dataframe::ValidityBitmap,
-) -> NumericProfile {
+fn profile_numeric(values: &[f64], validity: &crate::dataframe::ValidityBitmap) -> NumericProfile {
     // Extract valid values
-    let valid: Vec<f64> = validity
-        .valid_indices()
-        .map(|i| values[i])
-        .collect();
+    let valid: Vec<f64> = validity.valid_indices().map(|i| values[i]).collect();
 
     let valid_count = valid.len();
     if valid_count == 0 {
@@ -298,10 +292,7 @@ fn profile_numeric(
     }
 }
 
-fn profile_boolean(
-    values: &[bool],
-    validity: &crate::dataframe::ValidityBitmap,
-) -> BooleanProfile {
+fn profile_boolean(values: &[bool], validity: &crate::dataframe::ValidityBitmap) -> BooleanProfile {
     let mut true_count = 0usize;
     let mut false_count = 0usize;
 
@@ -376,10 +367,7 @@ fn profile_categorical(
     }
 }
 
-fn profile_text(
-    values: &[String],
-    validity: &crate::dataframe::ValidityBitmap,
-) -> TextProfile {
+fn profile_text(values: &[String], validity: &crate::dataframe::ValidityBitmap) -> TextProfile {
     let mut distinct: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut lengths: Vec<usize> = Vec::new();
     let mut empty_count = 0usize;
@@ -597,10 +585,8 @@ fn compute_quality_score(
 
     // Consistency: proportion of numeric columns without extreme values
     let consistency = {
-        let numeric_cols: Vec<&ColumnProfile> = columns
-            .iter()
-            .filter(|c| c.numeric.is_some())
-            .collect();
+        let numeric_cols: Vec<&ColumnProfile> =
+            columns.iter().filter(|c| c.numeric.is_some()).collect();
         if numeric_cols.is_empty() {
             1.0
         } else {
@@ -1212,7 +1198,9 @@ mod tests {
             indices,
             validity: ValidityBitmap::all_valid(7),
         };
-        let cp = profile_column("cat", &col).categorical.expect("categorical");
+        let cp = profile_column("cat", &col)
+            .categorical
+            .expect("categorical");
         assert_eq!(cp.valid_count, 7);
         assert_eq!(cp.distinct_count, 3);
         assert!(!cp.is_constant);
@@ -1232,7 +1220,9 @@ mod tests {
             indices,
             validity: ValidityBitmap::all_valid(3),
         };
-        let cp = profile_column("cat", &col).categorical.expect("categorical");
+        let cp = profile_column("cat", &col)
+            .categorical
+            .expect("categorical");
         assert!(cp.is_constant);
         assert_eq!(cp.distinct_count, 1);
         assert!((cp.mode_ratio - 1.0).abs() < 1e-10);
@@ -1249,7 +1239,9 @@ mod tests {
             indices,
             validity,
         };
-        let cp = profile_column("cat", &col).categorical.expect("categorical");
+        let cp = profile_column("cat", &col)
+            .categorical
+            .expect("categorical");
         assert_eq!(cp.valid_count, 3); // 3 valid, 1 null
         assert_eq!(cp.distinct_count, 1); // only "A" in valid values
         assert!(cp.is_constant);
@@ -1283,10 +1275,7 @@ mod tests {
         let values = vec!["abc".into(), String::new(), "de".into()];
         let mut validity = ValidityBitmap::all_valid(3);
         validity.set_invalid(1);
-        let col = Column::Text {
-            values,
-            validity,
-        };
+        let col = Column::Text { values, validity };
         let tp = profile_column("txt", &col).text.expect("text");
         assert_eq!(tp.valid_count, 2);
         assert_eq!(tp.min_length, 2);
@@ -1344,7 +1333,10 @@ mod tests {
             validity: ValidityBitmap::all_valid(n),
         };
         let np = profile_column("x", &col).numeric.expect("numeric");
-        assert!(np.skewness.abs() < 0.5, "skewness should be near zero for uniform-like data");
+        assert!(
+            np.skewness.abs() < 0.5,
+            "skewness should be near zero for uniform-like data"
+        );
     }
 
     #[test]
@@ -1508,16 +1500,14 @@ mod tests {
         let flags = compute_flags(&prof, &FlagThresholds::default());
         assert!(
             flags.contains(&DiagnosticFlag::ExtremeSkewness),
-            "skewness = {}", prof.numeric.as_ref().unwrap().skewness
+            "skewness = {}",
+            prof.numeric.as_ref().unwrap().skewness
         );
     }
 
     #[test]
     fn flag_contains_infinity() {
-        let col = Column::numeric(
-            vec![1.0, f64::INFINITY, 3.0],
-            ValidityBitmap::all_valid(3),
-        );
+        let col = Column::numeric(vec![1.0, f64::INFINITY, 3.0], ValidityBitmap::all_valid(3));
         let prof = profile_column("x", &col);
         let flags = compute_flags(&prof, &FlagThresholds::default());
         assert!(flags.contains(&DiagnosticFlag::ContainsInfinity));
@@ -1598,8 +1588,12 @@ mod tests {
 
         assert!((q.completeness - 1.0).abs() < 1e-10); // no nulls
         assert!((q.uniqueness - 1.0).abs() < 1e-10); // no duplicates
-        // validity may not be 1.0 (ALL_UNIQUE flag on 3-value numeric column)
-        assert!(q.overall > 0.5, "overall should be reasonable: {}", q.overall);
+                                                     // validity may not be 1.0 (ALL_UNIQUE flag on 3-value numeric column)
+        assert!(
+            q.overall > 0.5,
+            "overall should be reasonable: {}",
+            q.overall
+        );
     }
 
     #[test]
@@ -1639,11 +1633,14 @@ mod tests {
         let ds = profile_dataset(&df);
         let q = &ds.quality_score;
 
-        for score in [q.completeness, q.uniqueness, q.validity, q.consistency, q.overall] {
-            assert!(
-                (0.0..=1.0).contains(&score),
-                "score {score} out of range"
-            );
+        for score in [
+            q.completeness,
+            q.uniqueness,
+            q.validity,
+            q.consistency,
+            q.overall,
+        ] {
+            assert!((0.0..=1.0).contains(&score), "score {score} out of range");
         }
     }
 

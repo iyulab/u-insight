@@ -191,9 +191,9 @@ pub fn mahalanobis(
     // Build Matrix and invert
     let cov_mat = Matrix::new(p, p, cov_data)
         .map_err(|e| InsightError::Io(format!("covariance matrix construction: {e}")))?;
-    let inv_cov = cov_mat.inverse().map_err(|_| {
-        InsightError::Io("covariance matrix is singular or near-singular".into())
-    })?;
+    let inv_cov = cov_mat
+        .inverse()
+        .map_err(|_| InsightError::Io("covariance matrix is singular or near-singular".into()))?;
 
     // Compute squared Mahalanobis distance for each point
     let mut distances = Vec::with_capacity(n);

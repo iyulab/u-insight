@@ -167,7 +167,11 @@ pub fn pca(data: &[Vec<f64>], config: &PcaConfig) -> Result<PcaResult, InsightEr
         vars.iter()
             .map(|&v| {
                 let s = (v / (n - 1) as f64).sqrt();
-                if s < 1e-15 { 1.0 } else { s } // avoid division by zero for constant features
+                if s < 1e-15 {
+                    1.0
+                } else {
+                    s
+                } // avoid division by zero for constant features
             })
             .collect::<Vec<f64>>()
     } else {
@@ -411,7 +415,10 @@ mod tests {
         let n = result.scores.len();
         for comp in 0..result.n_components {
             let mean: f64 = result.scores.iter().map(|s| s[comp]).sum::<f64>() / n as f64;
-            assert!(mean.abs() < 1e-10, "scores for component {comp} not centered: mean = {mean}");
+            assert!(
+                mean.abs() < 1e-10,
+                "scores for component {comp} not centered: mean = {mean}"
+            );
         }
     }
 

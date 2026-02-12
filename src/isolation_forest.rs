@@ -223,7 +223,10 @@ pub fn isolation_forest(
     // Determine threshold from contamination
     let mut sorted_scores: Vec<f64> = scores.clone();
     sorted_scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-    let threshold_idx = ((n as f64 * config.contamination).ceil() as usize).min(n).max(1) - 1;
+    let threshold_idx = ((n as f64 * config.contamination).ceil() as usize)
+        .min(n)
+        .max(1)
+        - 1;
     let threshold = sorted_scores[threshold_idx];
 
     let anomalies: Vec<bool> = scores.iter().map(|&s| s >= threshold).collect();
@@ -250,9 +253,7 @@ enum ITreeNode {
         right: Box<ITreeNode>,
     },
     /// External (leaf) node.
-    External {
-        size: usize,
-    },
+    External { size: usize },
 }
 
 /// Builds a single isolation tree from a subsample.
@@ -315,9 +316,7 @@ fn build_itree(data: &[&[f64]], d: usize, max_depth: usize, rng: &mut u64) -> IT
 /// Computes the path length for a point traversing the tree.
 fn path_length(point: &[f64], node: &ITreeNode, current_depth: usize) -> f64 {
     match node {
-        ITreeNode::External { size } => {
-            current_depth as f64 + c_factor(*size)
-        }
+        ITreeNode::External { size } => current_depth as f64 + c_factor(*size),
         ITreeNode::Internal {
             feature,
             split_value,
@@ -402,11 +401,8 @@ mod tests {
     #[test]
     fn detects_obvious_outliers() {
         let data = make_normal_with_outliers();
-        let result = isolation_forest(
-            &data,
-            &IsolationForestConfig::default().contamination(0.1),
-        )
-        .unwrap();
+        let result =
+            isolation_forest(&data, &IsolationForestConfig::default().contamination(0.1)).unwrap();
 
         // The last 3 points are outliers — they should have high scores
         let n = data.len();
@@ -485,10 +481,7 @@ mod tests {
         let r2 = isolation_forest(&data, &config).unwrap();
 
         for (i, (&s1, &s2)) in r1.scores.iter().zip(r2.scores.iter()).enumerate() {
-            assert!(
-                (s1 - s2).abs() < 1e-10,
-                "score[{i}] differs: {s1} vs {s2}"
-            );
+            assert!((s1 - s2).abs() < 1e-10, "score[{i}] differs: {s1} vs {s2}");
         }
     }
 
@@ -497,7 +490,9 @@ mod tests {
     #[test]
     fn uniform_data_low_scores() {
         // All points are similar — scores should be near 0.5
-        let data: Vec<Vec<f64>> = (0..50).map(|i| vec![i as f64 * 0.1, i as f64 * 0.1]).collect();
+        let data: Vec<Vec<f64>> = (0..50)
+            .map(|i| vec![i as f64 * 0.1, i as f64 * 0.1])
+            .collect();
         let result = isolation_forest(&data, &IsolationForestConfig::default()).unwrap();
 
         let mean_score: f64 = result.scores.iter().sum::<f64>() / result.scores.len() as f64;
@@ -564,11 +559,8 @@ mod tests {
         }
         data.push(vec![100.0; 10]); // outlier
 
-        let result = isolation_forest(
-            &data,
-            &IsolationForestConfig::default().n_estimators(200),
-        )
-        .unwrap();
+        let result =
+            isolation_forest(&data, &IsolationForestConfig::default().n_estimators(200)).unwrap();
 
         // Outlier should have the highest score
         let max_idx = result
@@ -601,14 +593,14 @@ mod tests {
     fn different_n_estimators() {
         let data = make_normal_with_outliers();
         // Fewer trees should still detect obvious outliers
-        let result = isolation_forest(
-            &data,
-            &IsolationForestConfig::default().n_estimators(10),
-        )
-        .unwrap();
+        let result =
+            isolation_forest(&data, &IsolationForestConfig::default().n_estimators(10)).unwrap();
 
         // Outlier at index 40 should still be detectable
         let outlier_score = result.scores[40];
-        assert!(outlier_score > 0.5, "even with 10 trees, outlier score = {outlier_score}");
+        assert!(
+            outlier_score > 0.5,
+            "even with 10 trees, outlier score = {outlier_score}"
+        );
     }
 }

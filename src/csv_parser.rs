@@ -33,8 +33,8 @@ use std::collections::HashMap;
 
 /// Standard null value markers recognized during parsing.
 const DEFAULT_NULL_MARKERS: &[&str] = &[
-    "", "NA", "N/A", "na", "n/a", "null", "NULL", "None", "none", ".",
-    "NaN", "nan", "NAN", "#N/A", "#NA",
+    "", "NA", "N/A", "na", "n/a", "null", "NULL", "None", "none", ".", "NaN", "nan", "NAN", "#N/A",
+    "#NA",
 ];
 
 /// Maximum unique-value ratio for a column to be classified as Categorical
@@ -132,10 +132,7 @@ impl CsvParser {
                     } else {
                         line_idx + 1
                     },
-                    message: format!(
-                        "expected {n_cols} fields, got {}",
-                        row.len()
-                    ),
+                    message: format!("expected {n_cols} fields, got {}", row.len()),
                 });
             }
             for (col_idx, field) in row.iter().enumerate() {
@@ -402,10 +399,7 @@ fn is_boolean_str(s: &str) -> bool {
 
 /// Parses a boolean string to `bool`.
 fn parse_boolean_str(s: &str) -> bool {
-    matches!(
-        s.to_lowercase().as_str(),
-        "true" | "yes" | "t" | "y"
-    )
+    matches!(s.to_lowercase().as_str(), "true" | "yes" | "t" | "y")
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
