@@ -187,12 +187,11 @@ All FFI functions use `catch_unwind` to prevent panics from crossing the FFI bou
 
 ## C# Binding (UInsight)
 
-A .NET 10 binding is provided in `bindings/csharp/UInsight/` with:
+Install via NuGet — native libraries are bundled automatically:
 
-- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 32 FFI functions
-- `Interop/NativeStructs.cs` — `[StructLayout]` mappings for all 20 C structs
-- `InsightClient.cs` — High-level managed API (automatic memory management)
-- `InsightException.cs` — Error code to exception conversion
+```bash
+dotnet add package UInsight
+```
 
 ```csharp
 using UInsight;
@@ -204,6 +203,13 @@ var data = new double[,] { {0,0}, {1,1}, {10,10}, {11,11} };
 var result = client.KMeans(data, k: 2);
 Console.WriteLine($"K={result.K}, WCSS={result.Wcss:F2}");
 ```
+
+The binding is in `bindings/csharp/UInsight/` with:
+
+- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 32 FFI functions
+- `Interop/NativeStructs.cs` — `[StructLayout]` mappings for all 20 C structs
+- `InsightClient.cs` — High-level managed API (automatic memory management)
+- `InsightException.cs` — Error code to exception conversion
 
 ## Test Status
 
@@ -223,7 +229,7 @@ C header: auto-generated via cbindgen (20 structs, 32 functions)
 - Feature importance and selection (ANOVA, MI, Permutation)
 - Distribution analysis and normality testing
 - C FFI for cross-language use
-- C# binding (UInsight.SDK)
+- C# binding (UInsight NuGet package)
 
 **Out of Scope:**
 - Visualization / charting

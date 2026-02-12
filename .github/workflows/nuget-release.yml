@@ -1,0 +1,139 @@
+name: NuGet Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g., 0.1.0)'
+        required: true
+        type: string
+      publish:
+        description: 'Publish to NuGet.org'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Build native libraries for each platform ──
+  build-native:
+    name: Build Native (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rid: win-x64
+            artifact: u_insight.dll
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            rid: linux-x64
+            artifact: libu_insight.so
+          - os: macos-13
+            target: x86_64-apple-darwin
+            rid: osx-x64
+            artifact: libu_insight.dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            rid: osx-arm64
+            artifact: libu_insight.dylib
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout path dependencies
+        shell: bash
+        run: |
+          mkdir -p ../../foundation ../../algorithms
+          git clone --depth 1 https://github.com/iyulab/u-numflow.git ../../foundation/u-numflow
+          git clone --depth 1 https://github.com/iyulab/u-analytics.git ../../algorithms/u-analytics
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  # ── Pack & Publish NuGet ──
+  pack-and-publish:
+    name: Pack & Publish NuGet
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Download all native artifacts into runtimes/ structure
+      - name: Download win-x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win-x64
+          path: bindings/csharp/UInsight/runtimes/win-x64/native/
+
+      - name: Download linux-x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: bindings/csharp/UInsight/runtimes/linux-x64/native/
+
+      - name: Download osx-x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: native-osx-x64
+          path: bindings/csharp/UInsight/runtimes/osx-x64/native/
+
+      - name: Download osx-arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: native-osx-arm64
+          path: bindings/csharp/UInsight/runtimes/osx-arm64/native/
+
+      - name: Verify native libraries
+        run: |
+          echo "=== Native libraries ==="
+          find bindings/csharp/UInsight/runtimes -type f
+          echo "=== Sizes ==="
+          find bindings/csharp/UInsight/runtimes -type f -exec ls -lh {} \;
+
+      - name: Pack NuGet
+        run: |
+          dotnet pack bindings/csharp/UInsight/UInsight.csproj \
+            -c Release \
+            -p:Version=${{ inputs.version }} \
+            -o ./nupkg
+
+      - name: Inspect package
+        run: |
+          echo "=== Package contents ==="
+          unzip -l ./nupkg/UInsight.${{ inputs.version }}.nupkg | grep -E "runtimes|build|lib"
+
+      - name: Upload NuGet package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ./nupkg/*.nupkg
+
+      - name: Publish to NuGet.org
+        if: inputs.publish
+        run: |
+          dotnet nuget push ./nupkg/UInsight.${{ inputs.version }}.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

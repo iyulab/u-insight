@@ -4,6 +4,8 @@ target/
 # .NET
 bin/
 obj/
+nupkg/
+bindings/csharp/UInsight/runtimes/
 
 # Local
 dev-docs/

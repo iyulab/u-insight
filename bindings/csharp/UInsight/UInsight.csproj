@@ -10,7 +10,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>UInsight</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>iyulab</Authors>
     <Company>iyulab</Company>
     <Product>UInsight</Product>
@@ -30,11 +30,23 @@
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="\" />
 
-    <!-- Native library bundling -->
-    <None Include="runtimes/win-x64/native/u_insight.dll" Pack="true" PackagePath="runtimes/win-x64/native/" Condition="Exists('runtimes/win-x64/native/u_insight.dll')" />
-    <None Include="runtimes/linux-x64/native/libu_insight.so" Pack="true" PackagePath="runtimes/linux-x64/native/" Condition="Exists('runtimes/linux-x64/native/libu_insight.so')" />
-    <None Include="runtimes/osx-x64/native/libu_insight.dylib" Pack="true" PackagePath="runtimes/osx-x64/native/" Condition="Exists('runtimes/osx-x64/native/libu_insight.dylib')" />
-    <None Include="runtimes/osx-arm64/native/libu_insight.dylib" Pack="true" PackagePath="runtimes/osx-arm64/native/" Condition="Exists('runtimes/osx-arm64/native/libu_insight.dylib')" />
+    <!-- MSBuild .targets for auto-copy of native library -->
+    <None Include="build\UInsight.targets" Pack="true" PackagePath="build\" />
+    <None Include="build\UInsight.targets" Pack="true" PackagePath="buildTransitive\" />
+
+    <!-- Native library bundling (4 platforms) -->
+    <None Include="runtimes/win-x64/native/u_insight.dll"
+          Pack="true" PackagePath="runtimes/win-x64/native/"
+          Condition="Exists('runtimes/win-x64/native/u_insight.dll')" />
+    <None Include="runtimes/linux-x64/native/libu_insight.so"
+          Pack="true" PackagePath="runtimes/linux-x64/native/"
+          Condition="Exists('runtimes/linux-x64/native/libu_insight.so')" />
+    <None Include="runtimes/osx-x64/native/libu_insight.dylib"
+          Pack="true" PackagePath="runtimes/osx-x64/native/"
+          Condition="Exists('runtimes/osx-x64/native/libu_insight.dylib')" />
+    <None Include="runtimes/osx-arm64/native/libu_insight.dylib"
+          Pack="true" PackagePath="runtimes/osx-arm64/native/"
+          Condition="Exists('runtimes/osx-arm64/native/libu_insight.dylib')" />
   </ItemGroup>
 
 </Project>
