@@ -1,6 +1,7 @@
 # u-insight
 
 [![Crates.io](https://img.shields.io/crates/v/u-insight.svg)](https://crates.io/crates/u-insight)
+[![NuGet](https://img.shields.io/nuget/v/UInsight.svg)](https://www.nuget.org/packages/UInsight)
 [![docs.rs](https://docs.rs/u-insight/badge.svg)](https://docs.rs/u-insight)
 [![CI](https://github.com/iyulab/u-insight/actions/workflows/ci.yml/badge.svg)](https://github.com/iyulab/u-insight/actions/workflows/ci.yml)
 

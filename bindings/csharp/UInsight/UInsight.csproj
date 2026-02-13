@@ -32,7 +32,7 @@
 
     <!-- MSBuild .targets for auto-copy of native library -->
     <None Include="build\UInsight.targets" Pack="true" PackagePath="build\" />
-    <None Include="build\UInsight.targets" Pack="true" PackagePath="buildTransitive\" />
+    <None Include="build\UInsight.targets" Pack="true" PackagePath="buildTransitive/UInsight.targets" />
 
     <!-- Native library bundling (4 platforms) -->
     <None Include="runtimes/win-x64/native/u_insight.dll"

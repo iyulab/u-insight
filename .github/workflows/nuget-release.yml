@@ -131,7 +131,7 @@ jobs:
           path: ./nupkg/*.nupkg
 
       - name: Publish to NuGet.org
-        if: inputs.publish
+        if: inputs.publish != false
         run: |
           dotnet nuget push ./nupkg/UInsight.${{ inputs.version }}.nupkg \
             --api-key ${{ secrets.NUGET_API_KEY }} \
