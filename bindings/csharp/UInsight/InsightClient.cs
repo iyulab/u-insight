@@ -774,7 +774,7 @@ public class ColumnSummary
     public ulong ValidCount { get; init; }
     /// <summary>Count of null/missing values.</summary>
     public ulong NullCount { get; init; }
-    /// <summary>Detected data type (0=Text, 1=Numeric, 2=Boolean, 3=DateTime).</summary>
+    /// <summary>Detected data type (0=Numeric, 1=Boolean, 2=Categorical, 3=Text).</summary>
     public uint DataType { get; init; }
     /// <summary>Mean (numeric columns only).</summary>
     public double Mean { get; init; }
