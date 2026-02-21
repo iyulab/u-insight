@@ -115,15 +115,17 @@ pub fn pca(data: &[Vec<f64>], config: &PcaConfig) -> Result<PcaResult, InsightEr
 
     let d = data[0].len();
     if d == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::DegenerateData {
+            reason: "data has 0 features".into(),
         });
     }
     if config.n_components == 0 || config.n_components > d {
-        return Err(InsightError::InsufficientData {
-            min_required: config.n_components,
-            actual: d,
+        return Err(InsightError::InvalidParameter {
+            name: "n_components".into(),
+            message: format!(
+                "must be between 1 and {d} (number of features), got {}",
+                config.n_components
+            ),
         });
     }
 
@@ -204,18 +206,18 @@ pub fn pca(data: &[Vec<f64>], config: &PcaConfig) -> Result<PcaResult, InsightEr
         *v *= scale;
     }
 
-    let cov_matrix = Matrix::new(d, d, cov_data).map_err(|e| InsightError::InsufficientData {
-        min_required: d * d,
-        actual: e.to_string().len(), // fallback; should not happen
+    let cov_matrix = Matrix::new(d, d, cov_data).map_err(|e| InsightError::ComputationFailed {
+        operation: "covariance matrix construction".into(),
+        detail: e.to_string(),
     })?;
 
     // Step 5: Eigenvalue decomposition
     let (eigenvalues, eigenvectors) =
         cov_matrix
             .eigen_symmetric()
-            .map_err(|_| InsightError::InsufficientData {
-                min_required: 2,
-                actual: 1,
+            .map_err(|e| InsightError::ComputationFailed {
+                operation: "eigenvalue decomposition".into(),
+                detail: e.to_string(),
             })?;
 
     // Step 6: Select top-k components

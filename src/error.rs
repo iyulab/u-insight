@@ -11,8 +11,14 @@ pub enum InsightError {
     MissingValues { column: String, count: usize },
     /// Column is not numeric where numeric data is required.
     NonNumericColumn { column: String },
-    /// Insufficient data for the requested operation.
+    /// Insufficient data rows/samples for the requested operation.
     InsufficientData { min_required: usize, actual: usize },
+    /// Invalid parameter value for the requested operation.
+    InvalidParameter { name: String, message: String },
+    /// Data is degenerate (constant columns, singular matrix, etc.).
+    DegenerateData { reason: String },
+    /// Internal computation failed (eigenvalue decomposition, matrix construction, etc.).
+    ComputationFailed { operation: String, detail: String },
     /// Column not found in DataFrame.
     ColumnNotFound { name: String },
     /// Dimension mismatch.
@@ -38,6 +44,15 @@ impl fmt::Display for InsightError {
                 actual,
             } => {
                 write!(f, "need at least {min_required} rows, got {actual}")
+            }
+            Self::InvalidParameter { name, message } => {
+                write!(f, "invalid parameter '{name}': {message}")
+            }
+            Self::DegenerateData { reason } => {
+                write!(f, "degenerate data: {reason}")
+            }
+            Self::ComputationFailed { operation, detail } => {
+                write!(f, "{operation} failed: {detail}")
             }
             Self::ColumnNotFound { name } => {
                 write!(f, "column '{name}' not found")

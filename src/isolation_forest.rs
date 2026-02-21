@@ -146,9 +146,8 @@ pub fn isolation_forest(
 
     let d = data[0].len();
     if d == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::DegenerateData {
+            reason: "data has 0 features".into(),
         });
     }
 
@@ -170,15 +169,15 @@ pub fn isolation_forest(
     }
 
     if config.n_estimators == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::InvalidParameter {
+            name: "n_estimators".into(),
+            message: "must be at least 1".into(),
         });
     }
     if !(0.0..=1.0).contains(&config.contamination) {
-        return Err(InsightError::InsufficientData {
-            min_required: 0,
-            actual: 0,
+        return Err(InsightError::InvalidParameter {
+            name: "contamination".into(),
+            message: format!("must be in [0.0, 1.0], got {}", config.contamination),
         });
     }
 

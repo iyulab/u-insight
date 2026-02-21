@@ -42,9 +42,8 @@ use crate::error::InsightError;
 /// ```
 pub fn validate_clean_data(columns: &[Vec<f64>], names: &[String]) -> Result<(), InsightError> {
     if columns.is_empty() {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::DegenerateData {
+            reason: "no columns provided".into(),
         });
     }
 
@@ -166,9 +165,8 @@ pub fn correlation_analysis(
         CorrelationMethod::Pearson => u_analytics::correlation::correlation_matrix(&refs),
         CorrelationMethod::Spearman => u_analytics::correlation::spearman_matrix(&refs),
     }
-    .ok_or(InsightError::InsufficientData {
-        min_required: 2,
-        actual: columns[0].len(),
+    .ok_or_else(|| InsightError::DegenerateData {
+        reason: "correlation matrix computation failed (possible constant columns or zero-variance data)".into(),
     })?;
 
     // Extract high-correlation pairs
@@ -260,9 +258,9 @@ pub fn regression_analysis(
     target_name: &str,
 ) -> Result<RegressionAnalysis, InsightError> {
     if predictors.is_empty() {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::InvalidParameter {
+            name: "predictors".into(),
+            message: "at least 1 predictor required".into(),
         });
     }
 
@@ -293,9 +291,9 @@ pub fn regression_analysis(
     if predictors.len() == 1 {
         // Simple linear regression
         let result = u_analytics::regression::simple_linear_regression(&predictors[0], target)
-            .ok_or(InsightError::InsufficientData {
-                min_required: 3,
-                actual: n,
+            .ok_or_else(|| InsightError::ComputationFailed {
+                operation: "simple linear regression".into(),
+                detail: "computation returned None (possible degenerate data)".into(),
             })?;
 
         Ok(RegressionAnalysis {
@@ -311,10 +309,10 @@ pub fn regression_analysis(
     } else {
         // Multiple linear regression
         let x_refs: Vec<&[f64]> = predictors.iter().map(|c| c.as_slice()).collect();
-        let result = u_analytics::regression::multiple_linear_regression(&x_refs, target).ok_or(
-            InsightError::InsufficientData {
-                min_required: predictors.len() + 2,
-                actual: n,
+        let result = u_analytics::regression::multiple_linear_regression(&x_refs, target).ok_or_else(
+            || InsightError::ComputationFailed {
+                operation: "multiple linear regression".into(),
+                detail: "computation returned None (possible rank deficiency or singular data)".into(),
             },
         )?;
 
@@ -469,9 +467,9 @@ pub fn anova_feature_selection(
     significance_level: f64,
 ) -> Result<AnovaSelectionResult, InsightError> {
     if features.is_empty() {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::InvalidParameter {
+            name: "features".into(),
+            message: "at least 1 feature required".into(),
         });
     }
 
@@ -496,9 +494,11 @@ pub fn anova_feature_selection(
     classes.dedup();
 
     if classes.len() < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: classes.len(),
+        return Err(InsightError::DegenerateData {
+            reason: format!(
+                "ANOVA requires at least 2 classes, got {}",
+                classes.len()
+            ),
         });
     }
 
@@ -650,9 +650,9 @@ pub fn mutual_info_classif(
     n_bins: Option<usize>,
 ) -> Result<MutualInfoResult, InsightError> {
     if features.is_empty() {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::InvalidParameter {
+            name: "features".into(),
+            message: "at least 1 feature required".into(),
         });
     }
 
@@ -684,9 +684,10 @@ pub fn mutual_info_classif(
     let n_classes = classes.len();
 
     if n_classes < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n_classes,
+        return Err(InsightError::DegenerateData {
+            reason: format!(
+                "mutual information requires at least 2 classes, got {n_classes}"
+            ),
         });
     }
 

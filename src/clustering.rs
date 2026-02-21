@@ -145,15 +145,14 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
     let k = config.k;
 
     if n == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::DegenerateData {
+            reason: "no data points provided".into(),
         });
     }
     if k == 0 || k > n {
-        return Err(InsightError::InsufficientData {
-            min_required: k,
-            actual: n,
+        return Err(InsightError::InvalidParameter {
+            name: "k".into(),
+            message: format!("must be between 1 and {n} (number of data points), got {k}"),
         });
     }
 
@@ -213,15 +212,15 @@ pub fn auto_kmeans(
     base_config: &KMeansConfig,
 ) -> Result<AutoKResult, InsightError> {
     if k_min < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: k_min,
+        return Err(InsightError::InvalidParameter {
+            name: "k_min".into(),
+            message: format!("must be at least 2, got {k_min}"),
         });
     }
     if k_max < k_min {
-        return Err(InsightError::InsufficientData {
-            min_required: k_min,
-            actual: k_max,
+        return Err(InsightError::InvalidParameter {
+            name: "k_max".into(),
+            message: format!("must be >= k_min ({k_min}), got {k_max}"),
         });
     }
 
@@ -591,10 +590,10 @@ pub struct DbscanResult {
 ///
 /// # Errors
 ///
-/// - [`InsightError::InsufficientData`] if data is empty or min_samples < 2
+/// - [`InsightError::DegenerateData`] if data is empty
+/// - [`InsightError::InvalidParameter`] if min_samples < 2 or epsilon <= 0
 /// - [`InsightError::DimensionMismatch`] if points have different dimensions
 /// - [`InsightError::NonNumericColumn`] if data contains NaN or infinite values
-/// - [`InsightError::InsufficientData`] if epsilon <= 0
 ///
 /// # Example
 ///
@@ -616,16 +615,15 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
     let n = data.len();
 
     if n == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::DegenerateData {
+            reason: "no data points provided".into(),
         });
     }
 
     if config.min_samples < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: config.min_samples,
+        return Err(InsightError::InvalidParameter {
+            name: "min_samples".into(),
+            message: format!("must be at least 2, got {}", config.min_samples),
         });
     }
 
@@ -891,17 +889,18 @@ pub fn hierarchical(
 
     if let Some(k) = config.n_clusters {
         if k == 0 || k > n {
-            return Err(InsightError::InsufficientData {
-                min_required: 1,
-                actual: k,
+            return Err(InsightError::InvalidParameter {
+                name: "n_clusters".into(),
+                message: format!("must be between 1 and {n} (number of data points), got {k}"),
             });
         }
     }
 
     if let Some(t) = config.distance_threshold {
         if !t.is_finite() || t < 0.0 {
-            return Err(InsightError::NonNumericColumn {
-                column: "distance_threshold".to_string(),
+            return Err(InsightError::InvalidParameter {
+                name: "distance_threshold".into(),
+                message: format!("must be a non-negative finite number, got {t}"),
             });
         }
     }
@@ -1280,15 +1279,15 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
         });
     }
     if min_cluster_size < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: min_cluster_size,
+        return Err(InsightError::InvalidParameter {
+            name: "min_cluster_size".into(),
+            message: format!("must be at least 2, got {min_cluster_size}"),
         });
     }
     if min_samples < 1 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: min_samples,
+        return Err(InsightError::InvalidParameter {
+            name: "min_samples".into(),
+            message: format!("must be at least 1, got {min_samples}"),
         });
     }
 
@@ -2142,15 +2141,14 @@ pub fn mini_batch_kmeans(
     let k = config.k;
 
     if n == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::DegenerateData {
+            reason: "no data points provided".into(),
         });
     }
     if k == 0 || k > n {
-        return Err(InsightError::InsufficientData {
-            min_required: k,
-            actual: n,
+        return Err(InsightError::InvalidParameter {
+            name: "k".into(),
+            message: format!("must be between 1 and {n} (number of data points), got {k}"),
         });
     }
 
@@ -2325,15 +2323,14 @@ pub fn gap_statistic(
 ) -> Result<GapStatResult, InsightError> {
     let n = data.len();
     if n == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::DegenerateData {
+            reason: "no data points provided".into(),
         });
     }
     if k_min < 1 || k_max < k_min {
-        return Err(InsightError::InsufficientData {
-            min_required: k_min,
-            actual: k_max,
+        return Err(InsightError::InvalidParameter {
+            name: "k_min/k_max".into(),
+            message: format!("need 1 <= k_min <= k_max, got k_min={k_min}, k_max={k_max}"),
         });
     }
 

@@ -184,9 +184,9 @@ pub fn feature_analysis(
 ) -> Result<FeatureAnalysisResult, InsightError> {
     let p = features.len();
     if p == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::InvalidParameter {
+            name: "features".into(),
+            message: "at least 1 feature required".into(),
         });
     }
     if names.len() != p {
@@ -563,9 +563,9 @@ pub fn permutation_importance(
     seed: u64,
 ) -> Result<PermutationImportanceResult, InsightError> {
     if features.is_empty() {
-        return Err(InsightError::InsufficientData {
-            min_required: 1,
-            actual: 0,
+        return Err(InsightError::InvalidParameter {
+            name: "features".into(),
+            message: "at least 1 feature required".into(),
         });
     }
 
