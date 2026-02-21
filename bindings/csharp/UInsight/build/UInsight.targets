@@ -10,34 +10,38 @@
 
   <!-- Windows x64 -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR ('$(RuntimeIdentifier)' == '' AND '$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows)))' == 'true')">
-    <None Include="$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\u_insight.dll"
-          Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\u_insight.dll')"
-          CopyToOutputDirectory="PreserveNewest"
-          Link="u_insight.dll" />
+    <Content Include="$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\u_insight.dll"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\u_insight.dll')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Link="u_insight.dll" />
   </ItemGroup>
 
   <!-- Linux x64 -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR ('$(RuntimeIdentifier)' == '' AND '$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))' == 'true')">
-    <None Include="$(MSBuildThisFileDirectory)..\runtimes\linux-x64\native\libu_insight.so"
-          Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\linux-x64\native\libu_insight.so')"
-          CopyToOutputDirectory="PreserveNewest"
-          Link="libu_insight.so" />
+    <Content Include="$(MSBuildThisFileDirectory)..\runtimes\linux-x64\native\libu_insight.so"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\linux-x64\native\libu_insight.so')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Link="libu_insight.so" />
   </ItemGroup>
 
   <!-- macOS x64 -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
-    <None Include="$(MSBuildThisFileDirectory)..\runtimes\osx-x64\native\libu_insight.dylib"
-          Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\osx-x64\native\libu_insight.dylib')"
-          CopyToOutputDirectory="PreserveNewest"
-          Link="libu_insight.dylib" />
+    <Content Include="$(MSBuildThisFileDirectory)..\runtimes\osx-x64\native\libu_insight.dylib"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\osx-x64\native\libu_insight.dylib')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Link="libu_insight.dylib" />
   </ItemGroup>
 
   <!-- macOS arm64 -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64' OR ('$(RuntimeIdentifier)' == '' AND '$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))' == 'true')">
-    <None Include="$(MSBuildThisFileDirectory)..\runtimes\osx-arm64\native\libu_insight.dylib"
-          Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\osx-arm64\native\libu_insight.dylib')"
-          CopyToOutputDirectory="PreserveNewest"
-          Link="libu_insight.dylib" />
+    <Content Include="$(MSBuildThisFileDirectory)..\runtimes\osx-arm64\native\libu_insight.dylib"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\osx-arm64\native\libu_insight.dylib')"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Link="libu_insight.dylib" />
   </ItemGroup>
 
 </Project>
