@@ -309,12 +309,12 @@ pub fn regression_analysis(
     } else {
         // Multiple linear regression
         let x_refs: Vec<&[f64]> = predictors.iter().map(|c| c.as_slice()).collect();
-        let result = u_analytics::regression::multiple_linear_regression(&x_refs, target).ok_or_else(
-            || InsightError::ComputationFailed {
+        let result = u_analytics::regression::multiple_linear_regression(&x_refs, target)
+            .ok_or_else(|| InsightError::ComputationFailed {
                 operation: "multiple linear regression".into(),
-                detail: "computation returned None (possible rank deficiency or singular data)".into(),
-            },
-        )?;
+                detail: "computation returned None (possible rank deficiency or singular data)"
+                    .into(),
+            })?;
 
         Ok(RegressionAnalysis {
             target_name: target_name.to_string(),
@@ -495,10 +495,7 @@ pub fn anova_feature_selection(
 
     if classes.len() < 2 {
         return Err(InsightError::DegenerateData {
-            reason: format!(
-                "ANOVA requires at least 2 classes, got {}",
-                classes.len()
-            ),
+            reason: format!("ANOVA requires at least 2 classes, got {}", classes.len()),
         });
     }
 
@@ -685,9 +682,7 @@ pub fn mutual_info_classif(
 
     if n_classes < 2 {
         return Err(InsightError::DegenerateData {
-            reason: format!(
-                "mutual information requires at least 2 classes, got {n_classes}"
-            ),
+            reason: format!("mutual information requires at least 2 classes, got {n_classes}"),
         });
     }
 
