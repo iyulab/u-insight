@@ -23,6 +23,14 @@
 
 #define INSIGHT_ERR_PANIC -99
 
+#define INSIGHT_ERR_INSUFFICIENT_DATA -5
+
+#define INSIGHT_ERR_INVALID_PARAM -6
+
+#define INSIGHT_ERR_DEGENERATE_DATA -7
+
+#define INSIGHT_ERR_COMPUTATION_FAILED -8
+
 /**
  * Opaque handle for a profiling context.
  * Holds the parsed DataFrame and computed profiles.
