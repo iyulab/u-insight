@@ -3,10 +3,6 @@ name: NuGet Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Package version (e.g., 0.1.0)'
-        required: true
-        type: string
       publish:
         description: 'Publish to NuGet.org'
         required: false
@@ -75,6 +71,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read version from csproj
+        id: read_version
+        run: |
+          VERSION=$(grep -oPm1 '(?<=<Version>)[^<]+' bindings/csharp/UInsight/UInsight.csproj)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -116,13 +119,13 @@ jobs:
         run: |
           dotnet pack bindings/csharp/UInsight/UInsight.csproj \
             -c Release \
-            -p:Version=${{ inputs.version }} \
             -o ./nupkg
 
       - name: Inspect package
         run: |
+          VERSION=${{ steps.read_version.outputs.version }}
           echo "=== Package contents ==="
-          unzip -l ./nupkg/UInsight.${{ inputs.version }}.nupkg | grep -E "runtimes|build|lib"
+          unzip -l ./nupkg/UInsight.${VERSION}.nupkg | grep -E "runtimes|build|lib"
 
       - name: Upload NuGet package artifact
         uses: actions/upload-artifact@v4
@@ -133,7 +136,8 @@ jobs:
       - name: Publish to NuGet.org
         if: inputs.publish != false
         run: |
-          dotnet nuget push ./nupkg/UInsight.${{ inputs.version }}.nupkg \
+          VERSION=${{ steps.read_version.outputs.version }}
+          dotnet nuget push ./nupkg/UInsight.${VERSION}.nupkg \
             --api-key ${{ secrets.NUGET_API_KEY }} \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
