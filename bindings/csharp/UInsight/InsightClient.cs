@@ -38,12 +38,16 @@ public sealed class InsightClient : IDisposable
             {
                 var native = new NativeStructs.CColumnSummary();
                 Native.ThrowIfFailed(Native.insight_profile_column(ctx, i, ref native));
+                var dataType = Enum.IsDefined(typeof(InsightDataType), native.DataType)
+                    ? (InsightDataType)native.DataType
+                    : InsightDataType.Text;
+
                 columns[i] = new ColumnSummary
                 {
                     Index = native.Index,
                     ValidCount = native.ValidCount,
                     NullCount = native.NullCount,
-                    DataType = native.DataType,
+                    DataType = dataType,
                     Mean = native.Mean,
                     StdDev = native.StdDev,
                     Min = native.Min,
@@ -774,8 +778,8 @@ public class ColumnSummary
     public ulong ValidCount { get; init; }
     /// <summary>Count of null/missing values.</summary>
     public ulong NullCount { get; init; }
-    /// <summary>Detected data type (0=Numeric, 1=Boolean, 2=Categorical, 3=Text).</summary>
-    public uint DataType { get; init; }
+    /// <summary>Detected data type of the column.</summary>
+    public InsightDataType DataType { get; init; }
     /// <summary>Mean (numeric columns only).</summary>
     public double Mean { get; init; }
     /// <summary>Standard deviation (numeric columns only).</summary>
