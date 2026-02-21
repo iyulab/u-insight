@@ -1,4 +1,4 @@
-//! C FFI bindings for u-insight.
+﻿//! C FFI bindings for u-insight.
 //!
 //! Exposes profiling and analysis functionality via a C-compatible interface.
 //!
@@ -42,9 +42,30 @@ pub const INSIGHT_ERR_INVALID_INPUT: i32 = -2;
 pub const INSIGHT_ERR_PARSE_FAILED: i32 = -3;
 pub const INSIGHT_ERR_ANALYSIS_FAILED: i32 = -4;
 pub const INSIGHT_ERR_PANIC: i32 = -99;
+// New granular error codes — 1:1 with InsightError variants
+pub const INSIGHT_ERR_INSUFFICIENT_DATA: i32 = -5;
+pub const INSIGHT_ERR_INVALID_PARAM: i32 = -6;
+pub const INSIGHT_ERR_DEGENERATE_DATA: i32 = -7;
+pub const INSIGHT_ERR_COMPUTATION_FAILED: i32 = -8;
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
+}
+
+fn error_to_code(e: &crate::error::InsightError) -> i32 {
+    use crate::error::InsightError;
+    match e {
+        InsightError::CsvParse { .. } => INSIGHT_ERR_PARSE_FAILED,
+        InsightError::MissingValues { .. }
+        | InsightError::NonNumericColumn { .. }
+        | InsightError::ColumnNotFound { .. }
+        | InsightError::DimensionMismatch { .. } => INSIGHT_ERR_INVALID_INPUT,
+        InsightError::InsufficientData { .. } => INSIGHT_ERR_INSUFFICIENT_DATA,
+        InsightError::InvalidParameter { .. } => INSIGHT_ERR_INVALID_PARAM,
+        InsightError::DegenerateData { .. } => INSIGHT_ERR_DEGENERATE_DATA,
+        InsightError::ComputationFailed { .. } => INSIGHT_ERR_COMPUTATION_FAILED,
+        InsightError::Io(_) => INSIGHT_ERR_ANALYSIS_FAILED,
+    }
 }
 
 fn set_last_error(msg: &str) {
@@ -313,8 +334,8 @@ pub unsafe extern "C" fn insight_kmeans(
         let km_result = match kmeans(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("kmeans error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -402,8 +423,8 @@ pub unsafe extern "C" fn insight_pca(
         let pca_result = match pca(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("PCA error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -490,8 +511,8 @@ pub unsafe extern "C" fn insight_dbscan(
         let db_result = match dbscan(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("DBSCAN error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -600,8 +621,8 @@ pub unsafe extern "C" fn insight_distribution(
         let dist_result = match distribution_analysis(&values, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("distribution analysis error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -705,8 +726,8 @@ pub unsafe extern "C" fn insight_feature_importance(
         let fi_result = match feature_analysis(&columns, &names, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("feature importance error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -805,8 +826,8 @@ pub unsafe extern "C" fn insight_isolation_forest(
         let iforest = match crate::isolation_forest::isolation_forest(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("isolation forest error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -878,8 +899,8 @@ pub unsafe extern "C" fn insight_lof(
         let lof_result = match crate::lof::lof(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("LOF error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -988,7 +1009,7 @@ pub unsafe extern "C" fn insight_correlation(
             }
             Err(e) => {
                 set_last_error(&e.to_string());
-                INSIGHT_ERR_ANALYSIS_FAILED
+                error_to_code(&e)
             }
         }
     });
@@ -1067,7 +1088,7 @@ pub unsafe extern "C" fn insight_regression(
             }
             Err(e) => {
                 set_last_error(&e.to_string());
-                INSIGHT_ERR_ANALYSIS_FAILED
+                error_to_code(&e)
             }
         }
     });
@@ -1160,7 +1181,7 @@ pub unsafe extern "C" fn insight_mahalanobis(
             }
             Err(e) => {
                 set_last_error(&e.to_string());
-                INSIGHT_ERR_ANALYSIS_FAILED
+                error_to_code(&e)
             }
         }
     });
@@ -1323,7 +1344,7 @@ pub unsafe extern "C" fn insight_anova_select(
             }
             Err(e) => {
                 set_last_error(&e.to_string());
-                INSIGHT_ERR_ANALYSIS_FAILED
+                error_to_code(&e)
             }
         }
     });
@@ -1434,8 +1455,8 @@ pub unsafe extern "C" fn insight_hierarchical(
         let hc_result = match hierarchical(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("hierarchical error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -1537,8 +1558,8 @@ pub unsafe extern "C" fn insight_hdbscan(
         let hdb_result = match hdbscan(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&format!("HDBSCAN error: {e}"));
-                return INSIGHT_ERR_ANALYSIS_FAILED;
+                set_last_error(&e.to_string());
+                return error_to_code(&e);
             }
         };
 
@@ -1667,8 +1688,8 @@ pub unsafe extern "C" fn insight_mutual_info(
                 INSIGHT_OK
             }
             Err(e) => {
-                set_last_error(&format!("mutual_info failed: {}", e));
-                INSIGHT_ERR_ANALYSIS_FAILED
+                set_last_error(&e.to_string());
+                error_to_code(&e)
             }
         }
     });
@@ -1767,8 +1788,8 @@ pub unsafe extern "C" fn insight_mini_batch_kmeans(
                 INSIGHT_OK
             }
             Err(e) => {
-                set_last_error(&format!("mini_batch_kmeans failed: {}", e));
-                INSIGHT_ERR_ANALYSIS_FAILED
+                set_last_error(&e.to_string());
+                error_to_code(&e)
             }
         }
     });
@@ -1866,8 +1887,8 @@ pub unsafe extern "C" fn insight_gap_statistic(
                 INSIGHT_OK
             }
             Err(e) => {
-                set_last_error(&format!("gap_statistic failed: {}", e));
-                INSIGHT_ERR_ANALYSIS_FAILED
+                set_last_error(&e.to_string());
+                error_to_code(&e)
             }
         }
     });
@@ -1966,8 +1987,8 @@ pub unsafe extern "C" fn insight_permutation_importance(
                 INSIGHT_OK
             }
             Err(e) => {
-                set_last_error(&format!("permutation_importance failed: {}", e));
-                INSIGHT_ERR_ANALYSIS_FAILED
+                set_last_error(&e.to_string());
+                error_to_code(&e)
             }
         }
     });

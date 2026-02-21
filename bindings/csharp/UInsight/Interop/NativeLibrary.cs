@@ -18,6 +18,11 @@ internal static partial class NativeLibrary
     public const int INSIGHT_ERR_PARSE_FAILED = -3;
     public const int INSIGHT_ERR_ANALYSIS_FAILED = -4;
     public const int INSIGHT_ERR_PANIC = -99;
+    // New granular error codes — 1:1 with InsightError variants
+    public const int INSIGHT_ERR_INSUFFICIENT_DATA = -5;
+    public const int INSIGHT_ERR_INVALID_PARAM = -6;
+    public const int INSIGHT_ERR_DEGENERATE_DATA = -7;
+    public const int INSIGHT_ERR_COMPUTATION_FAILED = -8;
 
     #endregion
 
@@ -232,6 +237,10 @@ internal static partial class NativeLibrary
         INSIGHT_ERR_PARSE_FAILED => "Parse failed",
         INSIGHT_ERR_ANALYSIS_FAILED => "Analysis failed",
         INSIGHT_ERR_PANIC => "Internal panic",
+        INSIGHT_ERR_INSUFFICIENT_DATA => "Insufficient data",
+        INSIGHT_ERR_INVALID_PARAM => "Invalid parameter",
+        INSIGHT_ERR_DEGENERATE_DATA => "Degenerate data",
+        INSIGHT_ERR_COMPUTATION_FAILED => "Computation failed",
         _ => $"Unknown error code: {errorCode}"
     };
 
