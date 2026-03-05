@@ -10,10 +10,16 @@ readme = "README.md"
 keywords = ["statistics", "profiling", "analytics", "ffi"]
 categories = ["algorithms", "science"]
 
+[features]
+wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:serde"]
+
 [dependencies]
 u-analytics = { version = "0.1", path = "../../algorithms/u-analytics" }
 u-numflow = { version = "0.2", path = "../../foundation/u-numflow" }
 rand = "0.9"
+wasm-bindgen = { version = "0.2", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
@@ -26,4 +32,4 @@ proptest = "1.4"
 
 [lib]
 name = "u_insight"
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["rlib", "cdylib", "staticlib"]

@@ -49,9 +49,13 @@ pub mod dataframe;
 pub mod distribution;
 pub mod error;
 pub mod feature_importance;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 pub mod isolation_forest;
 pub mod lof;
 pub mod mahalanobis;
 pub mod pca;
 pub mod profiling;
+
+#[cfg(feature = "wasm")]
+pub mod wasm;
