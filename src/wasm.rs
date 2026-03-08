@@ -475,8 +475,7 @@ struct HierarchicalDto {
 #[wasm_bindgen]
 pub fn hierarchical(data_json: JsValue, config_json: JsValue) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let cfg: HierarchicalConfigDto =
-        serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
+    let cfg: HierarchicalConfigDto = serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
 
     use crate::clustering::{hierarchical as hier_fn, HierarchicalConfig, Linkage};
 
@@ -574,9 +573,7 @@ pub fn isolation_forest(data_json: JsValue, config_json: JsValue) -> Result<JsVa
     let cfg: IsolationForestConfigDto =
         serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
 
-    use crate::isolation_forest::{
-        isolation_forest as iforest_fn, IsolationForestConfig,
-    };
+    use crate::isolation_forest::{isolation_forest as iforest_fn, IsolationForestConfig};
 
     let config = IsolationForestConfig {
         n_estimators: cfg.n_estimators,
@@ -767,17 +764,11 @@ struct DistributionAnalysisDto {
 ///
 /// `{ n, ecdf, histogram, qq_plot, normality, fits }`
 #[wasm_bindgen]
-pub fn distribution_analysis(
-    data_json: JsValue,
-    config_json: JsValue,
-) -> Result<JsValue, JsValue> {
+pub fn distribution_analysis(data_json: JsValue, config_json: JsValue) -> Result<JsValue, JsValue> {
     let data: Vec<f64> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let cfg: DistributionConfigDto =
-        serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
+    let cfg: DistributionConfigDto = serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
 
-    use crate::distribution::{
-        distribution_analysis as dist_fn, BinMethod, DistributionConfig,
-    };
+    use crate::distribution::{distribution_analysis as dist_fn, BinMethod, DistributionConfig};
 
     let bin_method = match cfg.bin_method.to_lowercase().as_str() {
         "sturges" => BinMethod::Sturges,
@@ -1036,11 +1027,7 @@ pub fn feature_importance(data_json: JsValue) -> Result<JsValue, JsValue> {
             use crate::analysis::anova_feature_selection;
 
             // Convert f64 target to usize class labels
-            let class_target: Vec<usize> = input
-                .target
-                .iter()
-                .map(|&v| v as usize)
-                .collect();
+            let class_target: Vec<usize> = input.target.iter().map(|&v| v as usize).collect();
 
             let result = anova_feature_selection(
                 &feat_columns,
@@ -1073,19 +1060,11 @@ pub fn feature_importance(data_json: JsValue) -> Result<JsValue, JsValue> {
         "mutual_info" => {
             use crate::analysis::mutual_info_classif;
 
-            let class_target: Vec<usize> = input
-                .target
-                .iter()
-                .map(|&v| v as usize)
-                .collect();
+            let class_target: Vec<usize> = input.target.iter().map(|&v| v as usize).collect();
 
-            let result = mutual_info_classif(
-                &feat_columns,
-                &feat_names,
-                &class_target,
-                input.n_bins,
-            )
-            .map_err(js_err)?;
+            let result =
+                mutual_info_classif(&feat_columns, &feat_names, &class_target, input.n_bins)
+                    .map_err(js_err)?;
 
             let dto = FeatureImportanceDto {
                 method: "mutual_info".into(),
