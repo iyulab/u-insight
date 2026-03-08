@@ -243,6 +243,131 @@ C header: auto-generated via cbindgen (20 structs, 32 functions)
 - Rust 1.75+
 - Dependencies: `u-analytics`, `u-numflow`
 
+## WebAssembly / npm
+
+Available as an npm package via [wasm-pack](https://rustwasm.github.io/wasm-pack/).
+
+```bash
+npm install @iyulab/u-insight
+```
+
+### Quick Start
+
+```javascript
+import init, { describe, kmeans } from '@iyulab/u-insight';
+
+await init();
+const stats = describe({ col1: [1, 2, 3], col2: [4, 5, 6] });
+```
+
+### Functions
+
+#### `describe(data) -> [ColumnResult]`
+
+Descriptive statistics per column. Input: column-major `{ "col1": [1,2,3] }`.
+
+**Output:** Array of `{ name, data_type, numeric: { count, min, max, mean, median, std_dev, variance, skewness, kurtosis, q1, q3, iqr, p5, p95, ... } }`.
+
+#### `correlation_matrix(data) -> CorrelationResult`
+
+Pearson correlation matrix. Input: column-major `{ "col1": [1,2,3], "col2": [4,5,6] }`.
+
+**Output:**
+```json
+{ "names": ["col1","col2"], "matrix": [1,0.99,0.99,1], "n": 2, "high_pairs": [{ "col_a": "col1", "col_b": "col2", "r": 0.99, "p_value": 0.01 }] }
+```
+
+#### `kmeans(data, k) -> KMeansResult`
+
+K-Means++ clustering on row-major data `[[x,y,...], ...]`.
+
+**Output:**
+```json
+{ "k": 3, "labels": [0,0,1,1,2,2], "centroids": [[...]], "wcss": 5.2, "iterations": 12, "cluster_sizes": [2,2,2] }
+```
+
+#### `pca(data, n_components) -> PcaResult`
+
+Principal Component Analysis on row-major data.
+
+**Output:**
+```json
+{ "n_components": 2, "n_features": 4, "eigenvalues": [3.1,0.9], "explained_variance_ratio": [0.77,0.23], "cumulative_variance_ratio": [0.77,1.0], "loadings": [[...]], "scores": [[...]], "means": [...], "stds": [...] }
+```
+
+#### `dbscan(data, config) -> DbscanResult`
+
+DBSCAN density-based clustering. `config`: `{ "epsilon": 1.5, "min_samples": 3 }`.
+
+**Output:**
+```json
+{ "labels": [0,0,null,1,1], "n_clusters": 2, "noise_count": 1, "cluster_sizes": [2,2], "core_points": [true,true,false,true,true] }
+```
+
+#### `hierarchical(data, config) -> HierarchicalResult`
+
+Hierarchical agglomerative clustering. `config`: `{ "linkage": "ward", "n_clusters": 3 }` or `{ "linkage": "single", "distance_threshold": 5.0 }`.
+
+**Output:**
+```json
+{ "merges": [{ "cluster_a": 0, "cluster_b": 1, "distance": 1.2, "size": 2 }], "labels": [0,0,1,1,2], "n_clusters": 3 }
+```
+
+#### `isolation_forest(data, config) -> IsolationForestResult`
+
+Isolation Forest anomaly detection. `config`: `{ "n_estimators": 100, "contamination": 0.1, "seed": 42 }`.
+
+**Output:**
+```json
+{ "scores": [0.45, 0.82], "anomalies": [false, true], "threshold": 0.65, "anomaly_count": 1, "anomaly_fraction": 0.5 }
+```
+
+#### `lof(data, config) -> LofResult`
+
+Local Outlier Factor anomaly detection. `config`: `{ "k": 20, "threshold": 1.5 }`.
+
+**Output:**
+```json
+{ "scores": [1.0, 2.3], "anomalies": [false, true], "threshold": 1.5, "anomaly_count": 1, "anomaly_fraction": 0.5 }
+```
+
+#### `distribution_analysis(data, config) -> DistributionResult`
+
+Distribution analysis on a 1-D array. `config`: `{ "bin_method": "freedman_diaconis", "significance_level": 0.05, "compute_ecdf": true, "compute_histogram": true, "compute_qq_plot": true, "fit_distributions": false }`.
+
+**Output:**
+```json
+{ "n": 100, "ecdf": { "values": [...], "probabilities": [...] }, "histogram": { "n_bins": 10, "bin_width": 0.5, "edges": [...], "counts": [...] }, "qq_plot": { "theoretical": [...], "sample": [...] }, "normality": { "shapiro_wilk": { "statistic": 0.98, "p_value": 0.45, "rejected": false }, "is_normal": true }, "fits": [] }
+```
+
+#### `regression(data) -> RegressionResult`
+
+OLS regression analysis.
+
+**Input:**
+```json
+{ "predictors": { "x1": [1,2,3,4,5] }, "target": [2.1, 3.9, 6.1, 7.9, 10.1], "target_name": "y" }
+```
+
+**Output:**
+```json
+{ "target_name": "y", "predictor_names": ["x1"], "r_squared": 0.99, "adj_r_squared": 0.99, "coefficients": [0.1, 2.0], "p_values": [0.9, 0.0001], "vif": [1.0], "f_p_value": 0.0001 }
+```
+
+#### `feature_importance(data) -> FeatureImportanceResult`
+
+Feature importance via permutation, ANOVA, or mutual information.
+
+**Input:**
+```json
+{ "features": { "f1": [1,2,3], "f2": [5,4,3] }, "target": [0,0,1], "method": "permutation", "n_repeats": 5, "seed": 42 }
+```
+
+**Output:**
+```json
+{ "method": "permutation", "features": [{ "name": "f1", "index": 0, "score": 0.8, "std_dev": 0.1 }], "baseline_score": 0.5 }
+```
+
 ## Related
 
 - [u-analytics](https://github.com/iyulab/u-analytics) -- Statistical analytics
