@@ -484,7 +484,8 @@ pub fn hierarchical(data_json: JsValue, config_json: JsValue) -> Result<JsValue,
         "single" => Linkage::Single,
         "complete" => Linkage::Complete,
         "average" => Linkage::Average,
-        "ward" | _ => Linkage::Ward,
+        "ward" => Linkage::Ward,
+        _ => Linkage::Ward,
     };
 
     let config = match (cfg.n_clusters, cfg.distance_threshold) {
@@ -781,7 +782,8 @@ pub fn distribution_analysis(
     let bin_method = match cfg.bin_method.to_lowercase().as_str() {
         "sturges" => BinMethod::Sturges,
         "scott" => BinMethod::Scott,
-        "freedman_diaconis" | _ => BinMethod::FreedmanDiaconis,
+        "freedman_diaconis" => BinMethod::FreedmanDiaconis,
+        _ => BinMethod::FreedmanDiaconis,
     };
 
     let config = DistributionConfig {
@@ -1090,8 +1092,7 @@ pub fn feature_importance(data_json: JsValue) -> Result<JsValue, JsValue> {
                 features: result
                     .features
                     .iter()
-                    .enumerate()
-                    .map(|(_i, f)| FeatureImportanceItemDto {
+                    .map(|f| FeatureImportanceItemDto {
                         name: f.name.clone(),
                         index: f.index,
                         score: f.mi,
