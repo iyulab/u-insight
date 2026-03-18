@@ -2013,6 +2013,246 @@ pub unsafe extern "C" fn insight_free_perm_features(ptr: *mut CPermImportanceFea
     }
 }
 
+// ── PELT changepoint detection ───────────────────────────────────────
+
+/// Result of PELT changepoint detection.
+#[repr(C)]
+pub struct CPeltResult {
+    /// Detected changepoint indices (0-based). Caller must free with
+    /// `insight_free_pelt_result`.
+    pub changepoints: *mut u32,
+    /// Number of changepoints detected.
+    pub n_changepoints: u32,
+}
+
+/// Runs PELT changepoint detection on a univariate time series.
+///
+/// # Parameters
+///
+/// - `data`: pointer to `n` contiguous f64 values
+/// - `n`: number of data points
+/// - `cost`: cost function (0 = L2 mean change, 1 = Normal mean+variance)
+/// - `penalty`: penalty value. Pass 0.0 to use BIC (automatic).
+/// - `min_segment_len`: minimum segment length (must be >= 2)
+/// - `out`: pointer to `CPeltResult` (filled on success)
+///
+/// # Safety
+///
+/// - `data` must point to `n` contiguous f64 values.
+/// - `out` must point to a valid `CPeltResult`.
+/// - Caller must free `out` with `insight_free_pelt_result`.
+#[no_mangle]
+pub unsafe extern "C" fn insight_pelt(
+    data: *const f64,
+    n: u32,
+    cost: u32,
+    penalty: f64,
+    min_segment_len: u32,
+    out: *mut CPeltResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(data, len) };
+
+        let cost_fn = match cost {
+            0 => u_analytics::detection::CostFunction::L2,
+            1 => u_analytics::detection::CostFunction::Normal,
+            _ => {
+                set_last_error("cost must be 0 (L2) or 1 (Normal)");
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+
+        let pen = if penalty == 0.0 {
+            u_analytics::detection::Penalty::Bic
+        } else if penalty > 0.0 && penalty.is_finite() {
+            u_analytics::detection::Penalty::Custom(penalty)
+        } else {
+            set_last_error("penalty must be 0.0 (BIC) or a positive finite number");
+            return INSIGHT_ERR_INVALID_PARAM;
+        };
+
+        let min_seg = min_segment_len as usize;
+        let pelt =
+            match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
+                Some(p) => p,
+                None => {
+                    set_last_error("invalid parameters (min_segment_len must be >= 2)");
+                    return INSIGHT_ERR_INVALID_PARAM;
+                }
+            };
+
+        let pelt_result = pelt.detect(raw);
+
+        let mut changepoints: Vec<u32> = pelt_result
+            .changepoints
+            .iter()
+            .map(|&cp| cp as u32)
+            .collect();
+        let n_cp = changepoints.len() as u32;
+        let cp_ptr = if changepoints.is_empty() {
+            ptr::null_mut()
+        } else {
+            let p = changepoints.as_mut_ptr();
+            std::mem::forget(changepoints);
+            p
+        };
+
+        unsafe {
+            (*out) = CPeltResult {
+                changepoints: cp_ptr,
+                n_changepoints: n_cp,
+            };
+        }
+
+        INSIGHT_OK
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_pelt");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Runs PELT on multi-signal (multivariate) data.
+///
+/// # Parameters
+///
+/// - `data`: row-major array of shape `[n_channels, n_points]`.
+///   Each row is one signal channel.
+/// - `n_channels`: number of signal channels
+/// - `n_points`: number of data points per channel
+/// - Other params same as `insight_pelt`.
+///
+/// # Safety
+///
+/// - `data` must point to `n_channels * n_points` contiguous f64 values.
+/// - `out` must point to a valid `CPeltResult`.
+/// - Caller must free `out` with `insight_free_pelt_result`.
+#[no_mangle]
+pub unsafe extern "C" fn insight_pelt_multi(
+    data: *const f64,
+    n_channels: u32,
+    n_points: u32,
+    cost: u32,
+    penalty: f64,
+    min_segment_len: u32,
+    out: *mut CPeltResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let ch = n_channels as usize;
+        let np = n_points as usize;
+        let raw = unsafe { slice::from_raw_parts(data, ch * np) };
+
+        let signals: Vec<Vec<f64>> = (0..ch)
+            .map(|i| raw[i * np..(i + 1) * np].to_vec())
+            .collect();
+        let refs: Vec<&[f64]> = signals.iter().map(|s| s.as_slice()).collect();
+
+        let cost_fn = match cost {
+            0 => u_analytics::detection::CostFunction::L2,
+            1 => u_analytics::detection::CostFunction::Normal,
+            _ => {
+                set_last_error("cost must be 0 (L2) or 1 (Normal)");
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+
+        let pen = if penalty == 0.0 {
+            u_analytics::detection::Penalty::Bic
+        } else if penalty > 0.0 && penalty.is_finite() {
+            u_analytics::detection::Penalty::Custom(penalty)
+        } else {
+            set_last_error("penalty must be 0.0 (BIC) or positive finite");
+            return INSIGHT_ERR_INVALID_PARAM;
+        };
+
+        let min_seg = min_segment_len as usize;
+        let pelt =
+            match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
+                Some(p) => p,
+                None => {
+                    set_last_error("invalid parameters");
+                    return INSIGHT_ERR_INVALID_PARAM;
+                }
+            };
+
+        let pelt_result = match pelt.detect_multi(&refs) {
+            Some(r) => r,
+            None => {
+                set_last_error("all signals must have the same length");
+                return INSIGHT_ERR_INVALID_INPUT;
+            }
+        };
+
+        let mut changepoints: Vec<u32> = pelt_result
+            .changepoints
+            .iter()
+            .map(|&cp| cp as u32)
+            .collect();
+        let n_cp = changepoints.len() as u32;
+        let cp_ptr = if changepoints.is_empty() {
+            ptr::null_mut()
+        } else {
+            let p = changepoints.as_mut_ptr();
+            std::mem::forget(changepoints);
+            p
+        };
+
+        unsafe {
+            (*out) = CPeltResult {
+                changepoints: cp_ptr,
+                n_changepoints: n_cp,
+            };
+        }
+
+        INSIGHT_OK
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_pelt_multi");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees a `CPeltResult` allocated by `insight_pelt` or `insight_pelt_multi`.
+///
+/// # Safety
+///
+/// The result must have been allocated by `insight_pelt` or `insight_pelt_multi`
+/// and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_pelt_result(result: *mut CPeltResult) {
+    if !result.is_null() {
+        let r = unsafe { &*result };
+        if !r.changepoints.is_null() && r.n_changepoints > 0 {
+            let _ = unsafe {
+                Vec::from_raw_parts(
+                    r.changepoints,
+                    r.n_changepoints as usize,
+                    r.n_changepoints as usize,
+                )
+            };
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2885,6 +3125,118 @@ mod tests {
         };
         let rc = unsafe {
             insight_permutation_importance(ptr::null(), 5, 2, ptr::null(), 5, 42, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    // ── PELT tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn ffi_pelt_single_changepoint() {
+        let mut data = vec![0.0_f64; 50];
+        data.extend(vec![5.0; 50]);
+
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+
+        let rc = unsafe {
+            insight_pelt(data.as_ptr(), 100, 0, 0.0, 2, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_changepoints, 1);
+        assert!(!result.changepoints.is_null());
+
+        let cp = unsafe { *result.changepoints };
+        assert!(
+            (cp as i64 - 50).unsigned_abs() <= 2,
+            "changepoint near 50, got {}",
+            cp
+        );
+
+        unsafe { insight_free_pelt_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_pelt_no_changepoint() {
+        let data = vec![5.0_f64; 100];
+
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+
+        let rc = unsafe {
+            insight_pelt(data.as_ptr(), 100, 0, 0.0, 2, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_changepoints, 0);
+        assert!(result.changepoints.is_null());
+    }
+
+    #[test]
+    fn ffi_pelt_null_pointer() {
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+        let rc = unsafe { insight_pelt(ptr::null(), 10, 0, 0.0, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_pelt_invalid_cost() {
+        let data = [1.0_f64; 10];
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+        let rc = unsafe {
+            insight_pelt(data.as_ptr(), 10, 99, 0.0, 2, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
+    fn ffi_pelt_multi_two_channels() {
+        let mut data = Vec::with_capacity(200);
+        // Channel 0: [0..50]=0, [50..100]=5
+        data.extend(vec![0.0_f64; 50]);
+        data.extend(vec![5.0; 50]);
+        // Channel 1: [0..50]=0, [50..100]=3
+        data.extend(vec![0.0_f64; 50]);
+        data.extend(vec![3.0; 50]);
+
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+
+        let rc = unsafe {
+            insight_pelt_multi(data.as_ptr(), 2, 100, 0, 0.0, 2, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_changepoints, 1);
+
+        let cp = unsafe { *result.changepoints };
+        assert!(
+            (cp as i64 - 50).unsigned_abs() <= 2,
+            "changepoint near 50, got {}",
+            cp
+        );
+
+        unsafe { insight_free_pelt_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_pelt_multi_null() {
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+        let rc = unsafe {
+            insight_pelt_multi(ptr::null(), 2, 50, 0, 0.0, 2, &mut result)
         };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }

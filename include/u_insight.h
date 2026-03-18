@@ -489,6 +489,21 @@ typedef struct CPermImportanceResult {
 } CPermImportanceResult;
 
 /**
+ * Result of PELT changepoint detection.
+ */
+typedef struct CPeltResult {
+  /**
+   * Detected changepoint indices (0-based). Caller must free with
+   * `insight_free_pelt_result`.
+   */
+  uint32_t *changepoints;
+  /**
+   * Number of changepoints detected.
+   */
+  uint32_t n_changepoints;
+} CPeltResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -915,5 +930,67 @@ int32_t insight_permutation_importance(const double *data,
  * `ptr` must have been returned by `insight_permutation_importance` with matching `count`.
  */
 INSIGHT_API void insight_free_perm_features(struct CPermImportanceFeature *ptr, uint32_t count);
+
+/**
+ * Runs PELT changepoint detection on a univariate time series.
+ *
+ * # Parameters
+ *
+ * - `data`: pointer to `n` contiguous f64 values
+ * - `n`: number of data points
+ * - `cost`: cost function (0 = L2 mean change, 1 = Normal mean+variance)
+ * - `penalty`: penalty value. Pass 0.0 to use BIC (automatic).
+ * - `min_segment_len`: minimum segment length (must be >= 2)
+ * - `out`: pointer to `CPeltResult` (filled on success)
+ *
+ * # Safety
+ *
+ * - `data` must point to `n` contiguous f64 values.
+ * - `out` must point to a valid `CPeltResult`.
+ * - Caller must free `out` with `insight_free_pelt_result`.
+ */
+INSIGHT_API
+int32_t insight_pelt(const double *data,
+                     uint32_t n,
+                     uint32_t cost,
+                     double penalty,
+                     uint32_t min_segment_len,
+                     struct CPeltResult *out);
+
+/**
+ * Runs PELT on multi-signal (multivariate) data.
+ *
+ * # Parameters
+ *
+ * - `data`: row-major array of shape `[n_channels, n_points]`.
+ *   Each row is one signal channel.
+ * - `n_channels`: number of signal channels
+ * - `n_points`: number of data points per channel
+ * - Other params same as `insight_pelt`.
+ *
+ * # Safety
+ *
+ * - `data` must point to `n_channels * n_points` contiguous f64 values.
+ * - `out` must point to a valid `CPeltResult`.
+ * - Caller must free `out` with `insight_free_pelt_result`.
+ */
+INSIGHT_API
+int32_t insight_pelt_multi(const double *data,
+                           uint32_t n_channels,
+                           uint32_t n_points,
+                           uint32_t cost,
+                           double penalty,
+                           uint32_t min_segment_len,
+                           struct CPeltResult *out);
+
+/**
+ * Frees a `CPeltResult` allocated by `insight_pelt` or `insight_pelt_multi`.
+ *
+ * # Safety
+ *
+ * The result must have been allocated by `insight_pelt` or `insight_pelt_multi`
+ * and not yet freed.
+ */
+INSIGHT_API void insight_free_pelt_result(struct CPeltResult *result);
 
 #endif  /* U_INSIGHT_H */
