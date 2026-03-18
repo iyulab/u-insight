@@ -696,6 +696,96 @@ public sealed class InsightClient : IDisposable
 
     #endregion
 
+    #region Changepoint Detection
+
+    /// <summary>
+    /// Detect changepoints using the PELT algorithm (Killick et al., 2012).
+    /// </summary>
+    /// <param name="data">Univariate time series.</param>
+    /// <param name="cost">0 = L2 (mean change), 1 = Normal (mean+variance).</param>
+    /// <param name="penalty">Penalty per changepoint. 0.0 = BIC (automatic).</param>
+    /// <param name="minSegmentLen">Minimum segment length (>= 2).</param>
+    public PeltResult Pelt(double[] data, uint cost = 0, double penalty = 0.0, uint minSegmentLen = 2)
+    {
+        var native = new NativeStructs.CPeltResult();
+
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_pelt(ptr, (uint)data.Length, cost, penalty, minSegmentLen, ref native));
+            }
+        }
+
+        try
+        {
+            var changepoints = CopyU32Array(native.Changepoints, native.NChangepoints);
+
+            return new PeltResult
+            {
+                Changepoints = changepoints,
+                NSegments = native.NChangepoints + 1
+            };
+        }
+        finally
+        {
+            Native.insight_free_pelt_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// Detect changepoints in multi-signal data using PELT.
+    /// </summary>
+    /// <param name="signals">Array of signal channels (each same length).</param>
+    /// <param name="cost">0 = L2, 1 = Normal.</param>
+    /// <param name="penalty">0.0 = BIC, or positive value.</param>
+    /// <param name="minSegmentLen">Minimum segment length (>= 2).</param>
+    public PeltResult PeltMulti(double[][] signals, uint cost = 0, double penalty = 0.0, uint minSegmentLen = 2)
+    {
+        if (signals.Length == 0)
+            throw new ArgumentException("signals must not be empty", nameof(signals));
+
+        var nChannels = (uint)signals.Length;
+        var nPoints = (uint)signals[0].Length;
+
+        if (signals.Any(s => s.Length != (int)nPoints))
+            throw new ArgumentException("All signals must have the same length", nameof(signals));
+
+        // Flatten to row-major: [ch0_pt0, ch0_pt1, ..., ch1_pt0, ch1_pt1, ...]
+        var flat = new double[nChannels * nPoints];
+        for (int ch = 0; ch < signals.Length; ch++)
+            Array.Copy(signals[ch], 0, flat, ch * (int)nPoints, (int)nPoints);
+
+        var native = new NativeStructs.CPeltResult();
+
+        unsafe
+        {
+            fixed (double* ptr = flat)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_pelt_multi(ptr, nChannels, nPoints, cost, penalty, minSegmentLen, ref native));
+            }
+        }
+
+        try
+        {
+            var changepoints = CopyU32Array(native.Changepoints, native.NChangepoints);
+
+            return new PeltResult
+            {
+                Changepoints = changepoints,
+                NSegments = native.NChangepoints + 1
+            };
+        }
+        finally
+        {
+            Native.insight_free_pelt_result(ref native);
+        }
+    }
+
+    #endregion
+
     #region Helpers
 
     private static (uint nRows, uint nCols, double[] flat) Flatten(double[,] data)
@@ -1015,6 +1105,15 @@ public class PermImportanceResult
     public double BaselineScore { get; init; }
     /// <summary>Features with importance scores.</summary>
     public PermImportanceFeature[] Features { get; init; } = [];
+}
+
+/// <summary>PELT changepoint detection result.</summary>
+public class PeltResult
+{
+    /// <summary>Detected changepoint indices (0-based).</summary>
+    public uint[] Changepoints { get; init; } = [];
+    /// <summary>Number of segments (changepoints + 1).</summary>
+    public uint NSegments { get; init; }
 }
 
 #endregion

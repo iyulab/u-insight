@@ -215,6 +215,26 @@ internal static partial class NativeLibrary
 
     #endregion
 
+    #region Changepoint Detection
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_pelt(
+        double* data, uint n,
+        uint cost, double penalty, uint minSegmentLen,
+        ref NativeStructs.CPeltResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_pelt_multi(
+        double* data, uint nChannels, uint nPoints,
+        uint cost, double penalty, uint minSegmentLen,
+        ref NativeStructs.CPeltResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_pelt_result(
+        ref NativeStructs.CPeltResult result);
+
+    #endregion
+
     #region Helper Methods
 
     /// <summary>

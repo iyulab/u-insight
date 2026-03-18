@@ -193,4 +193,11 @@ internal static class NativeStructs
         public IntPtr Features;
         public uint NFeatures;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CPeltResult
+    {
+        public IntPtr Changepoints;
+        public uint NChangepoints;
+    }
 }
