@@ -1,4 +1,4 @@
-﻿//! C FFI bindings for u-insight.
+//! C FFI bindings for u-insight.
 //!
 //! Exposes profiling and analysis functionality via a C-compatible interface.
 //!
@@ -2078,14 +2078,13 @@ pub unsafe extern "C" fn insight_pelt(
         };
 
         let min_seg = min_segment_len as usize;
-        let pelt =
-            match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
-                Some(p) => p,
-                None => {
-                    set_last_error("invalid parameters (min_segment_len must be >= 2)");
-                    return INSIGHT_ERR_INVALID_PARAM;
-                }
-            };
+        let pelt = match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
+            Some(p) => p,
+            None => {
+                set_last_error("invalid parameters (min_segment_len must be >= 2)");
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
 
         let pelt_result = pelt.detect(raw);
 
@@ -2181,14 +2180,13 @@ pub unsafe extern "C" fn insight_pelt_multi(
         };
 
         let min_seg = min_segment_len as usize;
-        let pelt =
-            match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
-                Some(p) => p,
-                None => {
-                    set_last_error("invalid parameters");
-                    return INSIGHT_ERR_INVALID_PARAM;
-                }
-            };
+        let pelt = match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
+            Some(p) => p,
+            None => {
+                set_last_error("invalid parameters");
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
 
         let pelt_result = match pelt.detect_multi(&refs) {
             Some(r) => r,
@@ -3141,9 +3139,7 @@ mod tests {
             n_changepoints: 0,
         };
 
-        let rc = unsafe {
-            insight_pelt(data.as_ptr(), 100, 0, 0.0, 2, &mut result)
-        };
+        let rc = unsafe { insight_pelt(data.as_ptr(), 100, 0, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_changepoints, 1);
         assert!(!result.changepoints.is_null());
@@ -3167,9 +3163,7 @@ mod tests {
             n_changepoints: 0,
         };
 
-        let rc = unsafe {
-            insight_pelt(data.as_ptr(), 100, 0, 0.0, 2, &mut result)
-        };
+        let rc = unsafe { insight_pelt(data.as_ptr(), 100, 0, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_changepoints, 0);
         assert!(result.changepoints.is_null());
@@ -3192,9 +3186,7 @@ mod tests {
             changepoints: ptr::null_mut(),
             n_changepoints: 0,
         };
-        let rc = unsafe {
-            insight_pelt(data.as_ptr(), 10, 99, 0.0, 2, &mut result)
-        };
+        let rc = unsafe { insight_pelt(data.as_ptr(), 10, 99, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
     }
 
@@ -3213,9 +3205,7 @@ mod tests {
             n_changepoints: 0,
         };
 
-        let rc = unsafe {
-            insight_pelt_multi(data.as_ptr(), 2, 100, 0, 0.0, 2, &mut result)
-        };
+        let rc = unsafe { insight_pelt_multi(data.as_ptr(), 2, 100, 0, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_changepoints, 1);
 
@@ -3235,9 +3225,7 @@ mod tests {
             changepoints: ptr::null_mut(),
             n_changepoints: 0,
         };
-        let rc = unsafe {
-            insight_pelt_multi(ptr::null(), 2, 50, 0, 0.0, 2, &mut result)
-        };
+        let rc = unsafe { insight_pelt_multi(ptr::null(), 2, 50, 0, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 }
