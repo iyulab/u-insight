@@ -75,11 +75,10 @@ impl JsonParser {
 
     /// Parses a column-major JSON string into a DataFrame.
     pub fn parse_str(&self, input: &str) -> Result<DataFrame, InsightError> {
-        let parsed: serde_json::Value = serde_json::from_str(input).map_err(|e| {
-            InsightError::JsonParse {
+        let parsed: serde_json::Value =
+            serde_json::from_str(input).map_err(|e| InsightError::JsonParse {
                 message: e.to_string(),
-            }
-        })?;
+            })?;
 
         self.parse_value(&parsed)
     }
@@ -114,9 +113,11 @@ impl JsonParser {
         // Validate that all values are arrays of the same length
         let mut expected_len: Option<usize> = None;
         for key in &keys {
-            let arr = map[*key].as_array().ok_or_else(|| InsightError::JsonParse {
-                message: format!("column '{key}' value must be an array"),
-            })?;
+            let arr = map[*key]
+                .as_array()
+                .ok_or_else(|| InsightError::JsonParse {
+                    message: format!("column '{key}' value must be an array"),
+                })?;
             match expected_len {
                 None => expected_len = Some(arr.len()),
                 Some(n) if n != arr.len() => {
@@ -146,10 +147,7 @@ impl JsonParser {
 
     /// Parses row-major format: `[[v1, v2], [v3, v4]]`
     /// Auto-generates column names: `col_0`, `col_1`, ...
-    fn parse_row_major(
-        &self,
-        rows: &[serde_json::Value],
-    ) -> Result<DataFrame, InsightError> {
+    fn parse_row_major(&self, rows: &[serde_json::Value]) -> Result<DataFrame, InsightError> {
         if rows.is_empty() {
             return Ok(DataFrame::new());
         }
@@ -253,9 +251,7 @@ fn build_column_from_json_array(values: &[serde_json::Value]) -> Column {
     let col_type = infer_json_type(values);
 
     match col_type {
-        JsonColumnType::AllNull => {
-            Column::numeric(vec![0.0; n], ValidityBitmap::all_invalid(n))
-        }
+        JsonColumnType::AllNull => Column::numeric(vec![0.0; n], ValidityBitmap::all_invalid(n)),
         JsonColumnType::Numeric => build_numeric_column(values),
         JsonColumnType::Boolean => build_boolean_column(values),
         JsonColumnType::String => build_string_column(values),
@@ -324,7 +320,10 @@ fn build_string_column(values: &[serde_json::Value]) -> Column {
 
     let non_null: Vec<&str> = strings.iter().filter_map(|s| *s).collect();
     if non_null.is_empty() {
-        return Column::numeric(vec![0.0; values.len()], ValidityBitmap::all_invalid(values.len()));
+        return Column::numeric(
+            vec![0.0; values.len()],
+            ValidityBitmap::all_invalid(values.len()),
+        );
     }
 
     // Categorical vs Text: based on cardinality
@@ -447,10 +446,19 @@ mod tests {
         let names = df.column_names();
         assert_eq!(names, &["active", "age", "name"]);
 
-        assert_eq!(df.column_by_name("active").unwrap().data_type(), DataType::Boolean);
-        assert_eq!(df.column_by_name("age").unwrap().data_type(), DataType::Numeric);
+        assert_eq!(
+            df.column_by_name("active").unwrap().data_type(),
+            DataType::Boolean
+        );
+        assert_eq!(
+            df.column_by_name("age").unwrap().data_type(),
+            DataType::Numeric
+        );
         // 3 unique / 3 non-null = 1.0 > 0.5 → Text
-        assert_eq!(df.column_by_name("name").unwrap().data_type(), DataType::Text);
+        assert_eq!(
+            df.column_by_name("name").unwrap().data_type(),
+            DataType::Text
+        );
     }
 
     #[test]

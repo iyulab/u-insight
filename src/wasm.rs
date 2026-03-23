@@ -175,8 +175,7 @@ pub fn describe(data_json: JsValue) -> Result<JsValue, JsValue> {
     use crate::json_parser::JsonParser;
     use crate::profiling::profile_dataframe;
 
-    let raw: serde_json::Value =
-        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+    let raw: serde_json::Value = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
 
     let df = JsonParser::new().parse_value(&raw).map_err(js_err)?;
 

@@ -28,9 +28,9 @@ use crate::clustering::{
     HdbscanConfig, HierarchicalConfig, KMeansConfig, Linkage, MiniBatchKMeansConfig,
 };
 use crate::csv_parser::CsvParser;
-use crate::json_parser::JsonParser;
 use crate::distribution::{distribution_analysis, DistributionConfig};
 use crate::feature_importance::{feature_analysis, permutation_importance, FeatureConfig};
+use crate::json_parser::JsonParser;
 use crate::pca::{pca, PcaConfig};
 use crate::profiling::profile_dataframe;
 

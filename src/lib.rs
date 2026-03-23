@@ -47,13 +47,13 @@ pub mod analysis;
 pub mod clustering;
 pub mod csv_parser;
 pub mod dataframe;
-pub mod json_parser;
 pub mod distribution;
 pub mod error;
 pub mod feature_importance;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
 pub mod isolation_forest;
+pub mod json_parser;
 pub mod lof;
 pub mod mahalanobis;
 pub mod pca;
