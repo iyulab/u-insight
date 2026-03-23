@@ -1,6 +1,6 @@
 [package]
 name = "u-insight"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["iyulab"]
 license = "MIT"
@@ -16,6 +16,7 @@ wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:serde"]
 [dependencies]
 u-analytics = { version = "0.2", path = "../../algorithms/u-analytics" }
 u-numflow = { version = "0.2", path = "../../foundation/u-numflow" }
+serde_json = "1"
 rand = "0.9"
 wasm-bindgen = { version = "0.2", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }

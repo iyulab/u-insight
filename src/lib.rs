@@ -12,6 +12,7 @@
 //!
 //! - [`dataframe`] — Column-major tabular data model (DataFrame, Column, DataType)
 //! - [`csv_parser`] — CSV parsing with automatic type inference
+//! - [`json_parser`] — JSON parsing with automatic type inference
 //! - [`profiling`] — Column-level and dataset-level data profiling
 //! - [`analysis`] — Correlation (Pearson/Spearman), regression (simple/multiple OLS), Cramér's V
 //! - [`clustering`] — K-Means++ (auto-K, Gap Statistic), Mini-Batch K-Means, DBSCAN, Hierarchical (4 linkages), HDBSCAN
@@ -46,6 +47,7 @@ pub mod analysis;
 pub mod clustering;
 pub mod csv_parser;
 pub mod dataframe;
+pub mod json_parser;
 pub mod distribution;
 pub mod error;
 pub mod feature_importance;

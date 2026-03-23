@@ -7,6 +7,8 @@ use std::fmt;
 pub enum InsightError {
     /// CSV parsing failed.
     CsvParse { line: usize, message: String },
+    /// JSON parsing failed.
+    JsonParse { message: String },
     /// Column contains missing values where none are allowed.
     MissingValues { column: String, count: usize },
     /// Column is not numeric where numeric data is required.
@@ -32,6 +34,9 @@ impl fmt::Display for InsightError {
         match self {
             Self::CsvParse { line, message } => {
                 write!(f, "CSV parse error at line {line}: {message}")
+            }
+            Self::JsonParse { message } => {
+                write!(f, "JSON parse error: {message}")
             }
             Self::MissingValues { column, count } => {
                 write!(f, "column '{column}' has {count} missing values")

@@ -28,6 +28,7 @@ use crate::clustering::{
     HdbscanConfig, HierarchicalConfig, KMeansConfig, Linkage, MiniBatchKMeansConfig,
 };
 use crate::csv_parser::CsvParser;
+use crate::json_parser::JsonParser;
 use crate::distribution::{distribution_analysis, DistributionConfig};
 use crate::feature_importance::{feature_analysis, permutation_importance, FeatureConfig};
 use crate::pca::{pca, PcaConfig};
@@ -55,7 +56,7 @@ thread_local! {
 fn error_to_code(e: &crate::error::InsightError) -> i32 {
     use crate::error::InsightError;
     match e {
-        InsightError::CsvParse { .. } => INSIGHT_ERR_PARSE_FAILED,
+        InsightError::CsvParse { .. } | InsightError::JsonParse { .. } => INSIGHT_ERR_PARSE_FAILED,
         InsightError::MissingValues { .. }
         | InsightError::NonNumericColumn { .. }
         | InsightError::ColumnNotFound { .. }
@@ -176,10 +177,64 @@ pub unsafe extern "C" fn insight_profile_csv(csv_data: *const c_char) -> *mut Pr
     }
 }
 
+/// Creates a profile context from a column-major JSON string.
+///
+/// Expected format: `{"col1": [v1, v2, ...], "col2": [...]}`
+///
+/// Values can be numbers, booleans, strings, or null. Column types are
+/// inferred automatically: number → Numeric, bool → Boolean,
+/// string → Categorical/Text (based on cardinality), null → missing.
+///
+/// # Safety
+/// - `json_data` must be a valid null-terminated UTF-8 string.
+/// - The returned handle must be freed with `insight_profile_free`.
+#[no_mangle]
+pub unsafe extern "C" fn insight_profile_json(json_data: *const c_char) -> *mut ProfileContext {
+    let result = panic::catch_unwind(|| {
+        if json_data.is_null() {
+            set_last_error("null json_data pointer");
+            return ptr::null_mut();
+        }
+
+        let c_str = unsafe { CStr::from_ptr(json_data) };
+        let json = match c_str.to_str() {
+            Ok(s) => s,
+            Err(e) => {
+                set_last_error(&format!("invalid UTF-8: {e}"));
+                return ptr::null_mut();
+            }
+        };
+
+        let df = match JsonParser::new().parse_str(json) {
+            Ok(df) => df,
+            Err(e) => {
+                set_last_error(&format!("JSON parse error: {e}"));
+                return ptr::null_mut();
+            }
+        };
+
+        let profiles = profile_dataframe(&df);
+
+        let ctx = Box::new(ProfileContext {
+            dataframe: df,
+            column_profiles: profiles,
+        });
+        Box::into_raw(ctx)
+    });
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(_) => {
+            set_last_error("panic in insight_profile_json");
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Frees a profile context.
 ///
 /// # Safety
-/// `ctx` must be a valid pointer from `insight_profile_csv`, or null.
+/// `ctx` must be a valid pointer from `insight_profile_csv` or `insight_profile_json`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn insight_profile_free(ctx: *mut ProfileContext) {
     if !ctx.is_null() {

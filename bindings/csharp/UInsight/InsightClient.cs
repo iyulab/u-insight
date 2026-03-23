@@ -27,7 +27,27 @@ public sealed class InsightClient : IDisposable
         var ctx = Native.insight_profile_csv(csvData);
         if (ctx == IntPtr.Zero)
             throw new InsightException(-1, "Failed to profile CSV data");
+        return BuildProfileResult(ctx);
+    }
 
+    /// <summary>
+    /// Profiles a column-major JSON string and returns column summaries.
+    /// </summary>
+    /// <remarks>
+    /// Expected format: <c>{"col1": [v1, v2, ...], "col2": [...]}</c>.
+    /// Values can be numbers, booleans, strings, or null.
+    /// Column types are inferred automatically.
+    /// </remarks>
+    public ProfileResult ProfileJson(string jsonData)
+    {
+        var ctx = Native.insight_profile_json(jsonData);
+        if (ctx == IntPtr.Zero)
+            throw new InsightException(-1, "Failed to profile JSON data");
+        return BuildProfileResult(ctx);
+    }
+
+    private static ProfileResult BuildProfileResult(IntPtr ctx)
+    {
         try
         {
             var rows = Native.insight_profile_row_count(ctx);

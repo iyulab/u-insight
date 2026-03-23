@@ -157,6 +157,13 @@ struct PcaDto {
 /// Returns descriptive statistics for each column in a column-major dataset.
 ///
 /// # Input
+///
+/// Accepts mixed-type columns (numbers, booleans, strings, null):
+/// ```json
+/// { "age": [30, 25, null], "name": ["Alice", "Bob", null], "active": [true, false, true] }
+/// ```
+///
+/// Also accepts numeric-only columns (backward-compatible):
 /// ```json
 /// { "col1": [1.0, 2.0, 3.0], "col2": [4.0, 5.0, 6.0] }
 /// ```
@@ -165,29 +172,16 @@ struct PcaDto {
 /// Array of column profile objects, one per column.
 #[wasm_bindgen]
 pub fn describe(data_json: JsValue) -> Result<JsValue, JsValue> {
-    let raw: HashMap<String, Vec<f64>> =
-        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-
-    if raw.is_empty() {
-        return Err(js_err("data_json must contain at least one column"));
-    }
-
-    // Build a DataFrame from numeric columns using CsvParser isn't practical here;
-    // instead use profiling directly via the Column API.
-    use crate::dataframe::{Column, DataFrame, ValidityBitmap};
+    use crate::json_parser::JsonParser;
     use crate::profiling::profile_dataframe;
 
-    let mut df = DataFrame::new();
-    // Sort keys for deterministic column order
-    let mut keys: Vec<String> = raw.keys().cloned().collect();
-    keys.sort();
+    let raw: serde_json::Value =
+        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
 
-    for key in &keys {
-        let values = raw[key].clone();
-        let n = values.len();
-        let validity = ValidityBitmap::all_valid(n);
-        let col = Column::numeric(values, validity);
-        df.add_column(key.clone(), col).map_err(js_err)?;
+    let df = JsonParser::new().parse_value(&raw).map_err(js_err)?;
+
+    if df.is_empty() {
+        return Err(js_err("data_json must contain at least one column"));
     }
 
     let profiles = profile_dataframe(&df);

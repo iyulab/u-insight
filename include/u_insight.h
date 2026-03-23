@@ -527,10 +527,25 @@ INSIGHT_API void insight_clear_error(void);
 INSIGHT_API struct ProfileContext *insight_profile_csv(const char *csv_data);
 
 /**
+ * Creates a profile context from a column-major JSON string.
+ *
+ * Expected format: `{"col1": [v1, v2, ...], "col2": [...]}`
+ *
+ * Values can be numbers, booleans, strings, or null. Column types are
+ * inferred automatically: number → Numeric, bool → Boolean,
+ * string → Categorical/Text (based on cardinality), null → missing.
+ *
+ * # Safety
+ * - `json_data` must be a valid null-terminated UTF-8 string.
+ * - The returned handle must be freed with `insight_profile_free`.
+ */
+INSIGHT_API struct ProfileContext *insight_profile_json(const char *json_data);
+
+/**
  * Frees a profile context.
  *
  * # Safety
- * `ctx` must be a valid pointer from `insight_profile_csv`, or null.
+ * `ctx` must be a valid pointer from `insight_profile_csv` or `insight_profile_json`, or null.
  */
 INSIGHT_API void insight_profile_free(struct ProfileContext *ctx);
 
