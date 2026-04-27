@@ -755,28 +755,19 @@ public sealed class InsightClient : IDisposable
     }
 
     /// <summary>
-    /// Detect changepoints in multi-signal data using PELT.
+    /// Detect changepoints in multivariate (multi-channel) time-series data using PELT.
     /// </summary>
-    /// <param name="signals">Array of signal channels (each same length).</param>
-    /// <param name="cost">0 = L2, 1 = Normal.</param>
-    /// <param name="penalty">0.0 = BIC, or positive value.</param>
+    /// <param name="data">
+    /// Multivariate observations matrix. Rows = time-series samples, columns = signal channels —
+    /// the same convention as <see cref="Pca"/>, <see cref="KMeans"/>, and every other
+    /// multi-dimensional API in this library.
+    /// </param>
+    /// <param name="cost">0 = L2 (mean change), 1 = Normal (mean+variance).</param>
+    /// <param name="penalty">Penalty per changepoint. 0.0 = BIC (automatic).</param>
     /// <param name="minSegmentLen">Minimum segment length (>= 2).</param>
-    public PeltResult PeltMulti(double[][] signals, uint cost = 0, double penalty = 0.0, uint minSegmentLen = 2)
+    public PeltResult PeltMulti(double[,] data, uint cost = 0, double penalty = 0.0, uint minSegmentLen = 2)
     {
-        if (signals.Length == 0)
-            throw new ArgumentException("signals must not be empty", nameof(signals));
-
-        var nChannels = (uint)signals.Length;
-        var nPoints = (uint)signals[0].Length;
-
-        if (signals.Any(s => s.Length != (int)nPoints))
-            throw new ArgumentException("All signals must have the same length", nameof(signals));
-
-        // Flatten to row-major: [ch0_pt0, ch0_pt1, ..., ch1_pt0, ch1_pt1, ...]
-        var flat = new double[nChannels * nPoints];
-        for (int ch = 0; ch < signals.Length; ch++)
-            Array.Copy(signals[ch], 0, flat, ch * (int)nPoints, (int)nPoints);
-
+        var (nSamples, nChannels, flat) = Flatten(data);
         var native = new NativeStructs.CPeltResult();
 
         unsafe
@@ -784,7 +775,7 @@ public sealed class InsightClient : IDisposable
             fixed (double* ptr = flat)
             {
                 Native.ThrowIfFailed(
-                    Native.insight_pelt_multi(ptr, nChannels, nPoints, cost, penalty, minSegmentLen, ref native));
+                    Native.insight_pelt_multi(ptr, nSamples, nChannels, cost, penalty, minSegmentLen, ref native));
             }
         }
 

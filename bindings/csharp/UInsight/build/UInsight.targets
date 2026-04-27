@@ -8,12 +8,21 @@
     <UInsightNativeDir>$(MSBuildThisFileDirectory)..\runtimes\$(RuntimeIdentifier)\native\</UInsightNativeDir>
   </PropertyGroup>
 
+  <!--
+    Pack="false" prevents these <Content> entries from being repackaged into
+    downstream consumers' nupkgs (which would otherwise emit NU5100 warnings —
+    "assembly not inside the 'lib' folder"). The native dlls are still bundled
+    inside UInsight.nupkg via the runtimes/{rid}/native/ paths declared in
+    UInsight.csproj, which is the canonical NuGet mechanism for native binaries.
+  -->
+
   <!-- Windows x64 -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR ('$(RuntimeIdentifier)' == '' AND '$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Windows)))' == 'true')">
     <Content Include="$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\u_insight.dll"
              Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\u_insight.dll')"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
+             Pack="false"
              Link="u_insight.dll" />
   </ItemGroup>
 
@@ -23,6 +32,7 @@
              Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\linux-x64\native\libu_insight.so')"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
+             Pack="false"
              Link="libu_insight.so" />
   </ItemGroup>
 
@@ -32,6 +42,7 @@
              Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\osx-x64\native\libu_insight.dylib')"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
+             Pack="false"
              Link="libu_insight.dylib" />
   </ItemGroup>
 
@@ -41,6 +52,7 @@
              Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\osx-arm64\native\libu_insight.dylib')"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
+             Pack="false"
              Link="libu_insight.dylib" />
   </ItemGroup>
 

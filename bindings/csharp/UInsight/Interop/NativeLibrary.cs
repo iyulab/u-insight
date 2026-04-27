@@ -228,7 +228,7 @@ internal static partial class NativeLibrary
 
     [LibraryImport(LibraryName)]
     public static unsafe partial int insight_pelt_multi(
-        double* data, uint nChannels, uint nPoints,
+        double* data, uint nSamples, uint nChannels,
         uint cost, double penalty, uint minSegmentLen,
         ref NativeStructs.CPeltResult result);
 

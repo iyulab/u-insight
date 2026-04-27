@@ -2180,22 +2180,24 @@ pub unsafe extern "C" fn insight_pelt(
 ///
 /// # Parameters
 ///
-/// - `data`: row-major array of shape `[n_channels, n_points]`.
-///   Each row is one signal channel.
-/// - `n_channels`: number of signal channels
-/// - `n_points`: number of data points per channel
+/// - `data`: row-major array of shape `[n_samples, n_channels]`.
+///   Each row is one observation across all channels — same convention
+///   as every other multi-dimensional FFI in this crate
+///   (PCA, KMeans, DBSCAN, IsolationForest, etc.).
+/// - `n_samples`: number of time-series observations (rows)
+/// - `n_channels`: number of signal channels (columns)
 /// - Other params same as `insight_pelt`.
 ///
 /// # Safety
 ///
-/// - `data` must point to `n_channels * n_points` contiguous f64 values.
+/// - `data` must point to `n_samples * n_channels` contiguous f64 values.
 /// - `out` must point to a valid `CPeltResult`.
 /// - Caller must free `out` with `insight_free_pelt_result`.
 #[no_mangle]
 pub unsafe extern "C" fn insight_pelt_multi(
     data: *const f64,
+    n_samples: u32,
     n_channels: u32,
-    n_points: u32,
     cost: u32,
     penalty: f64,
     min_segment_len: u32,
@@ -2207,12 +2209,14 @@ pub unsafe extern "C" fn insight_pelt_multi(
             return INSIGHT_ERR_NULL_PTR;
         }
 
+        let ns = n_samples as usize;
         let ch = n_channels as usize;
-        let np = n_points as usize;
-        let raw = unsafe { slice::from_raw_parts(data, ch * np) };
+        let raw = unsafe { slice::from_raw_parts(data, ns * ch) };
 
+        // Transpose row-major [n_samples, n_channels] into per-channel slices
+        // expected by `Pelt::detect_multi` (one slice per channel).
         let signals: Vec<Vec<f64>> = (0..ch)
-            .map(|i| raw[i * np..(i + 1) * np].to_vec())
+            .map(|c| (0..ns).map(|s| raw[s * ch + c]).collect())
             .collect();
         let refs: Vec<&[f64]> = signals.iter().map(|s| s.as_slice()).collect();
 
@@ -3247,20 +3251,23 @@ mod tests {
 
     #[test]
     fn ffi_pelt_multi_two_channels() {
+        // Row-major [n_samples=100, n_channels=2]:
+        // sample s, channel c → data[s * 2 + c]
         let mut data = Vec::with_capacity(200);
-        // Channel 0: [0..50]=0, [50..100]=5
-        data.extend(vec![0.0_f64; 50]);
-        data.extend(vec![5.0; 50]);
-        // Channel 1: [0..50]=0, [50..100]=3
-        data.extend(vec![0.0_f64; 50]);
-        data.extend(vec![3.0; 50]);
+        for s in 0..100 {
+            // Channel 0: [0..50]=0, [50..100]=5
+            data.push(if s < 50 { 0.0_f64 } else { 5.0 });
+            // Channel 1: [0..50]=0, [50..100]=3
+            data.push(if s < 50 { 0.0_f64 } else { 3.0 });
+        }
 
         let mut result = CPeltResult {
             changepoints: ptr::null_mut(),
             n_changepoints: 0,
         };
 
-        let rc = unsafe { insight_pelt_multi(data.as_ptr(), 2, 100, 0, 0.0, 2, &mut result) };
+        // n_samples=100, n_channels=2
+        let rc = unsafe { insight_pelt_multi(data.as_ptr(), 100, 2, 0, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_changepoints, 1);
 
@@ -3275,12 +3282,59 @@ mod tests {
     }
 
     #[test]
+    fn ffi_pelt_multi_asymmetric_layout() {
+        // Asymmetric shape (n_samples=80 ≠ n_channels=3) so any swapped
+        // dimensions or off-by-one transpose surfaces immediately.
+        // Channel 0: step at sample 40, level jump 0 → 4
+        // Channel 1: step at sample 40, level jump 0 → 6
+        // Channel 2: step at sample 40, level jump 0 → 2
+        let n_samples = 80usize;
+        let n_channels = 3usize;
+        let mut data = Vec::with_capacity(n_samples * n_channels);
+        for s in 0..n_samples {
+            let pre = s < 40;
+            data.push(if pre { 0.0_f64 } else { 4.0 });
+            data.push(if pre { 0.0_f64 } else { 6.0 });
+            data.push(if pre { 0.0_f64 } else { 2.0 });
+        }
+
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+
+        let rc = unsafe {
+            insight_pelt_multi(
+                data.as_ptr(),
+                n_samples as u32,
+                n_channels as u32,
+                0,
+                0.0,
+                2,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_changepoints, 1);
+
+        let cp = unsafe { *result.changepoints };
+        assert!(
+            (cp as i64 - 40).unsigned_abs() <= 2,
+            "changepoint near 40, got {}",
+            cp
+        );
+
+        unsafe { insight_free_pelt_result(&mut result) };
+    }
+
+    #[test]
     fn ffi_pelt_multi_null() {
         let mut result = CPeltResult {
             changepoints: ptr::null_mut(),
             n_changepoints: 0,
         };
-        let rc = unsafe { insight_pelt_multi(ptr::null(), 2, 50, 0, 0.0, 2, &mut result) };
+        // n_samples=50, n_channels=2
+        let rc = unsafe { insight_pelt_multi(ptr::null(), 50, 2, 0, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 }

@@ -977,22 +977,24 @@ int32_t insight_pelt(const double *data,
  *
  * # Parameters
  *
- * - `data`: row-major array of shape `[n_channels, n_points]`.
- *   Each row is one signal channel.
- * - `n_channels`: number of signal channels
- * - `n_points`: number of data points per channel
+ * - `data`: row-major array of shape `[n_samples, n_channels]`.
+ *   Each row is one observation across all channels — same convention
+ *   as every other multi-dimensional FFI in this crate
+ *   (PCA, KMeans, DBSCAN, IsolationForest, etc.).
+ * - `n_samples`: number of time-series observations (rows)
+ * - `n_channels`: number of signal channels (columns)
  * - Other params same as `insight_pelt`.
  *
  * # Safety
  *
- * - `data` must point to `n_channels * n_points` contiguous f64 values.
+ * - `data` must point to `n_samples * n_channels` contiguous f64 values.
  * - `out` must point to a valid `CPeltResult`.
  * - Caller must free `out` with `insight_free_pelt_result`.
  */
 INSIGHT_API
 int32_t insight_pelt_multi(const double *data,
+                           uint32_t n_samples,
                            uint32_t n_channels,
-                           uint32_t n_points,
                            uint32_t cost,
                            double penalty,
                            uint32_t min_segment_len,
