@@ -335,7 +335,7 @@ fn profile_categorical(
 
     // Top values sorted by frequency descending
     let mut freq_vec: Vec<(u32, usize)> = freq.into_iter().collect();
-    freq_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    freq_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let top_n = 10.min(freq_vec.len());
     let top_values: Vec<(String, usize)> = freq_vec[..top_n]

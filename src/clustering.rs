@@ -1011,14 +1011,12 @@ pub fn hierarchical(
     // Assign sequential cluster IDs to the merge history.
     // Original points: 0..n, merged clusters: n, n+1, ...
     let mut id_map: Vec<usize> = (0..n).collect();
-    let mut next_merge_id = n;
-    for merge in &mut merges {
+    for (next_merge_id, merge) in (n..).zip(merges.iter_mut()) {
         let a = merge.cluster_a;
         let b = merge.cluster_b;
         merge.cluster_a = id_map[a];
         merge.cluster_b = id_map[b];
         id_map[a] = next_merge_id;
-        next_merge_id += 1;
     }
 
     // Cut dendrogram if requested
