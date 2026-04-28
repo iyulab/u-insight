@@ -248,19 +248,28 @@ pub fn describe(data_json: JsValue) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&results).map_err(js_err)
 }
 
-/// Computes a Pearson correlation matrix for a column-major dataset.
+/// Computes a correlation matrix for a column-major dataset.
 ///
 /// # Input
 /// ```json
-/// { "col1": [1.0, 2.0, 3.0], "col2": [4.0, 5.0, 6.0] }
+/// { "col1": [1.0, 2.0, 3.0], "col2": [4.0, 5.0, 6.0], "_method": "pearson" }
 /// ```
+///
+/// `_method` ∈ `{"pearson", "spearman", "kendall"}` — optional, defaults
+/// to `"pearson"`. Reserved key (prefix `_`) so it never collides with a
+/// column name.
 ///
 /// # Output
 /// `{ names, matrix (flattened n×n), n, high_pairs }`
 #[wasm_bindgen]
 pub fn correlation_matrix(data_json: JsValue) -> Result<JsValue, JsValue> {
-    let raw: HashMap<String, Vec<f64>> =
+    let mut raw: HashMap<String, serde_json::Value> =
         serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+
+    let method_str = raw
+        .remove("_method")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "pearson".to_string());
 
     if raw.is_empty() {
         return Err(js_err("data_json must contain at least one column"));
@@ -270,10 +279,27 @@ pub fn correlation_matrix(data_json: JsValue) -> Result<JsValue, JsValue> {
     let mut names: Vec<String> = raw.keys().cloned().collect();
     names.sort();
 
-    let columns: Vec<Vec<f64>> = names.iter().map(|n| raw[n].clone()).collect();
+    let columns: Vec<Vec<f64>> = names
+        .iter()
+        .map(|n| {
+            raw[n]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+        .collect();
 
-    use crate::analysis::{correlation_analysis, CorrelationConfig};
-    let config = CorrelationConfig::default();
+    use crate::analysis::{correlation_analysis, CorrelationConfig, CorrelationMethod};
+    let method = match method_str.as_str() {
+        "pearson" => CorrelationMethod::Pearson,
+        "spearman" => CorrelationMethod::Spearman,
+        "kendall" => CorrelationMethod::Kendall,
+        other => return Err(js_err(format!("unknown correlation method '{other}'"))),
+    };
+    let config = CorrelationConfig {
+        method,
+        high_threshold: 0.7,
+    };
     let result = correlation_analysis(&columns, &names, &config).map_err(js_err)?;
 
     let n = names.len();

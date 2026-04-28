@@ -7,6 +7,19 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
+## What's New in 0.9.0
+
+- **Kendall tau-b correlation** added to `CorrelationMethod` (Pearson / Spearman / Kendall)
+- **Outlier fences exposed** on `OutlierResult` — `lower_fence`, `upper_fence`, `center`, `spread`
+- **`detect_outliers_slice(&[f64], method)`** helper for raw-slice input
+- **`vif_analysis()` and `condition_number()`** standalone multicollinearity diagnostics
+- **WASM**: `correlation_matrix` accepts optional `_method` field (`"pearson"` | `"spearman"` | `"kendall"`); new `detect_univariate_outliers`, `vif_diagnostic`, `condition_number_diagnostic`
+- **C#**: `CorrelationMethodKind` enum + `Correlate(data, method)` parameter
+- **BREAKING — Rust**: Non-finite numeric inputs now return `InsightError::DegenerateData` (was `NonNumericColumn`); audit covered 11 call sites
+- **BREAKING — Rust**: `OutlierResult` gained 4 new fields (exhaustive pattern matches must be updated)
+- **BREAKING — FFI**: `insight_correlation` signature gained a `method: u32` parameter (use `INSIGHT_CORR_PEARSON` = 0 to keep prior behaviour)
+- **BREAKING — C#**: `Correlate(...)` now takes an optional `CorrelationMethodKind` parameter (default `Pearson` keeps existing call-sites compiling)
+
 ## Overview
 
 u-insight transforms raw tabular data into actionable statistical insights. It operates in two distinct layers with **opposite assumptions about input data quality**:

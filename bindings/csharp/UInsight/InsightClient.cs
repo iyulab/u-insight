@@ -433,9 +433,13 @@ public sealed class InsightClient : IDisposable
     #region Statistical Analysis
 
     /// <summary>
-    /// Computes Pearson correlation matrix.
+    /// Computes a correlation matrix using the chosen method.
     /// </summary>
-    public CorrelationResult Correlation(double[,] data)
+    /// <param name="data">Row-major numeric data; rows are observations, columns are variables.</param>
+    /// <param name="method">Correlation method (default: Pearson).</param>
+    public CorrelationResult Correlation(
+        double[,] data,
+        CorrelationMethodKind method = CorrelationMethodKind.Pearson)
     {
         var (nRows, nCols, flat) = Flatten(data);
         var native = new NativeStructs.CCorrelationResult();
@@ -445,7 +449,7 @@ public sealed class InsightClient : IDisposable
             fixed (double* ptr = flat)
             {
                 Native.ThrowIfFailed(
-                    Native.insight_correlation(ptr, nRows, nCols, ref native));
+                    Native.insight_correlation(ptr, nRows, nCols, (uint)method, ref native));
             }
         }
 
@@ -996,6 +1000,20 @@ public class CorrelationResult
     public double[,] Matrix { get; init; } = new double[0, 0];
     /// <summary>Number of high-correlation pairs.</summary>
     public uint NHighPairs { get; init; }
+}
+
+/// <summary>
+/// Correlation method kinds. Numeric values match the native
+/// <c>INSIGHT_CORR_*</c> constants (0 = Pearson, 1 = Spearman, 2 = Kendall).
+/// </summary>
+public enum CorrelationMethodKind : uint
+{
+    /// <summary>Pearson product-moment correlation (assumes linear, normal-ish data).</summary>
+    Pearson = 0,
+    /// <summary>Spearman rank correlation (robust to monotonic non-linearity).</summary>
+    Spearman = 1,
+    /// <summary>Kendall tau-b rank correlation (robust to ties).</summary>
+    Kendall = 2,
 }
 
 /// <summary>Linear regression result.</summary>

@@ -1001,12 +1001,21 @@ pub struct CCorrelationResult {
     pub n_high_pairs: u32,
 }
 
-/// Computes a Pearson correlation matrix over row-major numeric data.
+/// Method codes for [`insight_correlation`].
+pub const INSIGHT_CORR_PEARSON: u32 = 0;
+/// Spearman rank correlation.
+pub const INSIGHT_CORR_SPEARMAN: u32 = 1;
+/// Kendall tau-b rank correlation.
+pub const INSIGHT_CORR_KENDALL: u32 = 2;
+
+/// Computes a correlation matrix over row-major numeric data.
 ///
 /// `data`: flat array of `n_rows × n_cols` f64 values, row-major.
+/// `method`: one of `INSIGHT_CORR_PEARSON` (0) / `_SPEARMAN` (1) / `_KENDALL` (2).
 /// `out`: pointer to a `CCorrelationResult`.
 ///
-/// Returns 0 on success, negative on error.
+/// Returns 0 on success, negative on error. Unknown `method` values
+/// return `INSIGHT_ERR_INVALID_PARAM`.
 ///
 /// # Safety
 /// `data` must point to `n_rows * n_cols` f64s. `out` must be valid.
@@ -1015,6 +1024,7 @@ pub unsafe extern "C" fn insight_correlation(
     data: *const f64,
     n_rows: u32,
     n_cols: u32,
+    method: u32,
     out: *mut CCorrelationResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
@@ -1030,6 +1040,16 @@ pub unsafe extern "C" fn insight_correlation(
             return INSIGHT_ERR_INVALID_INPUT;
         }
 
+        let corr_method = match method {
+            INSIGHT_CORR_PEARSON => crate::analysis::CorrelationMethod::Pearson,
+            INSIGHT_CORR_SPEARMAN => crate::analysis::CorrelationMethod::Spearman,
+            INSIGHT_CORR_KENDALL => crate::analysis::CorrelationMethod::Kendall,
+            _ => {
+                set_last_error("invalid correlation method (use 0=Pearson, 1=Spearman, 2=Kendall)");
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+
         let raw = unsafe { slice::from_raw_parts(data, nr * nc) };
 
         // Convert row-major flat to column-major Vec<Vec<f64>>
@@ -1041,7 +1061,10 @@ pub unsafe extern "C" fn insight_correlation(
         }
 
         let names: Vec<String> = (0..nc).map(|i| format!("c{i}")).collect();
-        let config = crate::analysis::CorrelationConfig::default();
+        let config = crate::analysis::CorrelationConfig {
+            method: corr_method,
+            high_threshold: 0.7,
+        };
 
         match crate::analysis::correlation_analysis(&columns, &names, &config) {
             Ok(result) => {
@@ -2822,7 +2845,9 @@ mod tests {
             n_high_pairs: 0,
         };
 
-        let rc = unsafe { insight_correlation(data.as_ptr(), 5, 3, &mut result) };
+        let rc = unsafe {
+            insight_correlation(data.as_ptr(), 5, 3, INSIGHT_CORR_PEARSON, &mut result)
+        };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_vars, 3);
 
@@ -2846,7 +2871,9 @@ mod tests {
             matrix: ptr::null_mut(),
             n_high_pairs: 0,
         };
-        let rc = unsafe { insight_correlation(ptr::null(), 5, 3, &mut result) };
+        let rc = unsafe {
+            insight_correlation(ptr::null(), 5, 3, INSIGHT_CORR_PEARSON, &mut result)
+        };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
@@ -2858,8 +2885,54 @@ mod tests {
             matrix: ptr::null_mut(),
             n_high_pairs: 0,
         };
-        let rc = unsafe { insight_correlation(data.as_ptr(), 1, 2, &mut result) };
+        let rc = unsafe {
+            insight_correlation(data.as_ptr(), 1, 2, INSIGHT_CORR_PEARSON, &mut result)
+        };
         assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+    }
+
+    #[test]
+    fn ffi_correlation_invalid_method() {
+        let data: Vec<f64> = (0..15).map(|i| i as f64).collect();
+        let mut result = CCorrelationResult {
+            n_vars: 0,
+            matrix: ptr::null_mut(),
+            n_high_pairs: 0,
+        };
+        let rc = unsafe {
+            insight_correlation(data.as_ptr(), 5, 3, 99, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
+    fn ffi_correlation_kendall() {
+        // 3 columns × 5 rows: c0 perfectly monotonic with c1, anti-monotonic with c2.
+        let data: Vec<f64> = vec![
+            1.0, 2.0, 5.0, // row 0
+            2.0, 4.0, 4.0, // row 1
+            3.0, 6.0, 3.0, // row 2
+            4.0, 8.0, 2.0, // row 3
+            5.0, 10.0, 1.0, // row 4
+        ];
+        let mut result = CCorrelationResult {
+            n_vars: 0,
+            matrix: ptr::null_mut(),
+            n_high_pairs: 0,
+        };
+        let rc = unsafe {
+            insight_correlation(data.as_ptr(), 5, 3, INSIGHT_CORR_KENDALL, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_vars, 3);
+
+        let mat = unsafe { slice::from_raw_parts(result.matrix, 9) };
+        // c0 and c1 perfectly concordant → tau ≈ 1.0
+        assert!((mat[1] - 1.0).abs() < 1e-10, "r(0,1) = {}", mat[1]);
+        // c0 and c2 perfectly discordant → tau ≈ -1.0
+        assert!((mat[2] + 1.0).abs() < 1e-10, "r(0,2) = {}", mat[2]);
+
+        unsafe { insight_free_f64_array(result.matrix, 9) };
     }
 
     // ── Regression FFI tests ──────────────────────────────────────

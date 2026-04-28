@@ -26,6 +26,17 @@ internal static partial class NativeLibrary
 
     #endregion
 
+    #region Correlation Method Codes
+
+    /// <summary>Pearson product-moment correlation.</summary>
+    public const uint INSIGHT_CORR_PEARSON = 0;
+    /// <summary>Spearman rank correlation.</summary>
+    public const uint INSIGHT_CORR_SPEARMAN = 1;
+    /// <summary>Kendall tau-b rank correlation.</summary>
+    public const uint INSIGHT_CORR_KENDALL = 2;
+
+    #endregion
+
     #region Resolver
 
     static NativeLibrary()
@@ -160,7 +171,7 @@ internal static partial class NativeLibrary
 
     [LibraryImport(LibraryName)]
     public static unsafe partial int insight_correlation(
-        double* data, uint nRows, uint nCols,
+        double* data, uint nRows, uint nCols, uint method,
         ref NativeStructs.CCorrelationResult result);
 
     [LibraryImport(LibraryName)]

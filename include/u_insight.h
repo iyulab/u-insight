@@ -32,6 +32,21 @@
 #define INSIGHT_ERR_COMPUTATION_FAILED -8
 
 /**
+ * Method codes for [`insight_correlation`].
+ */
+#define INSIGHT_CORR_PEARSON 0
+
+/**
+ * Spearman rank correlation.
+ */
+#define INSIGHT_CORR_SPEARMAN 1
+
+/**
+ * Kendall tau-b rank correlation.
+ */
+#define INSIGHT_CORR_KENDALL 2
+
+/**
  * Opaque handle for a profiling context.
  * Holds the parsed DataFrame and computed profiles.
  */
@@ -710,12 +725,14 @@ int32_t insight_lof(const double *data,
                     struct CAnomalyResult *out);
 
 /**
- * Computes a Pearson correlation matrix over row-major numeric data.
+ * Computes a correlation matrix over row-major numeric data.
  *
  * `data`: flat array of `n_rows × n_cols` f64 values, row-major.
+ * `method`: one of `INSIGHT_CORR_PEARSON` (0) / `_SPEARMAN` (1) / `_KENDALL` (2).
  * `out`: pointer to a `CCorrelationResult`.
  *
- * Returns 0 on success, negative on error.
+ * Returns 0 on success, negative on error. Unknown `method` values
+ * return `INSIGHT_ERR_INVALID_PARAM`.
  *
  * # Safety
  * `data` must point to `n_rows * n_cols` f64s. `out` must be valid.
@@ -724,6 +741,7 @@ INSIGHT_API
 int32_t insight_correlation(const double *data,
                             uint32_t n_rows,
                             uint32_t n_cols,
+                            uint32_t method,
                             struct CCorrelationResult *out);
 
 /**
