@@ -139,9 +139,7 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
         }
         if let Some(col_idx) = point.iter().position(|v| !v.is_finite()) {
             return Err(InsightError::DegenerateData {
-                reason: format!(
-                    "non-finite value at row {row_idx}, column {col_idx}"
-                ),
+                reason: format!("non-finite value at row {row_idx}, column {col_idx}"),
             });
         }
     }

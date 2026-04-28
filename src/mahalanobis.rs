@@ -156,9 +156,7 @@ pub fn mahalanobis(
         }
         if let Some(col_idx) = point.iter().position(|v| !v.is_finite()) {
             return Err(InsightError::DegenerateData {
-                reason: format!(
-                    "non-finite value at row {row_idx}, column {col_idx}"
-                ),
+                reason: format!("non-finite value at row {row_idx}, column {col_idx}"),
             });
         }
     }
@@ -213,9 +211,12 @@ pub fn mahalanobis(
         operation: "covariance matrix construction".into(),
         detail: e.to_string(),
     })?;
-    let inv_cov = cov_mat.inverse().map_err(|_| InsightError::DegenerateData {
-        reason: "covariance matrix is singular or near-singular (likely collinear columns)".into(),
-    })?;
+    let inv_cov = cov_mat
+        .inverse()
+        .map_err(|_| InsightError::DegenerateData {
+            reason: "covariance matrix is singular or near-singular (likely collinear columns)"
+                .into(),
+        })?;
 
     // Compute squared Mahalanobis distance for each point
     let mut distances = Vec::with_capacity(n);
