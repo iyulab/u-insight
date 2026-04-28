@@ -1112,3 +1112,77 @@ pub fn feature_importance(data_json: JsValue) -> Result<JsValue, JsValue> {
         }
     }
 }
+
+// ── Univariate Outlier Detection ──────────────────────────────────────
+
+/// Univariate outlier detection on a flat numeric vector.
+///
+/// # Input
+/// ```json
+/// { "data": [1.0, 2.0, 3.0, 100.0], "method": "iqr" }
+/// ```
+/// `method` ∈ `{"iqr"|"tukey", "zscore"|"three_sigma", "modified_zscore"|"hampel"}`.
+/// Optional, defaults to `"iqr"`.
+///
+/// # Output
+/// `{ method, indices, scores, count, pct, lower_fence, upper_fence, center, spread }`
+///
+/// `method` aliases: `tukey` → IQR Tukey fences (k=1.5), `three_sigma` →
+/// mean ± 3·σ, `hampel` → robust median ± 3.5·(MAD/0.6745).
+#[wasm_bindgen]
+pub fn detect_univariate_outliers(data_json: JsValue) -> Result<JsValue, JsValue> {
+    #[derive(Deserialize)]
+    struct Req {
+        data: Vec<f64>,
+        #[serde(default = "default_outlier_method")]
+        method: String,
+    }
+    fn default_outlier_method() -> String {
+        "iqr".to_string()
+    }
+    #[derive(Serialize)]
+    struct Dto {
+        method: String,
+        indices: Vec<usize>,
+        scores: Vec<f64>,
+        count: usize,
+        pct: f64,
+        lower_fence: f64,
+        upper_fence: f64,
+        center: f64,
+        spread: f64,
+    }
+
+    let req: Req = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+
+    use crate::profiling::{detect_outliers_slice, OutlierMethod};
+    let method = match req.method.as_str() {
+        "iqr" | "tukey" => OutlierMethod::Iqr,
+        "zscore" | "three_sigma" => OutlierMethod::Zscore,
+        "modified_zscore" | "hampel" => OutlierMethod::ModifiedZscore,
+        other => return Err(js_err(format!("unknown method '{other}'"))),
+    };
+
+    let r = detect_outliers_slice(&req.data, method)
+        .ok_or_else(|| js_err("outlier computation returned None"))?;
+
+    let method_str = match r.method {
+        OutlierMethod::Iqr => "iqr",
+        OutlierMethod::Zscore => "zscore",
+        OutlierMethod::ModifiedZscore => "modified_zscore",
+    };
+
+    let dto = Dto {
+        method: method_str.to_string(),
+        indices: r.indices,
+        scores: r.scores,
+        count: r.count,
+        pct: r.pct,
+        lower_fence: r.lower_fence,
+        upper_fence: r.upper_fence,
+        center: r.center,
+        spread: r.spread,
+    };
+
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}

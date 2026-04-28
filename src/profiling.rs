@@ -708,7 +708,7 @@ pub enum OutlierMethod {
 pub struct OutlierResult {
     /// Method used.
     pub method: OutlierMethod,
-    /// Indices of detected outliers.
+    /// Indices of detected outliers (into the original column).
     pub indices: Vec<usize>,
     /// Outlier scores (absolute deviation from center).
     pub scores: Vec<f64>,
@@ -716,6 +716,17 @@ pub struct OutlierResult {
     pub count: usize,
     /// Percentage of outliers among valid values.
     pub pct: f64,
+    /// Lower fence (values strictly below this are outliers).
+    /// `f64::NAN` when the detector cannot establish a fence (zero variance,
+    /// zero MAD, or fewer than 3 valid values).
+    pub lower_fence: f64,
+    /// Upper fence (values strictly above this are outliers).
+    /// `f64::NAN` when the detector cannot establish a fence.
+    pub upper_fence: f64,
+    /// Center used by the detector: median (Iqr / ModifiedZscore) or mean (Zscore).
+    pub center: f64,
+    /// Spread used by the detector: IQR (Iqr), MAD (ModifiedZscore), std-dev (Zscore).
+    pub spread: f64,
 }
 
 /// Detects outliers in a numeric column using the specified method.
@@ -754,6 +765,55 @@ pub fn detect_outliers(col: &Column, method: OutlierMethod) -> Option<OutlierRes
             scores: Vec::new(),
             count: 0,
             pct: 0.0,
+            lower_fence: f64::NAN,
+            upper_fence: f64::NAN,
+            center: f64::NAN,
+            spread: f64::NAN,
+        });
+    }
+
+    let vals: Vec<f64> = valid.iter().map(|&(_, v)| v).collect();
+
+    match method {
+        OutlierMethod::Iqr => detect_iqr(&valid, &vals),
+        OutlierMethod::Zscore => detect_zscore(&valid, &vals),
+        OutlierMethod::ModifiedZscore => detect_modified_zscore(&valid, &vals),
+    }
+}
+
+/// Slice-input convenience over [`detect_outliers`].
+///
+/// Skips NaN/Inf entries; indices in the result are positions into the
+/// original slice (not the finite subsequence).
+///
+/// ```
+/// use u_insight::profiling::{detect_outliers_slice, OutlierMethod};
+///
+/// let data = [1.0, 2.0, 3.0, 2.5, 100.0, 2.0, 3.0, 2.0];
+/// let r = detect_outliers_slice(&data, OutlierMethod::Iqr).unwrap();
+/// assert!(r.count >= 1);
+/// assert!(r.indices.contains(&4));
+/// assert!(r.upper_fence.is_finite());
+/// ```
+pub fn detect_outliers_slice(data: &[f64], method: OutlierMethod) -> Option<OutlierResult> {
+    let valid: Vec<(usize, f64)> = data
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, v)| v.is_finite())
+        .collect();
+
+    if valid.len() < 3 {
+        return Some(OutlierResult {
+            method,
+            indices: Vec::new(),
+            scores: Vec::new(),
+            count: 0,
+            pct: 0.0,
+            lower_fence: f64::NAN,
+            upper_fence: f64::NAN,
+            center: f64::NAN,
+            spread: f64::NAN,
         });
     }
 
@@ -769,6 +829,7 @@ pub fn detect_outliers(col: &Column, method: OutlierMethod) -> Option<OutlierRes
 fn detect_iqr(valid: &[(usize, f64)], vals: &[f64]) -> Option<OutlierResult> {
     let q1 = u_numflow::stats::quantile(vals, 0.25)?;
     let q3 = u_numflow::stats::quantile(vals, 0.75)?;
+    let median = u_numflow::stats::median(vals)?;
     let iqr = q3 - q1;
     let k = 1.5;
     let lower = q1 - k * iqr;
@@ -801,6 +862,10 @@ fn detect_iqr(valid: &[(usize, f64)], vals: &[f64]) -> Option<OutlierResult> {
         scores,
         count,
         pct,
+        lower_fence: lower,
+        upper_fence: upper,
+        center: median,
+        spread: iqr,
     })
 }
 
@@ -810,13 +875,17 @@ fn detect_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<OutlierResult> 
     let threshold = 3.0;
 
     if std < 1e-15 {
-        // Zero variance: no outliers possible
+        // Zero variance: no outliers possible; fences undefined
         return Some(OutlierResult {
             method: OutlierMethod::Zscore,
             indices: Vec::new(),
             scores: Vec::new(),
             count: 0,
             pct: 0.0,
+            lower_fence: f64::NAN,
+            upper_fence: f64::NAN,
+            center: mean,
+            spread: 0.0,
         });
     }
 
@@ -843,6 +912,10 @@ fn detect_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<OutlierResult> 
         scores,
         count,
         pct,
+        lower_fence: mean - threshold * std,
+        upper_fence: mean + threshold * std,
+        center: mean,
+        spread: std,
     })
 }
 
@@ -862,10 +935,15 @@ fn detect_modified_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<Outlie
             scores: Vec::new(),
             count: 0,
             pct: 0.0,
+            lower_fence: f64::NAN,
+            upper_fence: f64::NAN,
+            center: median,
+            spread: 0.0,
         });
     }
 
-    // Modified Z-score: M_i = 0.6745 * (x_i - median) / MAD
+    // Modified Z-score: M_i = 0.6745 * (x_i - median) / MAD; equivalently a
+    // robust σ̂ = MAD / 0.6745 (≈ 1.4826 · MAD) for normal-distributed data.
     let factor = 0.6745;
     let mut indices = Vec::new();
     let mut scores = Vec::new();
@@ -884,12 +962,17 @@ fn detect_modified_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<Outlie
         0.0
     };
 
+    let scale = mad / factor;
     Some(OutlierResult {
         method: OutlierMethod::ModifiedZscore,
         indices,
         scores,
         count,
         pct,
+        lower_fence: median - threshold * scale,
+        upper_fence: median + threshold * scale,
+        center: median,
+        spread: mad,
     })
 }
 
@@ -1687,5 +1770,68 @@ mod tests {
         let df = CsvParser::new().parse_str(csv).unwrap();
         let ds = profile_dataset(&df);
         assert_eq!(ds.duplicate_count, 1); // row 3 = dup of row 2 (both have NA,B)
+    }
+
+    // ── Outlier fences (Sprint 3) ─────────────────────────────────
+
+    #[test]
+    fn detect_outliers_iqr_populates_fences() {
+        let col = Column::numeric(
+            vec![1.0, 2.0, 3.0, 2.5, 100.0, 2.0, 3.0, 2.0],
+            ValidityBitmap::all_valid(8),
+        );
+        let r = detect_outliers(&col, OutlierMethod::Iqr).unwrap();
+        assert!(r.lower_fence.is_finite());
+        assert!(r.upper_fence.is_finite());
+        assert!(r.upper_fence < 100.0); // 100 is outlier
+        assert!(r.center.is_finite());
+        assert!(r.spread > 0.0);
+    }
+
+    #[test]
+    fn detect_outliers_slice_iqr_basic() {
+        let data = [1.0, 2.0, 3.0, 2.5, 100.0, 2.0, 3.0, 2.0];
+        let r = detect_outliers_slice(&data, OutlierMethod::Iqr).unwrap();
+        assert!(r.indices.contains(&4));
+        assert!(r.upper_fence < 100.0);
+    }
+
+    #[test]
+    fn detect_outliers_slice_skips_non_finite() {
+        let data = [1.0, 2.0, 3.0, f64::NAN, 100.0, 2.0, 3.0, f64::INFINITY];
+        let r = detect_outliers_slice(&data, OutlierMethod::Iqr).unwrap();
+        // Outlier at original index 4 (100.0); NaN/Inf at 3 and 7 are excluded
+        assert!(r.indices.contains(&4));
+        assert!(!r.indices.contains(&3));
+        assert!(!r.indices.contains(&7));
+    }
+
+    #[test]
+    fn detect_outliers_slice_zscore_fences() {
+        let data: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let r = detect_outliers_slice(&data, OutlierMethod::Zscore).unwrap();
+        let expected_upper = r.center + 3.0 * r.spread;
+        let expected_lower = r.center - 3.0 * r.spread;
+        assert!((r.upper_fence - expected_upper).abs() < 1e-9);
+        assert!((r.lower_fence - expected_lower).abs() < 1e-9);
+    }
+
+    #[test]
+    fn detect_outliers_modified_zscore_fence_matches_threshold() {
+        let data: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let r = detect_outliers_slice(&data, OutlierMethod::ModifiedZscore).unwrap();
+        // Hampel scale: σ̂ = MAD / 0.6745; fence = median ± 3.5 · σ̂
+        let scale = r.spread / 0.6745;
+        let expected_upper = r.center + 3.5 * scale;
+        assert!((r.upper_fence - expected_upper).abs() < 1e-9);
+    }
+
+    #[test]
+    fn detect_outliers_too_few_returns_nan_fences() {
+        let data = [1.0, 2.0];
+        let r = detect_outliers_slice(&data, OutlierMethod::Iqr).unwrap();
+        assert_eq!(r.count, 0);
+        assert!(r.lower_fence.is_nan());
+        assert!(r.upper_fence.is_nan());
     }
 }
