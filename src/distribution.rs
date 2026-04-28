@@ -192,7 +192,7 @@ pub struct DistributionAnalysis {
 ///
 /// - [`InsightError::InsufficientData`] if fewer than 2 observations
 /// - [`InsightError::MissingValues`] if data contains NaN
-/// - [`InsightError::NonNumericColumn`] if data contains infinite values
+/// - [`InsightError::DegenerateData`] if data contains infinite values
 ///
 /// # Example
 ///
@@ -227,8 +227,8 @@ pub fn distribution_analysis(
 
     let inf_count = data.iter().filter(|v| v.is_infinite()).count();
     if inf_count > 0 {
-        return Err(InsightError::NonNumericColumn {
-            column: "data".to_string(),
+        return Err(InsightError::DegenerateData {
+            reason: format!("input contains {inf_count} non-finite (infinite) value(s)"),
         });
     }
 
@@ -675,7 +675,12 @@ mod tests {
         let data = vec![1.0, f64::INFINITY, 3.0];
         let config = DistributionConfig::default();
         let err = distribution_analysis(&data, &config).unwrap_err();
-        assert!(matches!(err, InsightError::NonNumericColumn { .. }));
+        match err {
+            InsightError::DegenerateData { reason } => {
+                assert!(reason.contains("non-finite") || reason.contains("infinite"));
+            }
+            other => panic!("expected DegenerateData, got {other:?}"),
+        }
     }
 
     #[test]

@@ -76,7 +76,11 @@ pub fn validate_clean_data(columns: &[Vec<f64>], names: &[String]) -> Result<(),
 
         let inf_count = col.iter().filter(|v| v.is_infinite()).count();
         if inf_count > 0 {
-            return Err(InsightError::NonNumericColumn { column: name });
+            return Err(InsightError::DegenerateData {
+                reason: format!(
+                    "column '{name}' contains {inf_count} non-finite (infinite) value(s)"
+                ),
+            });
         }
     }
 
@@ -810,7 +814,20 @@ mod tests {
         let data = vec![vec![1.0, f64::INFINITY, 3.0]];
         let names = vec!["a".into()];
         let err = validate_clean_data(&data, &names).unwrap_err();
-        assert!(matches!(err, InsightError::NonNumericColumn { .. }));
+        match err {
+            InsightError::DegenerateData { reason } => {
+                assert!(reason.contains("non-finite") || reason.contains("infinite"));
+            }
+            other => panic!("expected DegenerateData, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_nan_returns_missing_values() {
+        let data = vec![vec![1.0, 2.0, f64::NAN]];
+        let names = vec!["a".into()];
+        let err = validate_clean_data(&data, &names).unwrap_err();
+        assert!(matches!(err, InsightError::MissingValues { .. }));
     }
 
     #[test]

@@ -212,10 +212,13 @@ pub fn feature_analysis(
                 actual: feat.len(),
             });
         }
-        for &v in feat {
-            if v.is_nan() || v.is_infinite() {
-                return Err(InsightError::NonNumericColumn {
-                    column: names[i].clone(),
+        for (j, &v) in feat.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(InsightError::DegenerateData {
+                    reason: format!(
+                        "non-finite value at row {j} of feature '{}'",
+                        names[i]
+                    ),
                 });
             }
         }

@@ -164,10 +164,10 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
                 actual: point.len(),
             });
         }
-        for &v in point {
-            if v.is_nan() || v.is_infinite() {
-                return Err(InsightError::NonNumericColumn {
-                    column: format!("point[{i}]"),
+        for (j, &v) in point.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(InsightError::DegenerateData {
+                    reason: format!("non-finite value at point {i}, dimension {j}"),
                 });
             }
         }
@@ -590,10 +590,9 @@ pub struct DbscanResult {
 ///
 /// # Errors
 ///
-/// - [`InsightError::DegenerateData`] if data is empty
+/// - [`InsightError::DegenerateData`] if data is empty or contains NaN/infinite values
 /// - [`InsightError::InvalidParameter`] if min_samples < 2 or epsilon <= 0
 /// - [`InsightError::DimensionMismatch`] if points have different dimensions
-/// - [`InsightError::NonNumericColumn`] if data contains NaN or infinite values
 ///
 /// # Example
 ///
@@ -628,8 +627,12 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
     }
 
     if !config.epsilon.is_finite() || config.epsilon <= 0.0 {
-        return Err(InsightError::NonNumericColumn {
-            column: "epsilon".to_string(),
+        return Err(InsightError::InvalidParameter {
+            name: "epsilon".to_string(),
+            message: format!(
+                "must be finite and > 0, got {}",
+                config.epsilon
+            ),
         });
     }
 
@@ -641,10 +644,10 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
                 actual: point.len(),
             });
         }
-        for &v in point {
-            if v.is_nan() || v.is_infinite() {
-                return Err(InsightError::NonNumericColumn {
-                    column: format!("point[{i}]"),
+        for (j, &v) in point.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(InsightError::DegenerateData {
+                    reason: format!("non-finite value at point {i}, dimension {j}"),
                 });
             }
         }
@@ -920,10 +923,10 @@ pub fn hierarchical(
                 actual: point.len(),
             });
         }
-        for &v in point {
-            if v.is_nan() || v.is_infinite() {
-                return Err(InsightError::NonNumericColumn {
-                    column: format!("point[{i}]"),
+        for (j, &v) in point.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(InsightError::DegenerateData {
+                    reason: format!("non-finite value at point {i}, dimension {j}"),
                 });
             }
         }
@@ -1304,10 +1307,10 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
                 actual: point.len(),
             });
         }
-        for &v in point {
-            if v.is_nan() || v.is_infinite() {
-                return Err(InsightError::NonNumericColumn {
-                    column: format!("point[{i}]"),
+        for (j, &v) in point.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(InsightError::DegenerateData {
+                    reason: format!("non-finite value at point {i}, dimension {j}"),
                 });
             }
         }
@@ -2158,10 +2161,10 @@ pub fn mini_batch_kmeans(
                 actual: point.len(),
             });
         }
-        for &v in point {
-            if v.is_nan() || v.is_infinite() {
-                return Err(InsightError::NonNumericColumn {
-                    column: format!("point[{i}]"),
+        for (j, &v) in point.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(InsightError::DegenerateData {
+                    reason: format!("non-finite value at point {i}, dimension {j}"),
                 });
             }
         }

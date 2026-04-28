@@ -137,10 +137,10 @@ pub fn pca(data: &[Vec<f64>], config: &PcaConfig) -> Result<PcaResult, InsightEr
                 actual: point.len(),
             });
         }
-        for &v in point {
-            if v.is_nan() || v.is_infinite() {
-                return Err(InsightError::NonNumericColumn {
-                    column: format!("point[{i}]"),
+        for (j, &v) in point.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(InsightError::DegenerateData {
+                    reason: format!("non-finite value at point {i}, dimension {j}"),
                 });
             }
         }
