@@ -2845,9 +2845,8 @@ mod tests {
             n_high_pairs: 0,
         };
 
-        let rc = unsafe {
-            insight_correlation(data.as_ptr(), 5, 3, INSIGHT_CORR_PEARSON, &mut result)
-        };
+        let rc =
+            unsafe { insight_correlation(data.as_ptr(), 5, 3, INSIGHT_CORR_PEARSON, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_vars, 3);
 
@@ -2871,9 +2870,8 @@ mod tests {
             matrix: ptr::null_mut(),
             n_high_pairs: 0,
         };
-        let rc = unsafe {
-            insight_correlation(ptr::null(), 5, 3, INSIGHT_CORR_PEARSON, &mut result)
-        };
+        let rc =
+            unsafe { insight_correlation(ptr::null(), 5, 3, INSIGHT_CORR_PEARSON, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
@@ -2885,9 +2883,8 @@ mod tests {
             matrix: ptr::null_mut(),
             n_high_pairs: 0,
         };
-        let rc = unsafe {
-            insight_correlation(data.as_ptr(), 1, 2, INSIGHT_CORR_PEARSON, &mut result)
-        };
+        let rc =
+            unsafe { insight_correlation(data.as_ptr(), 1, 2, INSIGHT_CORR_PEARSON, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
     }
 
@@ -2899,9 +2896,7 @@ mod tests {
             matrix: ptr::null_mut(),
             n_high_pairs: 0,
         };
-        let rc = unsafe {
-            insight_correlation(data.as_ptr(), 5, 3, 99, &mut result)
-        };
+        let rc = unsafe { insight_correlation(data.as_ptr(), 5, 3, 99, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
     }
 
@@ -2920,9 +2915,8 @@ mod tests {
             matrix: ptr::null_mut(),
             n_high_pairs: 0,
         };
-        let rc = unsafe {
-            insight_correlation(data.as_ptr(), 5, 3, INSIGHT_CORR_KENDALL, &mut result)
-        };
+        let rc =
+            unsafe { insight_correlation(data.as_ptr(), 5, 3, INSIGHT_CORR_KENDALL, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_vars, 3);
 

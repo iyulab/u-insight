@@ -629,10 +629,7 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
     if !config.epsilon.is_finite() || config.epsilon <= 0.0 {
         return Err(InsightError::InvalidParameter {
             name: "epsilon".to_string(),
-            message: format!(
-                "must be finite and > 0, got {}",
-                config.epsilon
-            ),
+            message: format!("must be finite and > 0, got {}", config.epsilon),
         });
     }
 

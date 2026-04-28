@@ -376,7 +376,9 @@ pub fn vif_analysis(
     validate_clean_data(columns, names)?;
     let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
     let v = u_analytics::regression::vif(&refs).ok_or_else(|| InsightError::DegenerateData {
-        reason: "VIF computation failed (insufficient data, length mismatch, or near-zero variance)".into(),
+        reason:
+            "VIF computation failed (insufficient data, length mismatch, or near-zero variance)"
+                .into(),
     })?;
     let high_vif_columns: Vec<u32> = v
         .iter()
@@ -400,16 +402,13 @@ pub fn vif_analysis(
 ///
 /// # Errors
 /// - Same as [`vif_analysis`].
-pub fn condition_number(
-    columns: &[Vec<f64>],
-    names: &[String],
-) -> Result<f64, InsightError> {
+pub fn condition_number(columns: &[Vec<f64>], names: &[String]) -> Result<f64, InsightError> {
     validate_clean_data(columns, names)?;
     let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
-    u_analytics::regression::condition_number(&refs).ok_or_else(|| {
-        InsightError::DegenerateData {
-            reason: "condition number computation failed (insufficient data or eigendecomposition failed)".into(),
-        }
+    u_analytics::regression::condition_number(&refs).ok_or_else(|| InsightError::DegenerateData {
+        reason:
+            "condition number computation failed (insufficient data or eigendecomposition failed)"
+                .into(),
     })
 }
 
@@ -976,8 +975,8 @@ mod tests {
     fn kendall_correlation() {
         let data = vec![
             vec![1.0, 2.0, 3.0, 4.0, 5.0],
-            vec![1.0, 2.0, 3.0, 4.0, 5.0],  // perfect concordance
-            vec![5.0, 4.0, 3.0, 2.0, 1.0],  // perfect discordance
+            vec![1.0, 2.0, 3.0, 4.0, 5.0], // perfect concordance
+            vec![5.0, 4.0, 3.0, 2.0, 1.0], // perfect discordance
         ];
         let names = vec!["a".into(), "b".into(), "c".into()];
         let config = CorrelationConfig {

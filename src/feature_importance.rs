@@ -215,10 +215,7 @@ pub fn feature_analysis(
         for (j, &v) in feat.iter().enumerate() {
             if !v.is_finite() {
                 return Err(InsightError::DegenerateData {
-                    reason: format!(
-                        "non-finite value at row {j} of feature '{}'",
-                        names[i]
-                    ),
+                    reason: format!("non-finite value at row {j} of feature '{}'", names[i]),
                 });
             }
         }
