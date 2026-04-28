@@ -96,6 +96,8 @@ pub enum CorrelationMethod {
     Pearson,
     /// Spearman rank correlation.
     Spearman,
+    /// Kendall tau-b rank correlation (handles ties).
+    Kendall,
 }
 
 /// Configuration for correlation analysis.
@@ -168,6 +170,7 @@ pub fn correlation_analysis(
     let matrix = match config.method {
         CorrelationMethod::Pearson => u_analytics::correlation::correlation_matrix(&refs),
         CorrelationMethod::Spearman => u_analytics::correlation::spearman_matrix(&refs),
+        CorrelationMethod::Kendall => u_analytics::correlation::kendall_matrix(&refs),
     }
     .ok_or_else(|| InsightError::DegenerateData {
         reason: "correlation matrix computation failed (possible constant columns or zero-variance data)".into(),
@@ -188,6 +191,9 @@ pub fn correlation_analysis(
                     }
                     CorrelationMethod::Spearman => {
                         u_analytics::correlation::spearman(refs[i], refs[j])
+                    }
+                    CorrelationMethod::Kendall => {
+                        u_analytics::correlation::kendall_tau_b(refs[i], refs[j])
                     }
                 };
 
@@ -890,6 +896,42 @@ mod tests {
         };
         let result = correlation_analysis(&data, &names, &config).unwrap();
         assert!((result.matrix.get(0, 1) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn kendall_correlation() {
+        let data = vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![1.0, 2.0, 3.0, 4.0, 5.0],  // perfect concordance
+            vec![5.0, 4.0, 3.0, 2.0, 1.0],  // perfect discordance
+        ];
+        let names = vec!["a".into(), "b".into(), "c".into()];
+        let config = CorrelationConfig {
+            method: CorrelationMethod::Kendall,
+            high_threshold: 0.7,
+        };
+        let result = correlation_analysis(&data, &names, &config).unwrap();
+        assert_eq!(result.method, CorrelationMethod::Kendall);
+        assert!((result.matrix.get(0, 1) - 1.0).abs() < 1e-10);
+        assert!((result.matrix.get(0, 2) + 1.0).abs() < 1e-10);
+        // both off-diagonal pairs above |0.7|
+        assert!(result.high_pairs.len() >= 2);
+    }
+
+    #[test]
+    fn kendall_correlation_with_ties() {
+        let data = vec![
+            vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0],
+            vec![1.0, 2.0, 3.0, 3.0, 4.0, 5.0],
+        ];
+        let names = vec!["a".into(), "b".into()];
+        let config = CorrelationConfig {
+            method: CorrelationMethod::Kendall,
+            high_threshold: 0.5,
+        };
+        let result = correlation_analysis(&data, &names, &config).unwrap();
+        // tau-b correctly handles ties; expect high but not perfect
+        assert!(result.matrix.get(0, 1) > 0.7);
     }
 
     #[test]
