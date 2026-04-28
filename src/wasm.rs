@@ -1113,6 +1113,101 @@ pub fn feature_importance(data_json: JsValue) -> Result<JsValue, JsValue> {
     }
 }
 
+// ── Multicollinearity Diagnostics (VIF / Condition Number) ───────────
+
+/// Variance Inflation Factor diagnostics for column-major numeric data.
+///
+/// # Input
+/// ```json
+/// { "col1": [...], "col2": [...], "_threshold": 10.0 }
+/// ```
+/// `_threshold` is optional (default 10.0).
+///
+/// # Output
+/// `{ vif_per_column, high_vif_columns, threshold, names }`
+#[wasm_bindgen]
+pub fn vif_diagnostic(data_json: JsValue) -> Result<JsValue, JsValue> {
+    let mut raw: HashMap<String, serde_json::Value> =
+        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+
+    let threshold = raw
+        .remove("_threshold")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(10.0);
+
+    if raw.is_empty() {
+        return Err(js_err("input must contain at least one numeric column"));
+    }
+
+    let mut names: Vec<String> = raw.keys().cloned().collect();
+    names.sort();
+    let columns: Vec<Vec<f64>> = names
+        .iter()
+        .map(|n| {
+            raw[n]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+        .collect();
+
+    let r = crate::analysis::vif_analysis(&columns, &names, threshold).map_err(js_err)?;
+
+    #[derive(Serialize)]
+    struct Dto {
+        vif_per_column: Vec<f64>,
+        high_vif_columns: Vec<u32>,
+        threshold: f64,
+        names: Vec<String>,
+    }
+    serde_wasm_bindgen::to_value(&Dto {
+        vif_per_column: r.vif_per_column,
+        high_vif_columns: r.high_vif_columns,
+        threshold: r.threshold,
+        names: r.names,
+    })
+    .map_err(js_err)
+}
+
+/// 2-norm condition number of the sample covariance matrix.
+///
+/// # Input
+/// ```json
+/// { "col1": [...], "col2": [...] }
+/// ```
+///
+/// # Output
+/// `{ condition_number, names }`
+///
+/// Standard threshold: `cond > 30` indicates multicollinearity (Belsley 1991).
+/// Returns `Infinity` for numerically singular input.
+#[wasm_bindgen]
+pub fn condition_number_diagnostic(data_json: JsValue) -> Result<JsValue, JsValue> {
+    let raw: HashMap<String, Vec<f64>> =
+        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+
+    if raw.is_empty() {
+        return Err(js_err("input must contain at least one numeric column"));
+    }
+
+    let mut names: Vec<String> = raw.keys().cloned().collect();
+    names.sort();
+    let columns: Vec<Vec<f64>> = names.iter().map(|n| raw[n].clone()).collect();
+
+    let cond = crate::analysis::condition_number(&columns, &names).map_err(js_err)?;
+
+    #[derive(Serialize)]
+    struct Dto {
+        condition_number: f64,
+        names: Vec<String>,
+    }
+    serde_wasm_bindgen::to_value(&Dto {
+        condition_number: cond,
+        names,
+    })
+    .map_err(js_err)
+}
+
 // ── Univariate Outlier Detection ──────────────────────────────────────
 
 /// Univariate outlier detection on a flat numeric vector.

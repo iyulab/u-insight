@@ -339,6 +339,80 @@ pub fn regression_analysis(
     }
 }
 
+// ── Multicollinearity Diagnostics ────────────────────────────────────
+
+/// Result of standalone VIF analysis.
+#[derive(Debug, Clone)]
+pub struct VifAnalysis {
+    /// VIF for each column (same order as input).
+    pub vif_per_column: Vec<f64>,
+    /// Indices of columns with VIF > `threshold`.
+    pub high_vif_columns: Vec<u32>,
+    /// Threshold used.
+    pub threshold: f64,
+    /// Column names (echoed back from input).
+    pub names: Vec<String>,
+}
+
+/// Computes VIF for each column in a column-major numeric dataset.
+///
+/// `VIF_j = 1 / (1 - R²_j)`, where `R²_j` is the coefficient of determination
+/// from regressing column `j` on all others. Columns flagged in
+/// `high_vif_columns` exceed `threshold` (typical: 5 moderate, 10 severe).
+///
+/// # Errors
+/// - [`InsightError::DimensionMismatch`] if column lengths differ
+/// - [`InsightError::MissingValues`] if any column contains NaN
+/// - [`InsightError::DegenerateData`] if any column contains Inf or VIF
+///   computation fails (insufficient rows / near-zero variance)
+///
+/// # References
+/// Marquardt (1970); Belsley/Kuh/Welsch (1980).
+pub fn vif_analysis(
+    columns: &[Vec<f64>],
+    names: &[String],
+    threshold: f64,
+) -> Result<VifAnalysis, InsightError> {
+    validate_clean_data(columns, names)?;
+    let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
+    let v = u_analytics::regression::vif(&refs).ok_or_else(|| InsightError::DegenerateData {
+        reason: "VIF computation failed (insufficient data, length mismatch, or near-zero variance)".into(),
+    })?;
+    let high_vif_columns: Vec<u32> = v
+        .iter()
+        .enumerate()
+        .filter(|(_, &r)| r > threshold)
+        .map(|(i, _)| i as u32)
+        .collect();
+    Ok(VifAnalysis {
+        vif_per_column: v,
+        high_vif_columns,
+        threshold,
+        names: names.to_vec(),
+    })
+}
+
+/// Computes the 2-norm condition number of the sample covariance matrix.
+///
+/// Returns `f64::INFINITY` for numerically singular input (smallest
+/// eigenvalue below 1e-15). Standard threshold: `cond > 30` indicates
+/// multicollinearity (Belsley 1991).
+///
+/// # Errors
+/// - Same as [`vif_analysis`].
+pub fn condition_number(
+    columns: &[Vec<f64>],
+    names: &[String],
+) -> Result<f64, InsightError> {
+    validate_clean_data(columns, names)?;
+    let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
+    u_analytics::regression::condition_number(&refs).ok_or_else(|| {
+        InsightError::DegenerateData {
+            reason: "condition number computation failed (insufficient data or eigendecomposition failed)".into(),
+        }
+    })
+}
+
 // ── Cramér's V ──────────────────────────────────────────────────────
 
 /// Result of Cramér's V computation.
@@ -932,6 +1006,60 @@ mod tests {
         let result = correlation_analysis(&data, &names, &config).unwrap();
         // tau-b correctly handles ties; expect high but not perfect
         assert!(result.matrix.get(0, 1) > 0.7);
+    }
+
+    // ── Multicollinearity diagnostics ────────────────────────────
+
+    #[test]
+    fn vif_analysis_collinear_flags() {
+        let x1: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let x2: Vec<f64> = x1.iter().map(|&v| v * 2.0 + 1e-3).collect();
+        let cols = vec![x1, x2];
+        let names = vec!["x1".into(), "x2".into()];
+        let r = vif_analysis(&cols, &names, 10.0).unwrap();
+        assert!(r.vif_per_column[0] > 10.0);
+        assert!(r.high_vif_columns.contains(&0));
+        assert!(r.high_vif_columns.contains(&1));
+        assert_eq!(r.threshold, 10.0);
+    }
+
+    #[test]
+    fn vif_analysis_independent_no_flag() {
+        let x1: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let x2: Vec<f64> = vec![5.0, 9.0, 1.0, 7.0, 3.0, 8.0, 2.0, 6.0, 4.0, 10.0];
+        let cols = vec![x1, x2];
+        let names = vec!["x1".into(), "x2".into()];
+        let r = vif_analysis(&cols, &names, 10.0).unwrap();
+        assert!(r.high_vif_columns.is_empty());
+    }
+
+    #[test]
+    fn condition_number_orthogonal_small() {
+        let x1 = vec![1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
+        let x2 = vec![1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0];
+        let cols = vec![x1, x2];
+        let names = vec!["x1".into(), "x2".into()];
+        let c = condition_number(&cols, &names).unwrap();
+        assert!(c < 5.0);
+    }
+
+    #[test]
+    fn condition_number_collinear_huge() {
+        let x1: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let x2: Vec<f64> = x1.iter().map(|&v| v * 2.0 + 1e-6).collect();
+        let cols = vec![x1, x2];
+        let names = vec!["x1".into(), "x2".into()];
+        let c = condition_number(&cols, &names).unwrap();
+        assert!(c > 1e5 || c.is_infinite());
+    }
+
+    #[test]
+    fn vif_analysis_rejects_nan() {
+        let x1 = vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0];
+        let x2 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let cols = vec![x1, x2];
+        let names = vec!["x1".into(), "x2".into()];
+        assert!(vif_analysis(&cols, &names, 10.0).is_err());
     }
 
     #[test]
