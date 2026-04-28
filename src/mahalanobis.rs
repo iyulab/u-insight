@@ -97,11 +97,13 @@ pub struct MahalanobisResult {
 ///
 /// # Errors
 ///
-/// Returns `InsightError` if:
-/// - `data` has fewer than `p + 1` rows (where p = dimensionality)
-/// - Points have inconsistent dimensions
-/// - Points contain non-finite values
-/// - The covariance matrix is singular
+/// Returns `InsightError` with specific categories:
+/// - [`InsightError::InsufficientData`] — fewer than `p + 1` rows (where p = dimensionality)
+/// - [`InsightError::DimensionMismatch`] — points with inconsistent dimensions
+/// - [`InsightError::DegenerateData`] — non-finite values, near-zero variance columns,
+///   or singular covariance matrix (likely collinear columns). The `reason` field
+///   includes column indices when known.
+/// - [`InsightError::ComputationFailed`] — internal matrix operations failed.
 ///
 /// # Example
 ///
@@ -145,15 +147,19 @@ pub fn mahalanobis(
     }
 
     // Validate dimensions and values
-    for point in data.iter() {
+    for (row_idx, point) in data.iter().enumerate() {
         if point.len() != p {
             return Err(InsightError::DimensionMismatch {
                 expected: p,
                 actual: point.len(),
             });
         }
-        if point.iter().any(|v| !v.is_finite()) {
-            return Err(InsightError::Io("non-finite value in data".into()));
+        if let Some(col_idx) = point.iter().position(|v| !v.is_finite()) {
+            return Err(InsightError::DegenerateData {
+                reason: format!(
+                    "non-finite value at row {row_idx}, column {col_idx}"
+                ),
+            });
         }
     }
 
@@ -188,12 +194,28 @@ pub fn mahalanobis(
         }
     }
 
+    // Pre-screen for zero-variance columns (covariance matrix diagonal).
+    // A column with variance ≈ 0 makes the covariance matrix singular and
+    // is the most common cause of Mahalanobis failure on real-world data.
+    let zero_var_cols: Vec<usize> = (0..p)
+        .filter(|&c| cov_data[c * p + c].abs() < 1e-12)
+        .collect();
+    if !zero_var_cols.is_empty() {
+        return Err(InsightError::DegenerateData {
+            reason: format!(
+                "near-zero variance in column(s) {zero_var_cols:?}; covariance matrix would be singular"
+            ),
+        });
+    }
+
     // Build Matrix and invert
-    let cov_mat = Matrix::new(p, p, cov_data)
-        .map_err(|e| InsightError::Io(format!("covariance matrix construction: {e}")))?;
-    let inv_cov = cov_mat
-        .inverse()
-        .map_err(|_| InsightError::Io("covariance matrix is singular or near-singular".into()))?;
+    let cov_mat = Matrix::new(p, p, cov_data).map_err(|e| InsightError::ComputationFailed {
+        operation: "covariance matrix construction".into(),
+        detail: e.to_string(),
+    })?;
+    let inv_cov = cov_mat.inverse().map_err(|_| InsightError::DegenerateData {
+        reason: "covariance matrix is singular or near-singular (likely collinear columns)".into(),
+    })?;
 
     // Compute squared Mahalanobis distance for each point
     let mut distances = Vec::with_capacity(n);
@@ -368,7 +390,72 @@ mod tests {
             vec![4.0, 5.0],
             vec![6.0, 7.0],
         ];
-        assert!(mahalanobis(&data, &MahalanobisConfig::default()).is_err());
+        let err = mahalanobis(&data, &MahalanobisConfig::default()).unwrap_err();
+        // Must surface as DegenerateData with row/column locator (not Io).
+        match err {
+            InsightError::DegenerateData { reason } => {
+                assert!(
+                    reason.contains("row 1") && reason.contains("column 0"),
+                    "reason should pinpoint the offending cell, got: {reason}"
+                );
+            }
+            other => panic!("expected DegenerateData, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infinity_rejected_as_degenerate() {
+        let data = vec![
+            vec![1.0, 2.0],
+            vec![3.0, f64::INFINITY],
+            vec![4.0, 5.0],
+            vec![6.0, 7.0],
+        ];
+        let err = mahalanobis(&data, &MahalanobisConfig::default()).unwrap_err();
+        assert!(matches!(err, InsightError::DegenerateData { .. }));
+    }
+
+    #[test]
+    fn zero_variance_column_diagnosed() {
+        // Column 0 is constant → zero variance → singular covariance.
+        // Must be diagnosed as DegenerateData with the offending column index in reason.
+        let data: Vec<Vec<f64>> = (0..20)
+            .map(|i| {
+                let t = i as f64 * 0.1;
+                vec![5.0, t.sin(), t.cos()]
+            })
+            .collect();
+        let err = mahalanobis(&data, &MahalanobisConfig::default()).unwrap_err();
+        match err {
+            InsightError::DegenerateData { reason } => {
+                assert!(
+                    reason.contains('0'),
+                    "reason should mention column 0, got: {reason}"
+                );
+                assert!(
+                    reason.contains("variance") || reason.contains("singular"),
+                    "reason should explain the cause, got: {reason}"
+                );
+            }
+            other => panic!("expected DegenerateData, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collinear_columns_diagnosed_as_singular() {
+        // Column 1 = 2 × column 0 → perfect collinearity → singular covariance.
+        // Pre-screen passes (variance > 0), so this exercises the inverse() path.
+        let data: Vec<Vec<f64>> = (0..20)
+            .map(|i| {
+                let t = i as f64 * 0.5;
+                vec![t, 2.0 * t]
+            })
+            .collect();
+        let err = mahalanobis(&data, &MahalanobisConfig::default()).unwrap_err();
+        assert!(
+            matches!(err, InsightError::DegenerateData { .. }),
+            "collinear input must yield DegenerateData, got {err:?}"
+        );
     }
 
     #[test]
