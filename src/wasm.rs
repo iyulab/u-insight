@@ -36,6 +36,25 @@ fn js_err(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
 
+/// Strict column-extractor for column-major JSON inputs.
+///
+/// WASM is a system boundary — we reject malformed input loudly instead of
+/// silently coercing it to an empty / partial vector. Returns an `InvalidInput`-style
+/// JS error if the value is not a JSON array, or if any element is not a JSON number.
+fn extract_numeric_array(value: &serde_json::Value, name: &str) -> Result<Vec<f64>, JsValue> {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| js_err(format!("column '{name}' must be a numeric array")))?;
+    let parsed: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
+    if parsed.len() != arr.len() {
+        return Err(js_err(format!(
+            "column '{name}' contains {} non-numeric value(s)",
+            arr.len() - parsed.len()
+        )));
+    }
+    Ok(parsed)
+}
+
 // ── Serializable DTOs ─────────────────────────────────────────────────
 
 /// Descriptive statistics for a single numeric column.
@@ -281,13 +300,8 @@ pub fn correlation_matrix(data_json: JsValue) -> Result<JsValue, JsValue> {
 
     let columns: Vec<Vec<f64>> = names
         .iter()
-        .map(|n| {
-            raw[n]
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())
-                .unwrap_or_default()
-        })
-        .collect();
+        .map(|n| extract_numeric_array(&raw[n], n))
+        .collect::<Result<_, _>>()?;
 
     use crate::analysis::{correlation_analysis, CorrelationConfig, CorrelationMethod};
     let method = match method_str.as_str() {
@@ -1169,13 +1183,8 @@ pub fn vif_diagnostic(data_json: JsValue) -> Result<JsValue, JsValue> {
     names.sort();
     let columns: Vec<Vec<f64>> = names
         .iter()
-        .map(|n| {
-            raw[n]
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>())
-                .unwrap_or_default()
-        })
-        .collect();
+        .map(|n| extract_numeric_array(&raw[n], n))
+        .collect::<Result<_, _>>()?;
 
     let r = crate::analysis::vif_analysis(&columns, &names, threshold).map_err(js_err)?;
 
