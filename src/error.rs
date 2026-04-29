@@ -11,8 +11,6 @@ pub enum InsightError {
     JsonParse { message: String },
     /// Column contains missing values where none are allowed.
     MissingValues { column: String, count: usize },
-    /// Column is not numeric where numeric data is required.
-    NonNumericColumn { column: String },
     /// Insufficient data rows/samples for the requested operation.
     InsufficientData { min_required: usize, actual: usize },
     /// Invalid parameter value for the requested operation.
@@ -40,9 +38,6 @@ impl fmt::Display for InsightError {
             }
             Self::MissingValues { column, count } => {
                 write!(f, "column '{column}' has {count} missing values")
-            }
-            Self::NonNumericColumn { column } => {
-                write!(f, "column '{column}' is not numeric")
             }
             Self::InsufficientData {
                 min_required,

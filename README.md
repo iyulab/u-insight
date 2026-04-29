@@ -7,6 +7,10 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
+## What's New in 0.9.1
+
+- **BREAKING — Rust**: `InsightError::NonNumericColumn` variant removed. The 0.9.0 audit redirected all internal call sites to `DegenerateData`, leaving the variant unused. Removed per `Delete over deprecate` policy. External `match` arms over `InsightError` must drop the corresponding branch.
+
 ## What's New in 0.9.0
 
 - **Kendall tau-b correlation** added to `CorrelationMethod` (Pearson / Spearman / Kendall)
