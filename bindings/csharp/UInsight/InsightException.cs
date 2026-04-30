@@ -74,10 +74,15 @@ public class InsightException : Exception
     /// <summary>
     /// Creates an InsightException from an error code and optional native error detail.
     /// </summary>
+    /// <remarks>
+    /// The native side already produces a fully-formatted message via Rust's Display impl
+    /// (e.g. "degenerate data: correlation matrix computation failed (...)").
+    /// We surface that message verbatim and rely on <see cref="Category"/> for typed classification,
+    /// avoiding "Degenerate data: degenerate data: ..." prefix duplication.
+    /// </remarks>
     internal static InsightException FromCode(int code, string? nativeError)
     {
-        var baseMsg = Interop.NativeLibrary.GetErrorMessage(code);
-        var msg = nativeError is not null ? $"{baseMsg}: {nativeError}" : baseMsg;
+        var msg = nativeError ?? Interop.NativeLibrary.GetErrorMessage(code);
         return new InsightException(code, msg);
     }
 }

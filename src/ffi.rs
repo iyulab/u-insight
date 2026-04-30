@@ -24,8 +24,8 @@ use std::slice;
 
 use crate::analysis::mutual_info_classif;
 use crate::clustering::{
-    dbscan, gap_statistic, hdbscan, hierarchical, kmeans, mini_batch_kmeans, DbscanConfig,
-    HdbscanConfig, HierarchicalConfig, KMeansConfig, Linkage, MiniBatchKMeansConfig,
+    dbscan, gap_statistic, hdbscan, hierarchical, kmeans, mini_batch_kmeans, silhouette_samples,
+    DbscanConfig, HdbscanConfig, HierarchicalConfig, KMeansConfig, Linkage, MiniBatchKMeansConfig,
 };
 use crate::csv_parser::CsvParser;
 use crate::distribution::{distribution_analysis, DistributionConfig};
@@ -439,11 +439,24 @@ pub unsafe extern "C" fn insight_free_labels(labels: *mut u32, count: u32) {
 pub struct CPcaResult {
     /// Number of components retained.
     pub n_components: u32,
+    /// Number of original features (columns of input data).
+    pub n_features: u32,
+    /// Number of input rows (samples).
+    pub n_samples: u32,
     /// Explained variance ratios (length = n_components).
     /// Caller must free with `insight_free_f64_array`.
     pub explained_variance: *mut f64,
-    /// Number of variance values.
-    pub n_variance: u32,
+    /// Cumulative explained variance ratios (length = n_components).
+    /// Caller must free with `insight_free_f64_array`.
+    pub cumulative_variance: *mut f64,
+    /// Component loadings, row-major (length = n_components * n_features).
+    /// Row k (k-th component) contains the loading weights for original features.
+    /// Caller must free with `insight_free_f64_array`.
+    pub loadings: *mut f64,
+    /// Projected scores, row-major (length = n_samples * n_components).
+    /// Row i contains the PC-space coordinates of input row i.
+    /// Caller must free with `insight_free_f64_array`.
+    pub scores: *mut f64,
 }
 
 /// Runs PCA on row-major data.
@@ -451,7 +464,9 @@ pub struct CPcaResult {
 /// # Safety
 /// - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
 /// - `out` must point to a valid `CPcaResult`.
-/// - Caller must free `out.explained_variance` with `insight_free_f64_array`.
+/// - Caller must free each of `out.explained_variance`, `out.cumulative_variance`,
+///   `out.loadings`, `out.scores` with `insight_free_f64_array`, passing the
+///   appropriate length (see field docs).
 #[no_mangle]
 pub unsafe extern "C" fn insight_pca(
     data: *const f64,
@@ -482,16 +497,36 @@ pub unsafe extern "C" fn insight_pca(
             }
         };
 
-        let mut evr: Vec<f64> = pca_result.explained_variance_ratio;
-        let evr_ptr = evr.as_mut_ptr();
-        let evr_len = evr.len() as u32;
-        std::mem::forget(evr);
+        let n_components_actual = pca_result.n_components;
+        let n_features = pca_result.n_features;
+        let n_samples = points.len();
+
+        let evr_ptr = vec_to_raw(pca_result.explained_variance_ratio);
+        let cum_ptr = vec_to_raw(pca_result.cumulative_variance_ratio);
+
+        let mut loadings_flat: Vec<f64> =
+            Vec::with_capacity(n_components_actual.saturating_mul(n_features));
+        for row in &pca_result.loadings {
+            loadings_flat.extend_from_slice(row);
+        }
+        let loadings_ptr = vec_to_raw(loadings_flat);
+
+        let mut scores_flat: Vec<f64> =
+            Vec::with_capacity(n_samples.saturating_mul(n_components_actual));
+        for row in &pca_result.scores {
+            scores_flat.extend_from_slice(row);
+        }
+        let scores_ptr = vec_to_raw(scores_flat);
 
         unsafe {
             (*out) = CPcaResult {
-                n_components: pca_result.n_components as u32,
+                n_components: n_components_actual as u32,
+                n_features: n_features as u32,
+                n_samples: n_samples as u32,
                 explained_variance: evr_ptr,
-                n_variance: evr_len,
+                cumulative_variance: cum_ptr,
+                loadings: loadings_ptr,
+                scores: scores_ptr,
             };
         }
 
@@ -502,6 +537,101 @@ pub unsafe extern "C" fn insight_pca(
         Ok(code) => code,
         Err(_) => {
             set_last_error("panic in insight_pca");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+fn vec_to_raw(mut v: Vec<f64>) -> *mut f64 {
+    v.shrink_to_fit();
+    debug_assert_eq!(v.len(), v.capacity());
+    let ptr = v.as_mut_ptr();
+    std::mem::forget(v);
+    ptr
+}
+
+// ── Silhouette FFI ───────────────────────────────────────────────────
+
+/// C-compatible silhouette analysis result.
+#[repr(C)]
+pub struct CSilhouetteResult {
+    /// Mean silhouette across samples that had a defined silhouette.
+    pub avg: f64,
+    /// Per-sample silhouette scores (length = n_rows).
+    /// Caller must free with `insight_free_f64_array`.
+    pub per_sample: *mut f64,
+    /// Number of samples (mirrors n_rows the caller passed in).
+    pub n_samples: u32,
+}
+
+/// Computes silhouette scores for an existing clustering assignment.
+///
+/// Works with any clustering output (`KMeans`, `MiniBatchKMeans`, `Hierarchical`,
+/// `Dbscan`, `Hdbscan`) — the caller passes the already-computed `labels`.
+/// `k` is the number of distinct clusters represented in `labels` and is used
+/// only as an upper bound on the cluster-id loop.
+///
+/// # Safety
+/// - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
+/// - `labels` must point to `n_rows` u32 values, each `< k`.
+/// - `out` must point to a valid `CSilhouetteResult`.
+/// - Caller must free `out.per_sample` with `insight_free_f64_array(ptr, out.n_samples)`.
+#[no_mangle]
+pub unsafe extern "C" fn insight_silhouette(
+    data: *const f64,
+    n_rows: u32,
+    n_cols: u32,
+    labels: *const u32,
+    k: u32,
+    out: *mut CSilhouetteResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || labels.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let n = n_rows as usize;
+        let d = n_cols as usize;
+        if n == 0 || d == 0 {
+            set_last_error("empty input");
+            return INSIGHT_ERR_INVALID_INPUT;
+        }
+
+        let raw = unsafe { slice::from_raw_parts(data, n * d) };
+        let raw_labels = unsafe { slice::from_raw_parts(labels, n) };
+
+        let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
+        let labels_usize: Vec<usize> = raw_labels.iter().map(|&l| l as usize).collect();
+
+        // Validate label range
+        let k_usize = k as usize;
+        if let Some(&bad) = labels_usize.iter().find(|&&l| l >= k_usize) {
+            set_last_error(&format!(
+                "label {bad} out of range for k={k_usize}"
+            ));
+            return INSIGHT_ERR_INVALID_INPUT;
+        }
+
+        let analysis = silhouette_samples(&points, &labels_usize, k_usize);
+
+        let per_sample_ptr = vec_to_raw(analysis.per_sample);
+
+        unsafe {
+            (*out) = CSilhouetteResult {
+                avg: analysis.avg,
+                per_sample: per_sample_ptr,
+                n_samples: n as u32,
+            };
+        }
+
+        INSIGHT_OK
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_silhouette");
             INSIGHT_ERR_PANIC
         }
     }
@@ -2426,29 +2556,112 @@ mod tests {
         unsafe { insight_free_labels(result.labels, result.n_labels) };
     }
 
+    fn empty_pca_result() -> CPcaResult {
+        CPcaResult {
+            n_components: 0,
+            n_features: 0,
+            n_samples: 0,
+            explained_variance: ptr::null_mut(),
+            cumulative_variance: ptr::null_mut(),
+            loadings: ptr::null_mut(),
+            scores: ptr::null_mut(),
+        }
+    }
+
+    unsafe fn free_pca_result(result: &CPcaResult) {
+        insight_free_f64_array(result.explained_variance, result.n_components);
+        insight_free_f64_array(result.cumulative_variance, result.n_components);
+        insight_free_f64_array(
+            result.loadings,
+            result.n_components.saturating_mul(result.n_features),
+        );
+        insight_free_f64_array(
+            result.scores,
+            result.n_samples.saturating_mul(result.n_components),
+        );
+    }
+
     #[test]
     fn ffi_pca_basic() {
         // 4 points, 2D
         let data: Vec<f64> = vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0];
 
-        let mut result = CPcaResult {
-            n_components: 0,
-            explained_variance: ptr::null_mut(),
-            n_variance: 0,
-        };
-
+        let mut result = empty_pca_result();
         let rc = unsafe { insight_pca(data.as_ptr(), 4, 2, 1, 0, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_components, 1);
+        assert_eq!(result.n_features, 2);
+        assert_eq!(result.n_samples, 4);
 
         let evr =
-            unsafe { slice::from_raw_parts(result.explained_variance, result.n_variance as usize) };
+            unsafe { slice::from_raw_parts(result.explained_variance, result.n_components as usize) };
         assert!(
             (evr[0] - 1.0).abs() < 1e-10,
             "PC1 should explain all variance"
         );
 
-        unsafe { insight_free_f64_array(result.explained_variance, result.n_variance) };
+        unsafe { free_pca_result(&result) };
+    }
+
+    #[test]
+    fn ffi_pca_loadings_scores_shapes() {
+        // 5 samples, 3 features — synthetic correlated data
+        let data: Vec<f64> = vec![
+            1.0, 1.0, 0.0, //
+            2.0, 2.0, 0.0, //
+            3.0, 3.0, 0.0, //
+            4.0, 4.0, 0.0, //
+            5.0, 5.0, 0.0, //
+        ];
+
+        let mut result = empty_pca_result();
+        let rc = unsafe { insight_pca(data.as_ptr(), 5, 3, 2, 0, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_components, 2);
+        assert_eq!(result.n_features, 3);
+        assert_eq!(result.n_samples, 5);
+
+        // Cumulative variance is monotonic non-decreasing and sums consistently
+        let evr = unsafe {
+            slice::from_raw_parts(result.explained_variance, result.n_components as usize)
+        };
+        let cum = unsafe {
+            slice::from_raw_parts(result.cumulative_variance, result.n_components as usize)
+        };
+        assert!((cum[0] - evr[0]).abs() < 1e-10);
+        assert!(cum[1] >= cum[0] - 1e-10);
+        assert!((cum[1] - (evr[0] + evr[1])).abs() < 1e-10);
+
+        // Loadings: shape n_components × n_features, each row is unit-norm
+        let loadings = unsafe {
+            slice::from_raw_parts(
+                result.loadings,
+                (result.n_components * result.n_features) as usize,
+            )
+        };
+        for k in 0..result.n_components as usize {
+            let row = &loadings[k * result.n_features as usize
+                ..(k + 1) * result.n_features as usize];
+            let norm: f64 = row.iter().map(|x| x * x).sum::<f64>().sqrt();
+            assert!(
+                (norm - 1.0).abs() < 1e-6,
+                "loading row {k} should be unit-norm, got {norm}"
+            );
+        }
+
+        // Scores: shape n_samples × n_components
+        let scores = unsafe {
+            slice::from_raw_parts(
+                result.scores,
+                (result.n_samples * result.n_components) as usize,
+            )
+        };
+        assert_eq!(scores.len(), 5 * 2);
+        // Scores along PC1 should be monotonic for the correlated input above
+        let pc1: Vec<f64> = (0..5).map(|i| scores[i * 2]).collect();
+        assert!(pc1.windows(2).all(|w| w[1] >= w[0] - 1e-10) || pc1.windows(2).all(|w| w[1] <= w[0] + 1e-10));
+
+        unsafe { free_pca_result(&result) };
     }
 
     #[test]
@@ -2461,6 +2674,86 @@ mod tests {
             n_labels: 0,
         };
         let rc = unsafe { insight_kmeans(ptr::null(), 4, 2, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    // ── Silhouette FFI tests ─────────────────────────────────────
+
+    #[test]
+    fn ffi_silhouette_well_separated() {
+        // Two well-separated 2D clusters
+        let data: Vec<f64> = vec![
+            0.0, 0.0, 0.5, 0.5, 0.0, 0.5, 0.5, 0.0, // cluster A
+            10.0, 10.0, 10.5, 10.5, 10.0, 10.5, 10.5, 10.0, // cluster B
+        ];
+        let labels: Vec<u32> = vec![0, 0, 0, 0, 1, 1, 1, 1];
+
+        let mut result = CSilhouetteResult {
+            avg: 0.0,
+            per_sample: ptr::null_mut(),
+            n_samples: 0,
+        };
+        let rc = unsafe {
+            insight_silhouette(
+                data.as_ptr(),
+                8,
+                2,
+                labels.as_ptr(),
+                2,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_samples, 8);
+        assert!(
+            result.avg > 0.9,
+            "well-separated clusters should have high silhouette: {}",
+            result.avg
+        );
+
+        let per_sample =
+            unsafe { slice::from_raw_parts(result.per_sample, result.n_samples as usize) };
+        for &s in per_sample {
+            assert!(
+                (-1.0..=1.0).contains(&s),
+                "per-sample silhouette out of range: {s}"
+            );
+        }
+
+        unsafe { insight_free_f64_array(result.per_sample, result.n_samples) };
+    }
+
+    #[test]
+    fn ffi_silhouette_label_out_of_range() {
+        let data: Vec<f64> = vec![0.0, 0.0, 1.0, 1.0];
+        let labels: Vec<u32> = vec![0, 5]; // 5 >= k=2
+
+        let mut result = CSilhouetteResult {
+            avg: 0.0,
+            per_sample: ptr::null_mut(),
+            n_samples: 0,
+        };
+        let rc = unsafe {
+            insight_silhouette(
+                data.as_ptr(),
+                2,
+                2,
+                labels.as_ptr(),
+                2,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+    }
+
+    #[test]
+    fn ffi_silhouette_null_ptr() {
+        let mut result = CSilhouetteResult {
+            avg: 0.0,
+            per_sample: ptr::null_mut(),
+            n_samples: 0,
+        };
+        let rc = unsafe { insight_silhouette(ptr::null(), 4, 2, ptr::null(), 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 

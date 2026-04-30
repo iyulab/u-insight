@@ -157,6 +157,13 @@ struct KMeansDto {
     cluster_sizes: Vec<usize>,
 }
 
+/// Result of silhouette analysis.
+#[derive(Serialize)]
+struct SilhouetteDto {
+    avg: f64,
+    per_sample: Vec<f64>,
+}
+
 /// Result of PCA.
 #[derive(Serialize)]
 struct PcaDto {
@@ -370,6 +377,49 @@ pub fn kmeans(data_json: JsValue, k: usize) -> Result<JsValue, JsValue> {
         wcss: result.wcss,
         iterations: result.iterations,
         cluster_sizes: result.cluster_sizes,
+    };
+
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
+/// Computes silhouette scores for an existing clustering assignment.
+///
+/// # Input
+/// `data_json`: row-major points `[[x,y,...], ...]`
+/// `labels_json`: cluster id per sample `[0, 0, 1, 1, ...]` (each value `< k`)
+/// `k`: number of distinct clusters
+///
+/// # Output
+/// `{ avg, per_sample }` — `avg` is the mean silhouette across samples that
+/// had a defined silhouette; `per_sample[i]` is the silhouette of sample `i`
+/// (0.0 for singleton-cluster points).
+///
+/// O(n²) — use sparingly on very large inputs.
+#[wasm_bindgen]
+pub fn silhouette(
+    data_json: JsValue,
+    labels_json: JsValue,
+    k: usize,
+) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+    let labels: Vec<usize> = serde_wasm_bindgen::from_value(labels_json).map_err(js_err)?;
+
+    if labels.len() != data.len() {
+        return Err(js_err(format!(
+            "labels length ({}) must match data row count ({})",
+            labels.len(),
+            data.len()
+        )));
+    }
+    if let Some(&bad) = labels.iter().find(|&&l| l >= k) {
+        return Err(js_err(format!("label {bad} out of range for k={k}")));
+    }
+
+    use crate::clustering::silhouette_samples;
+    let analysis = silhouette_samples(&data, &labels, k);
+    let dto = SilhouetteDto {
+        avg: analysis.avg,
+        per_sample: analysis.per_sample,
     };
 
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)

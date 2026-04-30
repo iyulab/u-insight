@@ -133,6 +133,12 @@ internal static partial class NativeLibrary
         uint kMin, uint kMax, uint nRefs, ulong seed,
         ref NativeStructs.CGapStatResult result);
 
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_silhouette(
+        double* data, uint nRows, uint nCols,
+        uint* labels, uint k,
+        ref NativeStructs.CSilhouetteResult result);
+
     #endregion
 
     #region PCA

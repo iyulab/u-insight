@@ -287,6 +287,54 @@ public sealed class InsightClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Computes silhouette scores for an existing clustering assignment.
+    /// </summary>
+    /// <param name="data">Input matrix (rows = samples, columns = features).</param>
+    /// <param name="labels">Cluster label per sample. Each label must be in <c>[0, k)</c>.</param>
+    /// <param name="k">Number of distinct clusters represented in <paramref name="labels"/>.</param>
+    /// <returns>Silhouette analysis containing the mean and per-sample scores.</returns>
+    /// <remarks>
+    /// Silhouette ranges from -1 (wrong cluster) to +1 (well-separated). O(n²) memory and time —
+    /// use sparingly on large inputs. Singleton clusters and points with no other cluster present
+    /// are excluded from the mean and reported as 0.0 in <see cref="SilhouetteResult.PerSample"/>.
+    /// </remarks>
+    public SilhouetteResult Silhouette(double[,] data, uint[] labels, uint k)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        var (nRows, nCols, flat) = Flatten(data);
+        if (labels.Length != nRows)
+        {
+            throw new ArgumentException(
+                $"labels length ({labels.Length}) must match data row count ({nRows})",
+                nameof(labels));
+        }
+
+        var native = new NativeStructs.CSilhouetteResult();
+        unsafe
+        {
+            fixed (double* dataPtr = flat)
+            fixed (uint* labelsPtr = labels)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_silhouette(dataPtr, nRows, nCols, labelsPtr, k, ref native));
+            }
+        }
+
+        try
+        {
+            return new SilhouetteResult
+            {
+                Avg = native.Avg,
+                PerSample = CopyF64Array(native.PerSample, native.NSamples)
+            };
+        }
+        finally
+        {
+            Native.insight_free_f64_array(native.PerSample, native.NSamples);
+        }
+    }
+
     #endregion
 
     #region PCA
@@ -294,6 +342,10 @@ public sealed class InsightClient : IDisposable
     /// <summary>
     /// Runs Principal Component Analysis.
     /// </summary>
+    /// <param name="data">Input matrix (rows = samples, columns = features).</param>
+    /// <param name="nComponents">Number of principal components to retain.</param>
+    /// <param name="autoScale">When true, standardise each feature to unit variance before PCA
+    /// (correlation-PCA). When false, only mean-centre the data (covariance-PCA).</param>
     public PcaResult Pca(double[,] data, uint nComponents, bool autoScale = true)
     {
         var (nRows, nCols, flat) = Flatten(data);
@@ -310,15 +362,27 @@ public sealed class InsightClient : IDisposable
 
         try
         {
+            var k = native.NComponents;
+            var p = native.NFeatures;
+            var n = native.NSamples;
+
             return new PcaResult
             {
-                NComponents = native.NComponents,
-                ExplainedVariance = CopyF64Array(native.ExplainedVariance, native.NVariance)
+                NComponents = k,
+                NFeatures = p,
+                NSamples = n,
+                ExplainedVariance = CopyF64Array(native.ExplainedVariance, k),
+                CumulativeVariance = CopyF64Array(native.CumulativeVariance, k),
+                Loadings = Reshape2D(CopyF64Array(native.Loadings, k * p), (int)k, (int)p),
+                Scores = ReshapeJagged(CopyF64Array(native.Scores, n * k), (int)n, (int)k)
             };
         }
         finally
         {
-            Native.insight_free_f64_array(native.ExplainedVariance, native.NVariance);
+            Native.insight_free_f64_array(native.ExplainedVariance, native.NComponents);
+            Native.insight_free_f64_array(native.CumulativeVariance, native.NComponents);
+            Native.insight_free_f64_array(native.Loadings, native.NComponents * native.NFeatures);
+            Native.insight_free_f64_array(native.Scores, native.NSamples * native.NComponents);
         }
     }
 
@@ -844,6 +908,27 @@ public sealed class InsightClient : IDisposable
         return result;
     }
 
+    private static double[,] Reshape2D(double[] flat, int rows, int cols)
+    {
+        var result = new double[rows, cols];
+        for (int i = 0; i < rows; i++)
+            for (int j = 0; j < cols; j++)
+                result[i, j] = flat[i * cols + j];
+        return result;
+    }
+
+    private static double[][] ReshapeJagged(double[] flat, int rows, int cols)
+    {
+        var result = new double[rows][];
+        for (int i = 0; i < rows; i++)
+        {
+            var row = new double[cols];
+            Array.Copy(flat, i * cols, row, 0, cols);
+            result[i] = row;
+        }
+        return result;
+    }
+
     #endregion
 
     #region IDisposable
@@ -945,6 +1030,23 @@ public class HdbscanResult
     public double[] Probabilities { get; init; } = [];
 }
 
+/// <summary>Silhouette analysis result.</summary>
+public class SilhouetteResult
+{
+    /// <summary>
+    /// Mean silhouette across samples that had a defined silhouette
+    /// (singletons and points with no other cluster present are excluded).
+    /// Ranges from -1 (wrong cluster) to +1 (well-separated).
+    /// </summary>
+    public double Avg { get; init; }
+
+    /// <summary>
+    /// Per-sample silhouette scores (length = sample count).
+    /// Singleton-cluster points and points with no other cluster present report 0.0.
+    /// </summary>
+    public double[] PerSample { get; init; } = [];
+}
+
 /// <summary>Gap Statistic result for optimal K selection.</summary>
 public class GapStatResult
 {
@@ -959,10 +1061,33 @@ public class GapStatResult
 /// <summary>PCA result.</summary>
 public class PcaResult
 {
-    /// <summary>Number of components.</summary>
+    /// <summary>Number of components retained.</summary>
     public uint NComponents { get; init; }
-    /// <summary>Explained variance ratios per component.</summary>
+
+    /// <summary>Number of original features (columns of the input matrix).</summary>
+    public uint NFeatures { get; init; }
+
+    /// <summary>Number of input samples (rows of the input matrix).</summary>
+    public uint NSamples { get; init; }
+
+    /// <summary>Explained variance ratios per component (length = NComponents).</summary>
     public double[] ExplainedVariance { get; init; } = [];
+
+    /// <summary>Cumulative explained variance ratios per component (length = NComponents).</summary>
+    public double[] CumulativeVariance { get; init; } = [];
+
+    /// <summary>
+    /// Component loadings, shape [NComponents, NFeatures].
+    /// Row k contains the unit-norm loading weights of PC{k+1} on the original features —
+    /// i.e. <c>Loadings[k, :]</c> is the eigenvector for component k.
+    /// </summary>
+    public double[,] Loadings { get; init; } = new double[0, 0];
+
+    /// <summary>
+    /// Projected scores in PC space, shape [NSamples][NComponents].
+    /// Row i contains the PC-space coordinates of input sample i.
+    /// </summary>
+    public double[][] Scores { get; init; } = [];
 }
 
 /// <summary>Anomaly detection result (Isolation Forest / LOF).</summary>

@@ -353,6 +353,116 @@ pub fn silhouette_score(data: &[Vec<f64>], labels: &[usize], k: usize) -> f64 {
     }
 }
 
+/// Per-sample silhouette scores plus the mean across all valid samples.
+#[derive(Debug, Clone)]
+pub struct SilhouetteAnalysis {
+    /// Mean silhouette across all samples that had a defined silhouette
+    /// (singletons and points with no other cluster present are excluded
+    /// from the mean and reported as 0.0 in `per_sample`).
+    pub avg: f64,
+    /// Silhouette score for each input sample (length = data.len()).
+    pub per_sample: Vec<f64>,
+}
+
+/// Computes per-sample silhouette scores and their mean.
+///
+/// Same algorithm as [`silhouette_score`], but exposes the individual `s(i)`
+/// values so callers can inspect cluster-quality on a point-by-point basis
+/// (e.g. for biplots, low-quality cluster diagnostics).
+///
+/// O(n²) time and memory — for very large `n` this can be expensive.
+///
+/// ```
+/// use u_insight::clustering::silhouette_samples;
+///
+/// let data = vec![
+///     vec![0.0, 0.0], vec![0.5, 0.5],
+///     vec![10.0, 10.0], vec![10.5, 10.5],
+/// ];
+/// let labels = vec![0, 0, 1, 1];
+/// let analysis = silhouette_samples(&data, &labels, 2);
+/// assert!(analysis.avg > 0.9);
+/// assert_eq!(analysis.per_sample.len(), 4);
+/// ```
+pub fn silhouette_samples(data: &[Vec<f64>], labels: &[usize], k: usize) -> SilhouetteAnalysis {
+    let n = data.len();
+    let mut per_sample = vec![0.0f64; n];
+
+    if n < 2 || k < 2 {
+        return SilhouetteAnalysis {
+            avg: 0.0,
+            per_sample,
+        };
+    }
+
+    let mut dist_matrix = vec![0.0f64; n * n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = euclidean_dist(&data[i], &data[j]);
+            dist_matrix[i * n + j] = d;
+            dist_matrix[j * n + i] = d;
+        }
+    }
+
+    let mut total_sil = 0.0;
+    let mut valid_count = 0;
+
+    for i in 0..n {
+        let own_cluster = labels[i];
+
+        let mut same_sum = 0.0;
+        let mut same_count = 0usize;
+        for j in 0..n {
+            if j != i && labels[j] == own_cluster {
+                same_sum += dist_matrix[i * n + j];
+                same_count += 1;
+            }
+        }
+
+        if same_count == 0 {
+            continue;
+        }
+
+        let a_i = same_sum / same_count as f64;
+
+        let mut b_i = f64::INFINITY;
+        for c in 0..k {
+            if c == own_cluster {
+                continue;
+            }
+            let mut other_sum = 0.0;
+            let mut other_count = 0usize;
+            for j in 0..n {
+                if labels[j] == c {
+                    other_sum += dist_matrix[i * n + j];
+                    other_count += 1;
+                }
+            }
+            if other_count > 0 {
+                let mean_dist = other_sum / other_count as f64;
+                b_i = b_i.min(mean_dist);
+            }
+        }
+
+        if b_i.is_infinite() {
+            continue;
+        }
+
+        let s_i = (b_i - a_i) / a_i.max(b_i);
+        per_sample[i] = s_i;
+        total_sil += s_i;
+        valid_count += 1;
+    }
+
+    let avg = if valid_count == 0 {
+        0.0
+    } else {
+        total_sil / valid_count as f64
+    };
+
+    SilhouetteAnalysis { avg, per_sample }
+}
+
 // ── Internal K-Means ──────────────────────────────────────────────────
 
 fn kmeans_single(
@@ -2631,6 +2741,46 @@ mod tests {
         let labels = vec![0, 0];
         let score = silhouette_score(&data, &labels, 1);
         assert_eq!(score, 0.0);
+    }
+
+    #[test]
+    fn silhouette_samples_matches_score_average() {
+        let data = make_two_clusters();
+        let labels = vec![0, 0, 0, 0, 1, 1, 1, 1];
+
+        let analysis = silhouette_samples(&data, &labels, 2);
+        let mean = silhouette_score(&data, &labels, 2);
+
+        assert_eq!(analysis.per_sample.len(), data.len());
+        assert!(
+            (analysis.avg - mean).abs() < 1e-12,
+            "per-sample mean ({}) should match silhouette_score ({})",
+            analysis.avg,
+            mean
+        );
+        for s in &analysis.per_sample {
+            assert!(
+                (-1.0..=1.0).contains(s),
+                "per-sample silhouette out of range: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn silhouette_samples_singleton_cluster_returns_zero() {
+        // Mix one singleton (label=2) with two real clusters
+        let data = vec![
+            vec![0.0, 0.0],
+            vec![0.5, 0.0],
+            vec![10.0, 0.0],
+            vec![10.5, 0.0],
+            vec![100.0, 100.0], // singleton
+        ];
+        let labels = vec![0, 0, 1, 1, 2];
+
+        let analysis = silhouette_samples(&data, &labels, 3);
+        assert_eq!(analysis.per_sample[4], 0.0, "singleton silhouette must be 0");
+        assert!(analysis.avg > 0.0);
     }
 
     // ── Auto-K ───────────────────────────────────────────────────

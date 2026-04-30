@@ -303,6 +303,17 @@ K-Means++ clustering on row-major data `[[x,y,...], ...]`.
 { "k": 3, "labels": [0,0,1,1,2,2], "centroids": [[...]], "wcss": 5.2, "iterations": 12, "cluster_sizes": [2,2,2] }
 ```
 
+#### `silhouette(data, labels, k) -> SilhouetteResult`
+
+Silhouette analysis for an existing clustering assignment. Works with any clustering output (`kmeans`, `dbscan`, `hierarchical`, etc.). `data` is row-major `[[x,y,...], ...]`, `labels` is one cluster id per row (each `< k`), `k` is the number of distinct clusters. O(n²) — use sparingly on very large inputs.
+
+**Output:**
+```json
+{ "avg": 0.74, "per_sample": [0.81, 0.79, 0.62, ...] }
+```
+
+`avg` ranges from -1 (wrong cluster) to +1 (well-separated); singleton-cluster points report 0.0 in `per_sample`.
+
 #### `pca(data, n_components) -> PcaResult`
 
 Principal Component Analysis on row-major data.

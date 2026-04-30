@@ -125,15 +125,55 @@ typedef struct CPcaResult {
    */
   uint32_t n_components;
   /**
+   * Number of original features (columns of input data).
+   */
+  uint32_t n_features;
+  /**
+   * Number of input rows (samples).
+   */
+  uint32_t n_samples;
+  /**
    * Explained variance ratios (length = n_components).
    * Caller must free with `insight_free_f64_array`.
    */
   double *explained_variance;
   /**
-   * Number of variance values.
+   * Cumulative explained variance ratios (length = n_components).
+   * Caller must free with `insight_free_f64_array`.
    */
-  uint32_t n_variance;
+  double *cumulative_variance;
+  /**
+   * Component loadings, row-major (length = n_components * n_features).
+   * Row k (k-th component) contains the loading weights for original features.
+   * Caller must free with `insight_free_f64_array`.
+   */
+  double *loadings;
+  /**
+   * Projected scores, row-major (length = n_samples * n_components).
+   * Row i contains the PC-space coordinates of input row i.
+   * Caller must free with `insight_free_f64_array`.
+   */
+  double *scores;
 } CPcaResult;
+
+/**
+ * C-compatible silhouette analysis result.
+ */
+typedef struct CSilhouetteResult {
+  /**
+   * Mean silhouette across samples that had a defined silhouette.
+   */
+  double avg;
+  /**
+   * Per-sample silhouette scores (length = n_rows).
+   * Caller must free with `insight_free_f64_array`.
+   */
+  double *per_sample;
+  /**
+   * Number of samples (mirrors n_rows the caller passed in).
+   */
+  uint32_t n_samples;
+} CSilhouetteResult;
 
 /**
  * C-compatible DBSCAN result.
@@ -620,7 +660,9 @@ INSIGHT_API void insight_free_labels(uint32_t *labels, uint32_t count);
  * # Safety
  * - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
  * - `out` must point to a valid `CPcaResult`.
- * - Caller must free `out.explained_variance` with `insight_free_f64_array`.
+ * - Caller must free each of `out.explained_variance`, `out.cumulative_variance`,
+ *   `out.loadings`, `out.scores` with `insight_free_f64_array`, passing the
+ *   appropriate length (see field docs).
  */
 INSIGHT_API
 int32_t insight_pca(const double *data,
@@ -629,6 +671,28 @@ int32_t insight_pca(const double *data,
                     uint32_t n_components,
                     int32_t auto_scale,
                     struct CPcaResult *out);
+
+/**
+ * Computes silhouette scores for an existing clustering assignment.
+ *
+ * Works with any clustering output (`KMeans`, `MiniBatchKMeans`, `Hierarchical`,
+ * `Dbscan`, `Hdbscan`) — the caller passes the already-computed `labels`.
+ * `k` is the number of distinct clusters represented in `labels` and is used
+ * only as an upper bound on the cluster-id loop.
+ *
+ * # Safety
+ * - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
+ * - `labels` must point to `n_rows` u32 values, each `< k`.
+ * - `out` must point to a valid `CSilhouetteResult`.
+ * - Caller must free `out.per_sample` with `insight_free_f64_array(ptr, out.n_samples)`.
+ */
+INSIGHT_API
+int32_t insight_silhouette(const double *data,
+                           uint32_t n_rows,
+                           uint32_t n_cols,
+                           const uint32_t *labels,
+                           uint32_t k,
+                           struct CSilhouetteResult *out);
 
 /**
  * Frees an f64 array allocated by an insight FFI function.

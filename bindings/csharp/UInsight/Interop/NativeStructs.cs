@@ -73,8 +73,20 @@ internal static class NativeStructs
     internal struct CPcaResult
     {
         public uint NComponents;
+        public uint NFeatures;
+        public uint NSamples;
         public IntPtr ExplainedVariance;
-        public uint NVariance;
+        public IntPtr CumulativeVariance;
+        public IntPtr Loadings;
+        public IntPtr Scores;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CSilhouetteResult
+    {
+        public double Avg;
+        public IntPtr PerSample;
+        public uint NSamples;
     }
 
     [StructLayout(LayoutKind.Sequential)]
