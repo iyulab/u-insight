@@ -396,11 +396,7 @@ pub fn kmeans(data_json: JsValue, k: usize) -> Result<JsValue, JsValue> {
 ///
 /// O(n²) — use sparingly on very large inputs.
 #[wasm_bindgen]
-pub fn silhouette(
-    data_json: JsValue,
-    labels_json: JsValue,
-    k: usize,
-) -> Result<JsValue, JsValue> {
+pub fn silhouette(data_json: JsValue, labels_json: JsValue, k: usize) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
     let labels: Vec<usize> = serde_wasm_bindgen::from_value(labels_json).map_err(js_err)?;
 

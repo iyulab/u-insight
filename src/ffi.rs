@@ -607,9 +607,7 @@ pub unsafe extern "C" fn insight_silhouette(
         // Validate label range
         let k_usize = k as usize;
         if let Some(&bad) = labels_usize.iter().find(|&&l| l >= k_usize) {
-            set_last_error(&format!(
-                "label {bad} out of range for k={k_usize}"
-            ));
+            set_last_error(&format!("label {bad} out of range for k={k_usize}"));
             return INSIGHT_ERR_INVALID_INPUT;
         }
 
@@ -2593,8 +2591,9 @@ mod tests {
         assert_eq!(result.n_features, 2);
         assert_eq!(result.n_samples, 4);
 
-        let evr =
-            unsafe { slice::from_raw_parts(result.explained_variance, result.n_components as usize) };
+        let evr = unsafe {
+            slice::from_raw_parts(result.explained_variance, result.n_components as usize)
+        };
         assert!(
             (evr[0] - 1.0).abs() < 1e-10,
             "PC1 should explain all variance"
@@ -2640,8 +2639,8 @@ mod tests {
             )
         };
         for k in 0..result.n_components as usize {
-            let row = &loadings[k * result.n_features as usize
-                ..(k + 1) * result.n_features as usize];
+            let row =
+                &loadings[k * result.n_features as usize..(k + 1) * result.n_features as usize];
             let norm: f64 = row.iter().map(|x| x * x).sum::<f64>().sqrt();
             assert!(
                 (norm - 1.0).abs() < 1e-6,
@@ -2659,7 +2658,10 @@ mod tests {
         assert_eq!(scores.len(), 5 * 2);
         // Scores along PC1 should be monotonic for the correlated input above
         let pc1: Vec<f64> = (0..5).map(|i| scores[i * 2]).collect();
-        assert!(pc1.windows(2).all(|w| w[1] >= w[0] - 1e-10) || pc1.windows(2).all(|w| w[1] <= w[0] + 1e-10));
+        assert!(
+            pc1.windows(2).all(|w| w[1] >= w[0] - 1e-10)
+                || pc1.windows(2).all(|w| w[1] <= w[0] + 1e-10)
+        );
 
         unsafe { free_pca_result(&result) };
     }
@@ -2693,16 +2695,8 @@ mod tests {
             per_sample: ptr::null_mut(),
             n_samples: 0,
         };
-        let rc = unsafe {
-            insight_silhouette(
-                data.as_ptr(),
-                8,
-                2,
-                labels.as_ptr(),
-                2,
-                &mut result,
-            )
-        };
+        let rc =
+            unsafe { insight_silhouette(data.as_ptr(), 8, 2, labels.as_ptr(), 2, &mut result) };
         assert_eq!(rc, INSIGHT_OK);
         assert_eq!(result.n_samples, 8);
         assert!(
@@ -2733,16 +2727,8 @@ mod tests {
             per_sample: ptr::null_mut(),
             n_samples: 0,
         };
-        let rc = unsafe {
-            insight_silhouette(
-                data.as_ptr(),
-                2,
-                2,
-                labels.as_ptr(),
-                2,
-                &mut result,
-            )
-        };
+        let rc =
+            unsafe { insight_silhouette(data.as_ptr(), 2, 2, labels.as_ptr(), 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
     }
 

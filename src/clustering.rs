@@ -2779,7 +2779,10 @@ mod tests {
         let labels = vec![0, 0, 1, 1, 2];
 
         let analysis = silhouette_samples(&data, &labels, 3);
-        assert_eq!(analysis.per_sample[4], 0.0, "singleton silhouette must be 0");
+        assert_eq!(
+            analysis.per_sample[4], 0.0,
+            "singleton silhouette must be 0"
+        );
         assert!(analysis.avg > 0.0);
     }
 
