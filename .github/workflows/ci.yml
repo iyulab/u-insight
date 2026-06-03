@@ -25,6 +25,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-features
+      # build.rs regenerates include/u_insight.h via cbindgen on every check/build.
+      # If the committed header drifted from the current #[repr(C)] FFI surface,
+      # the working tree is dirty — fail so the stale C header (which the C#/C
+      # bindings depend on) is regenerated and committed. Same drift class as the
+      # JSON FFI schema guards.
+      - name: Verify committed C header matches cbindgen output
+        shell: bash
+        run: |
+          git diff --exit-code -- include/u_insight.h \
+            || { echo "::error::include/u_insight.h is stale — run 'cargo build' and commit the regenerated header"; exit 1; }
 
   fmt:
     name: Format
