@@ -4,17 +4,17 @@
 //!
 //! # API
 //!
-//! - `describe(data_json)` — Descriptive statistics per column
-//! - `correlation_matrix(data_json)` — Pearson correlation matrix
-//! - `kmeans(data_json, k)` — K-Means++ clustering
-//! - `pca(data_json, n_components)` — Principal Component Analysis
-//! - `dbscan(data_json, config_json)` — DBSCAN density-based clustering
-//! - `hierarchical(data_json, config_json)` — Hierarchical agglomerative clustering
-//! - `isolation_forest(data_json, config_json)` — Isolation Forest anomaly detection
-//! - `lof(data_json, config_json)` — Local Outlier Factor anomaly detection
-//! - `distribution_analysis(data_json, config_json)` — Distribution analysis + normality tests
-//! - `regression(data_json)` — OLS regression (simple or multiple)
-//! - `feature_importance(data_json)` — Feature importance (permutation / ANOVA / mutual info)
+//! - `describe(data)` — Descriptive statistics per column
+//! - `correlation_matrix(data)` — Pearson correlation matrix
+//! - `kmeans(data, k)` — K-Means++ clustering
+//! - `pca(data, n_components)` — Principal Component Analysis
+//! - `dbscan(data, config)` — DBSCAN density-based clustering
+//! - `hierarchical(data, config)` — Hierarchical agglomerative clustering
+//! - `isolation_forest(data, config)` — Isolation Forest anomaly detection
+//! - `lof(data, config)` — Local Outlier Factor anomaly detection
+//! - `distribution_analysis(data, config)` — Distribution analysis + normality tests
+//! - `regression(data)` — OLS regression (simple or multiple)
+//! - `feature_importance(data)` — Feature importance (permutation / ANOVA / mutual info)
 //!
 //! # Input Formats
 //!
@@ -34,6 +34,18 @@ use wasm_bindgen::prelude::*;
 
 fn js_err(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
+}
+
+/// Deserialize a native JS value, rejecting JSON strings with an actionable
+/// message and prefixing the offending parameter name to any serde error.
+fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Result<T, JsValue> {
+    if value.as_string().is_some() {
+        return Err(js_err(format!(
+            "{param}: expected a native JS object/array, got a string — \
+             pass the value directly, not JSON.stringify(...)"
+        )));
+    }
+    serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))
 }
 
 /// Strict column-extractor for column-major JSON inputs.
@@ -197,16 +209,16 @@ struct PcaDto {
 /// # Output
 /// Array of column profile objects, one per column.
 #[wasm_bindgen]
-pub fn describe(data_json: JsValue) -> Result<JsValue, JsValue> {
+pub fn describe(data: JsValue) -> Result<JsValue, JsValue> {
     use crate::json_parser::JsonParser;
     use crate::profiling::profile_dataframe;
 
-    let raw: serde_json::Value = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+    let raw: serde_json::Value = from_js(data, "data")?;
 
     let df = JsonParser::new().parse_value(&raw).map_err(js_err)?;
 
     if df.is_empty() {
-        return Err(js_err("data_json must contain at least one column"));
+        return Err(js_err("data must contain at least one column"));
     }
 
     let profiles = profile_dataframe(&df);
@@ -288,9 +300,8 @@ pub fn describe(data_json: JsValue) -> Result<JsValue, JsValue> {
 /// # Output
 /// `{ names, matrix (flattened n×n), n, high_pairs }`
 #[wasm_bindgen]
-pub fn correlation_matrix(data_json: JsValue) -> Result<JsValue, JsValue> {
-    let mut raw: HashMap<String, serde_json::Value> =
-        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+pub fn correlation_matrix(data: JsValue) -> Result<JsValue, JsValue> {
+    let mut raw: HashMap<String, serde_json::Value> = from_js(data, "data")?;
 
     let method_str = raw
         .remove("_method")
@@ -298,7 +309,7 @@ pub fn correlation_matrix(data_json: JsValue) -> Result<JsValue, JsValue> {
         .unwrap_or_else(|| "pearson".to_string());
 
     if raw.is_empty() {
-        return Err(js_err("data_json must contain at least one column"));
+        return Err(js_err("data must contain at least one column"));
     }
 
     // Sort keys for deterministic order
@@ -363,8 +374,8 @@ pub fn correlation_matrix(data_json: JsValue) -> Result<JsValue, JsValue> {
 /// # Output
 /// `{ k, labels, centroids, wcss, iterations, cluster_sizes }`
 #[wasm_bindgen]
-pub fn kmeans(data_json: JsValue, k: usize) -> Result<JsValue, JsValue> {
-    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+pub fn kmeans(data: JsValue, k: usize) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = from_js(data, "data")?;
 
     use crate::clustering::{kmeans as kmeans_fn, KMeansConfig};
     let config = KMeansConfig::new(k);
@@ -385,8 +396,8 @@ pub fn kmeans(data_json: JsValue, k: usize) -> Result<JsValue, JsValue> {
 /// Computes silhouette scores for an existing clustering assignment.
 ///
 /// # Input
-/// `data_json`: row-major points `[[x,y,...], ...]`
-/// `labels_json`: cluster id per sample `[0, 0, 1, 1, ...]` (each value `< k`)
+/// `data`: row-major points `[[x,y,...], ...]`
+/// `labels`: cluster id per sample `[0, 0, 1, 1, ...]` (each value `< k`)
 /// `k`: number of distinct clusters
 ///
 /// # Output
@@ -396,9 +407,9 @@ pub fn kmeans(data_json: JsValue, k: usize) -> Result<JsValue, JsValue> {
 ///
 /// O(n²) — use sparingly on very large inputs.
 #[wasm_bindgen]
-pub fn silhouette(data_json: JsValue, labels_json: JsValue, k: usize) -> Result<JsValue, JsValue> {
-    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let labels: Vec<usize> = serde_wasm_bindgen::from_value(labels_json).map_err(js_err)?;
+pub fn silhouette(data: JsValue, labels: JsValue, k: usize) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = from_js(data, "data")?;
+    let labels: Vec<usize> = from_js(labels, "labels")?;
 
     if labels.len() != data.len() {
         return Err(js_err(format!(
@@ -431,8 +442,8 @@ pub fn silhouette(data_json: JsValue, labels_json: JsValue, k: usize) -> Result<
 /// # Output
 /// `{ n_components, n_features, eigenvalues, explained_variance_ratio, ... }`
 #[wasm_bindgen]
-pub fn pca(data_json: JsValue, n_components: usize) -> Result<JsValue, JsValue> {
-    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+pub fn pca(data: JsValue, n_components: usize) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = from_js(data, "data")?;
 
     use crate::pca::{pca as pca_fn, PcaConfig};
     let config = PcaConfig::new(n_components);
@@ -477,17 +488,17 @@ struct DbscanDto {
 ///
 /// # Input
 ///
-/// `data_json`: row-major points `[[x,y,...], ...]`
+/// `data`: row-major points `[[x,y,...], ...]`
 ///
-/// `config_json`: `{ "epsilon": 1.5, "min_samples": 3 }`
+/// `config`: `{ "epsilon": 1.5, "min_samples": 3 }`
 ///
 /// # Output
 ///
 /// `{ labels, n_clusters, noise_count, cluster_sizes, core_points }`
 #[wasm_bindgen]
-pub fn dbscan(data_json: JsValue, config_json: JsValue) -> Result<JsValue, JsValue> {
-    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let cfg: DbscanConfigDto = serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
+pub fn dbscan(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = from_js(data, "data")?;
+    let cfg: DbscanConfigDto = from_js(config, "config")?;
 
     use crate::clustering::{dbscan as dbscan_fn, DbscanConfig};
     let config = DbscanConfig::new(cfg.epsilon, cfg.min_samples);
@@ -543,18 +554,18 @@ struct HierarchicalDto {
 ///
 /// # Input
 ///
-/// `data_json`: row-major points `[[x,y,...], ...]`
+/// `data`: row-major points `[[x,y,...], ...]`
 ///
-/// `config_json`: `{ "linkage": "ward", "n_clusters": 3 }` or
+/// `config`: `{ "linkage": "ward", "n_clusters": 3 }` or
 /// `{ "linkage": "single", "distance_threshold": 5.0 }`
 ///
 /// # Output
 ///
 /// `{ merges, labels, n_clusters }`
 #[wasm_bindgen]
-pub fn hierarchical(data_json: JsValue, config_json: JsValue) -> Result<JsValue, JsValue> {
-    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let cfg: HierarchicalConfigDto = serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
+pub fn hierarchical(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = from_js(data, "data")?;
+    let cfg: HierarchicalConfigDto = from_js(config, "config")?;
 
     use crate::clustering::{hierarchical as hier_fn, HierarchicalConfig, Linkage};
 
@@ -639,18 +650,17 @@ struct IsolationForestDto {
 ///
 /// # Input
 ///
-/// `data_json`: row-major points `[[x,y,...], ...]`
+/// `data`: row-major points `[[x,y,...], ...]`
 ///
-/// `config_json`: `{ "n_estimators": 100, "contamination": 0.1, "seed": 42 }`
+/// `config`: `{ "n_estimators": 100, "contamination": 0.1, "seed": 42 }`
 ///
 /// # Output
 ///
 /// `{ scores, anomalies, threshold, anomaly_count, anomaly_fraction }`
 #[wasm_bindgen]
-pub fn isolation_forest(data_json: JsValue, config_json: JsValue) -> Result<JsValue, JsValue> {
-    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let cfg: IsolationForestConfigDto =
-        serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
+pub fn isolation_forest(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = from_js(data, "data")?;
+    let cfg: IsolationForestConfigDto = from_js(config, "config")?;
 
     use crate::isolation_forest::{isolation_forest as iforest_fn, IsolationForestConfig};
 
@@ -708,17 +718,17 @@ struct LofDto {
 ///
 /// # Input
 ///
-/// `data_json`: row-major points `[[x,y,...], ...]`
+/// `data`: row-major points `[[x,y,...], ...]`
 ///
-/// `config_json`: `{ "k": 20, "threshold": 1.5 }`
+/// `config`: `{ "k": 20, "threshold": 1.5 }`
 ///
 /// # Output
 ///
 /// `{ scores, anomalies, threshold, anomaly_count, anomaly_fraction }`
 #[wasm_bindgen]
-pub fn lof(data_json: JsValue, config_json: JsValue) -> Result<JsValue, JsValue> {
-    let data: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let cfg: LofConfigDto = serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
+pub fn lof(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
+    let data: Vec<Vec<f64>> = from_js(data, "data")?;
+    let cfg: LofConfigDto = from_js(config, "config")?;
 
     use crate::lof::{lof as lof_fn, LofConfig};
 
@@ -833,9 +843,9 @@ struct DistributionAnalysisDto {
 ///
 /// # Input
 ///
-/// `data_json`: flat array `[1.0, 2.0, 3.0, ...]`
+/// `data`: flat array `[1.0, 2.0, 3.0, ...]`
 ///
-/// `config_json`: `{ "bin_method": "freedman_diaconis", "significance_level": 0.05,
+/// `config`: `{ "bin_method": "freedman_diaconis", "significance_level": 0.05,
 ///   "compute_ecdf": true, "compute_histogram": true, "compute_qq_plot": true,
 ///   "fit_distributions": false }`
 ///
@@ -843,9 +853,9 @@ struct DistributionAnalysisDto {
 ///
 /// `{ n, ecdf, histogram, qq_plot, normality, fits }`
 #[wasm_bindgen]
-pub fn distribution_analysis(data_json: JsValue, config_json: JsValue) -> Result<JsValue, JsValue> {
-    let data: Vec<f64> = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
-    let cfg: DistributionConfigDto = serde_wasm_bindgen::from_value(config_json).map_err(js_err)?;
+pub fn distribution_analysis(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
+    let data: Vec<f64> = from_js(data, "data")?;
+    let cfg: DistributionConfigDto = from_js(config, "config")?;
 
     use crate::distribution::{distribution_analysis as dist_fn, BinMethod, DistributionConfig};
 
@@ -947,7 +957,7 @@ struct RegressionDto {
 ///
 /// # Input
 ///
-/// `data_json`:
+/// `data`:
 /// ```json
 /// {
 ///   "predictors": { "x1": [1,2,3,4,5], "x2": [2,4,6,8,10] },
@@ -960,8 +970,8 @@ struct RegressionDto {
 ///
 /// `{ target_name, predictor_names, r_squared, adj_r_squared, coefficients, p_values, vif, f_p_value }`
 #[wasm_bindgen]
-pub fn regression(data_json: JsValue) -> Result<JsValue, JsValue> {
-    let input: RegressionInputDto = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+pub fn regression(data: JsValue) -> Result<JsValue, JsValue> {
+    let input: RegressionInputDto = from_js(data, "data")?;
 
     use crate::analysis::regression_analysis;
 
@@ -1066,7 +1076,7 @@ struct FeatureImportanceDto {
 ///
 /// # Input
 ///
-/// `data_json`:
+/// `data`:
 /// ```json
 /// {
 ///   "features": { "f1": [1,2,3,4,5], "f2": [5,4,3,2,1] },
@@ -1084,9 +1094,8 @@ struct FeatureImportanceDto {
 ///
 /// `{ method, features: [{ name, index, score, std_dev?, p_value? }], baseline_score?, selected_indices? }`
 #[wasm_bindgen]
-pub fn feature_importance(data_json: JsValue) -> Result<JsValue, JsValue> {
-    let input: FeatureImportanceInputDto =
-        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+pub fn feature_importance(data: JsValue) -> Result<JsValue, JsValue> {
+    let input: FeatureImportanceInputDto = from_js(data, "data")?;
 
     if input.features.is_empty() {
         return Err(js_err("features must contain at least one column"));
@@ -1212,9 +1221,8 @@ pub fn feature_importance(data_json: JsValue) -> Result<JsValue, JsValue> {
 /// # Output
 /// `{ vif_per_column, high_vif_columns, threshold, names }`
 #[wasm_bindgen]
-pub fn vif_diagnostic(data_json: JsValue) -> Result<JsValue, JsValue> {
-    let mut raw: HashMap<String, serde_json::Value> =
-        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+pub fn vif_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
+    let mut raw: HashMap<String, serde_json::Value> = from_js(data, "data")?;
 
     let threshold = raw
         .remove("_threshold")
@@ -1263,9 +1271,8 @@ pub fn vif_diagnostic(data_json: JsValue) -> Result<JsValue, JsValue> {
 /// Standard threshold: `cond > 30` indicates multicollinearity (Belsley 1991).
 /// Returns `Infinity` for numerically singular input.
 #[wasm_bindgen]
-pub fn condition_number_diagnostic(data_json: JsValue) -> Result<JsValue, JsValue> {
-    let raw: HashMap<String, Vec<f64>> =
-        serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+pub fn condition_number_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
+    let raw: HashMap<String, Vec<f64>> = from_js(data, "data")?;
 
     if raw.is_empty() {
         return Err(js_err("input must contain at least one numeric column"));
@@ -1306,7 +1313,7 @@ pub fn condition_number_diagnostic(data_json: JsValue) -> Result<JsValue, JsValu
 /// `method` aliases: `tukey` → IQR Tukey fences (k=1.5), `three_sigma` →
 /// mean ± 3·σ, `hampel` → robust median ± 3.5·(MAD/0.6745).
 #[wasm_bindgen]
-pub fn detect_univariate_outliers(data_json: JsValue) -> Result<JsValue, JsValue> {
+pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
     #[derive(Deserialize)]
     struct Req {
         data: Vec<f64>,
@@ -1329,7 +1336,7 @@ pub fn detect_univariate_outliers(data_json: JsValue) -> Result<JsValue, JsValue
         spread: f64,
     }
 
-    let req: Req = serde_wasm_bindgen::from_value(data_json).map_err(js_err)?;
+    let req: Req = from_js(data, "data")?;
 
     use crate::profiling::{detect_outliers_slice, OutlierMethod};
     let method = match req.method.as_str() {
