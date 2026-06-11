@@ -45,7 +45,12 @@ fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Resul
              pass the value directly, not JSON.stringify(...)"
         )));
     }
-    serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))
+    // serde-wasm-bindgen reads only a struct's declared fields from a JS
+    // object, so `deny_unknown_fields` never sees extra keys. Round-trip
+    // through serde_json::Value so the strict wire schema is enforced.
+    let json: serde_json::Value =
+        serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))?;
+    serde_json::from_value(json).map_err(|e| js_err(format!("{param}: {e}")))
 }
 
 /// Strict column-extractor for column-major JSON inputs.
@@ -468,6 +473,7 @@ pub fn pca(data: JsValue, n_components: usize) -> Result<JsValue, JsValue> {
 
 /// DBSCAN configuration input.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DbscanConfigDto {
     epsilon: f64,
     min_samples: usize,
@@ -519,6 +525,7 @@ pub fn dbscan(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
 
 /// Hierarchical clustering configuration input.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HierarchicalConfigDto {
     /// Linkage: "single", "complete", "average", "ward". Default: "ward".
     #[serde(default = "default_linkage")]
@@ -611,6 +618,7 @@ pub fn hierarchical(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> 
 
 /// Isolation Forest configuration input.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IsolationForestConfigDto {
     /// Number of trees. Default: 100.
     #[serde(default = "default_n_estimators")]
@@ -688,6 +696,7 @@ pub fn isolation_forest(data: JsValue, config: JsValue) -> Result<JsValue, JsVal
 
 /// LOF configuration input.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LofConfigDto {
     /// Number of nearest neighbors. Default: 20.
     #[serde(default = "default_lof_k")]
@@ -750,6 +759,7 @@ pub fn lof(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
 
 /// Distribution analysis configuration input.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DistributionConfigDto {
     /// Bin method: "sturges", "scott", "freedman_diaconis". Default: "freedman_diaconis".
     #[serde(default = "default_bin_method")]
@@ -947,6 +957,7 @@ pub fn distribution_analysis(data: JsValue, config: JsValue) -> Result<JsValue, 
 
 /// Regression input: column-major predictors + target.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RegressionInputDto {
     /// Predictor columns: `{ "x1": [1,2,3], "x2": [4,5,6] }`.
     predictors: HashMap<String, Vec<f64>>,
@@ -1030,6 +1041,7 @@ pub fn regression(data: JsValue) -> Result<JsValue, JsValue> {
 
 /// Feature importance input.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FeatureImportanceInputDto {
     /// Feature columns: `{ "f1": [1,2,3], "f2": [4,5,6] }`.
     features: HashMap<String, Vec<f64>>,
@@ -1328,17 +1340,19 @@ pub fn condition_number_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// `method` aliases: `tukey` → IQR Tukey fences (k=1.5), `three_sigma` →
 /// mean ± 3·σ, `hampel` → robust median ± 3.5·(MAD/0.6745).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OutlierInputDto {
+    data: Vec<f64>,
+    #[serde(default = "default_outlier_method")]
+    method: String,
+}
+fn default_outlier_method() -> String {
+    "iqr".to_string()
+}
+
 #[wasm_bindgen]
 pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
-    #[derive(Deserialize)]
-    struct Req {
-        data: Vec<f64>,
-        #[serde(default = "default_outlier_method")]
-        method: String,
-    }
-    fn default_outlier_method() -> String {
-        "iqr".to_string()
-    }
     #[derive(Serialize)]
     struct Dto {
         method: String,
@@ -1352,7 +1366,7 @@ pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
         spread: f64,
     }
 
-    let req: Req = from_js(data, "data")?;
+    let req: OutlierInputDto = from_js(data, "data")?;
 
     use crate::profiling::{detect_outliers_slice, OutlierMethod};
     let method = match req.method.as_str() {
@@ -1418,5 +1432,60 @@ mod tests {
             resolve_bin_method("not_a_method", None),
             BinMethod::FreedmanDiaconis
         );
+    }
+}
+
+#[cfg(test)]
+mod dto_strictness_tests {
+    use serde_json::json;
+
+    fn assert_rejects_unknown<T: serde::de::DeserializeOwned>(v: serde_json::Value) {
+        match serde_json::from_value::<T>(v) {
+            Ok(_) => panic!("unknown key must be rejected"),
+            Err(e) => assert!(e.to_string().contains("unknown field"), "{e}"),
+        }
+    }
+
+    #[test]
+    fn cluster_configs_reject_unknown_keys() {
+        assert_rejects_unknown::<super::DbscanConfigDto>(json!({
+            "epsilon": 0.5, "min_samples": 5, "metric": "euclidean"
+        }));
+        assert_rejects_unknown::<super::HierarchicalConfigDto>(json!({
+            "linkage": "ward", "n_clusters": 3, "criterion": "maxclust"
+        }));
+    }
+
+    #[test]
+    fn outlier_configs_reject_unknown_keys() {
+        assert_rejects_unknown::<super::IsolationForestConfigDto>(json!({
+            "n_estimators": 50, "n_trees": 50
+        }));
+        assert_rejects_unknown::<super::LofConfigDto>(json!({
+            "k": 10, "metric": "euclidean"
+        }));
+        assert_rejects_unknown::<super::OutlierInputDto>(json!({
+            "data": [1.0, 2.0], "threshold": 3.0
+        }));
+    }
+
+    #[test]
+    fn distribution_config_rejects_unknown_keys() {
+        // The defect class that motivated this guard: a consumer typo
+        // (`fit` instead of `fit_distributions`) was silently ignored.
+        assert_rejects_unknown::<super::DistributionConfigDto>(json!({
+            "fit": true
+        }));
+    }
+
+    #[test]
+    fn analysis_inputs_reject_unknown_keys() {
+        assert_rejects_unknown::<super::RegressionInputDto>(json!({
+            "predictors": { "x": [1.0, 2.0] }, "target": [1.0, 2.0],
+            "target_name": "y", "intercept": true
+        }));
+        assert_rejects_unknown::<super::FeatureImportanceInputDto>(json!({
+            "features": { "f": [1.0, 2.0] }, "target": [0.0, 1.0], "repeats": 5
+        }));
     }
 }

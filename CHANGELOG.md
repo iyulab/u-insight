@@ -8,6 +8,23 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-12
+
+### Changed — BREAKING (WASM)
+
+- WASM config/input objects (`dbscan`, `hierarchical`, `isolation_forest`,
+  `lof`, `distribution_analysis`, `regression`, `feature_importance`,
+  `detect_univariate_outliers`) now **reject unknown keys** with an explicit
+  `unknown field` error instead of silently ignoring them
+  (`serde(deny_unknown_fields)`). This is the guard for the defect class where
+  a config typo (e.g. `fit` instead of `fit_distributions`) silently disabled
+  a feature. Column-major *data* maps (`describe`, `correlation_matrix`,
+  `predictors`/`features` values) are unaffected — column names stay free-form.
+
+### Changed
+
+- Dependency: `u-analytics` `^0.5` → `^0.6`.
+
 ## [0.11.0] - 2026-06-11
 
 ### Added
