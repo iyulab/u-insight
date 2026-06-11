@@ -361,7 +361,10 @@ Local Outlier Factor anomaly detection. `config`: `{ "k": 20, "threshold": 1.5 }
 
 #### `distribution_analysis(data, config) -> DistributionResult`
 
-Distribution analysis on a 1-D array. `config`: `{ "bin_method": "freedman_diaconis", "significance_level": 0.05, "compute_ecdf": true, "compute_histogram": true, "compute_qq_plot": true, "fit_distributions": false }`.
+Distribution analysis on a 1-D array. `config`: `{ "bin_method": "freedman_diaconis", "bins": null, "significance_level": 0.05, "compute_ecdf": true, "compute_histogram": true, "compute_qq_plot": true, "fit_distributions": false }`.
+
+- `bin_method`: `"sturges" | "scott" | "freedman_diaconis"` — automatic bin count rule (default `"freedman_diaconis"`).
+- `bins` (optional, integer >= 1): explicit histogram bin count. When set it takes precedence over `bin_method`, and the histogram `method` field echoes `"Fixed(n)"`.
 
 **Output:**
 ```json

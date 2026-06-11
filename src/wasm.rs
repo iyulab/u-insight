@@ -754,6 +754,9 @@ struct DistributionConfigDto {
     /// Bin method: "sturges", "scott", "freedman_diaconis". Default: "freedman_diaconis".
     #[serde(default = "default_bin_method")]
     bin_method: String,
+    /// Explicit bin count (>= 1). When set, takes precedence over `bin_method`.
+    #[serde(default)]
+    bins: Option<usize>,
     /// Significance level for normality tests. Default: 0.05.
     #[serde(default = "default_significance")]
     significance_level: f64,
@@ -773,6 +776,20 @@ struct DistributionConfigDto {
 
 fn default_bin_method() -> String {
     "freedman_diaconis".into()
+}
+
+/// Resolves the effective bin method: an explicit `bins` count wins over
+/// the `bin_method` name; unknown names fall back to Freedman-Diaconis.
+fn resolve_bin_method(bin_method: &str, bins: Option<usize>) -> crate::distribution::BinMethod {
+    use crate::distribution::BinMethod;
+    if let Some(n) = bins {
+        return BinMethod::Fixed(n);
+    }
+    match bin_method.to_lowercase().as_str() {
+        "sturges" => BinMethod::Sturges,
+        "scott" => BinMethod::Scott,
+        _ => BinMethod::FreedmanDiaconis,
+    }
 }
 fn default_significance() -> f64 {
     0.05
@@ -845,9 +862,13 @@ struct DistributionAnalysisDto {
 ///
 /// `data`: flat array `[1.0, 2.0, 3.0, ...]`
 ///
-/// `config`: `{ "bin_method": "freedman_diaconis", "significance_level": 0.05,
-///   "compute_ecdf": true, "compute_histogram": true, "compute_qq_plot": true,
-///   "fit_distributions": false }`
+/// `config`: `{ "bin_method": "freedman_diaconis", "bins": null,
+///   "significance_level": 0.05, "compute_ecdf": true, "compute_histogram": true,
+///   "compute_qq_plot": true, "fit_distributions": false }`
+///
+/// `bins` (optional, >= 1): explicit histogram bin count; when set it takes
+/// precedence over `bin_method`. The histogram `method` field echoes
+/// `"Fixed(n)"` in that case.
 ///
 /// # Output
 ///
@@ -857,14 +878,9 @@ pub fn distribution_analysis(data: JsValue, config: JsValue) -> Result<JsValue, 
     let data: Vec<f64> = from_js(data, "data")?;
     let cfg: DistributionConfigDto = from_js(config, "config")?;
 
-    use crate::distribution::{distribution_analysis as dist_fn, BinMethod, DistributionConfig};
+    use crate::distribution::{distribution_analysis as dist_fn, DistributionConfig};
 
-    let bin_method = match cfg.bin_method.to_lowercase().as_str() {
-        "sturges" => BinMethod::Sturges,
-        "scott" => BinMethod::Scott,
-        "freedman_diaconis" => BinMethod::FreedmanDiaconis,
-        _ => BinMethod::FreedmanDiaconis,
-    };
+    let bin_method = resolve_bin_method(&cfg.bin_method, cfg.bins);
 
     let config = DistributionConfig {
         bin_method,
@@ -1368,4 +1384,39 @@ pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
     };
 
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_bin_method;
+    use crate::distribution::BinMethod;
+
+    #[test]
+    fn bins_overrides_bin_method() {
+        assert_eq!(resolve_bin_method("sturges", Some(5)), BinMethod::Fixed(5));
+        assert_eq!(
+            resolve_bin_method("freedman_diaconis", Some(20)),
+            BinMethod::Fixed(20)
+        );
+    }
+
+    #[test]
+    fn bin_method_used_when_bins_absent() {
+        assert_eq!(resolve_bin_method("sturges", None), BinMethod::Sturges);
+        assert_eq!(resolve_bin_method("scott", None), BinMethod::Scott);
+        assert_eq!(
+            resolve_bin_method("freedman_diaconis", None),
+            BinMethod::FreedmanDiaconis
+        );
+    }
+
+    #[test]
+    fn unknown_method_falls_back_to_freedman_diaconis() {
+        assert_eq!(
+            resolve_bin_method("not_a_method", None),
+            BinMethod::FreedmanDiaconis
+        );
+    }
 }

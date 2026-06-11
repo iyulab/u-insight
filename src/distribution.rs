@@ -43,6 +43,8 @@ pub enum BinMethod {
     Scott,
     /// Freedman-Diaconis rule: h = 2 * IQR * n^(-1/3). Robust to outliers.
     FreedmanDiaconis,
+    /// Explicit bin count chosen by the caller. Must be >= 1.
+    Fixed(usize),
 }
 
 /// Configuration for distribution analysis.
@@ -248,6 +250,7 @@ pub fn distribution_analysis(
             BinMethod::Sturges => u_analytics::distribution::BinMethod::Sturges,
             BinMethod::Scott => u_analytics::distribution::BinMethod::Scott,
             BinMethod::FreedmanDiaconis => u_analytics::distribution::BinMethod::FreedmanDiaconis,
+            BinMethod::Fixed(k) => u_analytics::distribution::BinMethod::Fixed(k),
         };
         u_analytics::distribution::histogram_bins(data, bin_method).map(|bins| HistogramResult {
             n_bins: bins.n_bins,
@@ -381,6 +384,7 @@ pub fn histogram(data: &[f64], method: BinMethod) -> Option<HistogramResult> {
         BinMethod::Sturges => u_analytics::distribution::BinMethod::Sturges,
         BinMethod::Scott => u_analytics::distribution::BinMethod::Scott,
         BinMethod::FreedmanDiaconis => u_analytics::distribution::BinMethod::FreedmanDiaconis,
+        BinMethod::Fixed(k) => u_analytics::distribution::BinMethod::Fixed(k),
     };
     u_analytics::distribution::histogram_bins(data, bin_method).map(|bins| HistogramResult {
         n_bins: bins.n_bins,
@@ -766,6 +770,34 @@ mod tests {
     #[test]
     fn histogram_constant() {
         assert!(histogram(&[5.0, 5.0, 5.0], BinMethod::Sturges).is_none());
+    }
+
+    #[test]
+    fn histogram_fixed_exact_count() {
+        let data: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let result = histogram(&data, BinMethod::Fixed(7)).unwrap();
+        assert_eq!(result.n_bins, 7);
+        assert_eq!(result.edges.len(), 8);
+        assert_eq!(result.counts.iter().sum::<usize>(), 100);
+        assert_eq!(result.method, BinMethod::Fixed(7));
+    }
+
+    #[test]
+    fn histogram_fixed_zero_invalid() {
+        assert!(histogram(&[1.0, 2.0, 3.0], BinMethod::Fixed(0)).is_none());
+    }
+
+    #[test]
+    fn distribution_analysis_fixed_bins() {
+        let data: Vec<f64> = (0..50).map(|i| i as f64).collect();
+        let config = DistributionConfig {
+            bin_method: BinMethod::Fixed(5),
+            ..Default::default()
+        };
+        let result = distribution_analysis(&data, &config).unwrap();
+        let hist = result.histogram.expect("histogram requested");
+        assert_eq!(hist.n_bins, 5);
+        assert_eq!(hist.method, BinMethod::Fixed(5));
     }
 
     // ── QQ-plot ─────────────────────────────────────────────────
