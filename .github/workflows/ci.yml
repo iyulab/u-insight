@@ -24,6 +24,8 @@ jobs:
           git clone --depth 1 https://github.com/iyulab/u-analytics.git ../../algorithms/u-analytics
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --all-features
       # build.rs regenerates include/u_insight.h via cbindgen on every check/build.
       # If the committed header drifted from the current #[repr(C)] FFI surface,
@@ -67,6 +69,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --all-features -- -D warnings
 
   test:
@@ -86,6 +90,8 @@ jobs:
           git clone --depth 1 https://github.com/iyulab/u-analytics.git ../../algorithms/u-analytics
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run tests
         run: cargo test --all-features
 
@@ -102,6 +108,8 @@ jobs:
           git clone --depth 1 https://github.com/iyulab/u-analytics.git ../../algorithms/u-analytics
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo doc --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
@@ -138,6 +146,8 @@ jobs:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v4
         with:
@@ -159,6 +169,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --lib --target wasm32-unknown-unknown
 
   semver:
@@ -174,6 +186,8 @@ jobs:
           git clone --depth 1 https://github.com/iyulab/u-analytics.git ../../algorithms/u-analytics
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check public API against the latest crates.io release
         uses: obi1kenobi/cargo-semver-checks-action@v2
 
