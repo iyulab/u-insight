@@ -399,6 +399,19 @@ Feature importance via permutation, ANOVA, or mutual information.
 { "method": "permutation", "features": [{ "name": "f1", "index": 0, "score": 0.8, "std_dev": 0.1 }], "baseline_score": 0.5 }
 ```
 
+## npm (WebAssembly)
+
+```bash
+npm install @iyulab/u-insight
+```
+
+The package resolves per environment via a conditional `exports` map:
+
+| Environment | Entry |
+|---|---|
+| Bundlers (webpack, Vite, …) | ESM + WebAssembly ESM-integration (`default` condition) |
+| Node.js — `require()`, ESM `import`, CJS TS runners (`tsx`, `ts-node`) | CJS glue loading the wasm from the filesystem (`node` condition) — no loader hooks or flags |
+
 ## Related
 
 - [u-analytics](https://github.com/iyulab/u-analytics) -- Statistical analytics
