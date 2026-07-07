@@ -873,6 +873,16 @@ pub enum Linkage {
     Ward,
 }
 
+/// Default upper bound on the point count accepted by [`hierarchical`].
+///
+/// Hierarchical clustering needs a condensed distance matrix of
+/// `n(n−1)/2 × 8` bytes (≈ 400 MB at `n = 10_000`, ≈ 1.6 GB at `n = 20_000`).
+/// Since the O(n²) NN-chain makes time cheap, memory is the binding constraint;
+/// this guard rejects oversized inputs before they can exhaust memory (a
+/// browser-tab / WASM crash). Callers can raise it, or set
+/// [`HierarchicalConfig::max_points`] to `0` to disable the guard.
+pub const DEFAULT_MAX_POINTS: usize = 10_000;
+
 /// Configuration for hierarchical agglomerative clustering.
 #[derive(Debug, Clone)]
 pub struct HierarchicalConfig {
@@ -882,6 +892,11 @@ pub struct HierarchicalConfig {
     pub n_clusters: Option<usize>,
     /// Distance threshold for cutting the dendrogram. Mutually exclusive with `n_clusters`.
     pub distance_threshold: Option<f64>,
+    /// Maximum number of input points (memory guard). Inputs larger than this
+    /// are rejected with an error rather than allocating an O(n²) distance
+    /// matrix that could exhaust memory. `0` disables the guard.
+    /// Default: [`DEFAULT_MAX_POINTS`].
+    pub max_points: usize,
 }
 
 impl HierarchicalConfig {
@@ -891,6 +906,7 @@ impl HierarchicalConfig {
             linkage: Linkage::Ward,
             n_clusters: Some(k),
             distance_threshold: None,
+            max_points: DEFAULT_MAX_POINTS,
         }
     }
 
@@ -900,12 +916,19 @@ impl HierarchicalConfig {
             linkage: Linkage::Ward,
             n_clusters: None,
             distance_threshold: Some(threshold),
+            max_points: DEFAULT_MAX_POINTS,
         }
     }
 
     /// Sets the linkage criterion.
     pub fn linkage(mut self, linkage: Linkage) -> Self {
         self.linkage = linkage;
+        self
+    }
+
+    /// Sets the maximum input point count (memory guard). `0` disables it.
+    pub fn max_points(mut self, max_points: usize) -> Self {
+        self.max_points = max_points;
         self
     }
 }
@@ -955,8 +978,12 @@ pub struct HierarchicalResult {
 ///
 /// # Complexity
 ///
-/// Time: O(n³) — naive implementation scanning for minimum each step.
-/// Space: O(n²) — condensed distance matrix.
+/// Time: O(n²) — the nearest-neighbor-chain algorithm merges a reciprocal
+/// nearest-neighbor pair each step (valid for the supported reducible
+/// linkages), replacing the naive O(n²)-per-step min rescan that made the
+/// whole procedure O(n³). For inputs in general position the resulting
+/// dendrogram is identical to the naive scan.
+/// Space: O(n²) — condensed distance matrix (plus O(n) working state).
 ///
 /// # References
 ///
@@ -994,6 +1021,21 @@ pub fn hierarchical(
         return Err(InsightError::InsufficientData {
             min_required: 2,
             actual: n,
+        });
+    }
+
+    // Memory guard: the condensed distance matrix is O(n²), so reject oversized
+    // inputs before allocating rather than risk exhausting memory. `0` disables.
+    if config.max_points != 0 && n > config.max_points {
+        return Err(InsightError::InvalidParameter {
+            name: "max_points".into(),
+            message: format!(
+                "input has {n} points, exceeding max_points = {} (hierarchical clustering \
+                 allocates an O(n²) distance matrix, ≈ {} MB here); reduce the input, raise \
+                 max_points, or set it to 0 to disable the guard",
+                config.max_points,
+                (n.saturating_mul(n.saturating_sub(1)) / 2).saturating_mul(8) / (1024 * 1024),
+            ),
         });
     }
 
@@ -1051,83 +1093,106 @@ pub fn hierarchical(
         }
     }
 
-    // Active cluster tracking
-    let mut active = vec![true; n]; // which clusters are still alive
-    let mut sizes = vec![1_usize; n]; // cluster sizes
-    let mut merges = Vec::with_capacity(n - 1);
+    // Nearest-neighbor chain (NN-chain) agglomeration.
+    //
+    // The naive approach rescans all O(n²) active pairs on every merge → O(n³)
+    // (a multi-second main-thread freeze at n≈3000–4000). NN-chain instead grows
+    // a chain of clusters until its last two are *reciprocal* nearest neighbors,
+    // which — for reducible linkages (single, complete, average, Ward, i.e. all
+    // supported here) — is always safe to merge. Each cluster enters the chain
+    // O(1) amortized times and each extension is an O(n) row scan, giving O(n²)
+    // time and only O(n) memory beyond the distance matrix.
+    //
+    // Reference: Müllner (2011), "Modern hierarchical, agglomerative clustering
+    // algorithms", NN-chain; Murtagh & Legendre (2014).
+    let mut sizes = vec![1_usize; n]; // cluster size per slot; 0 = dissolved
+    let mut merges: Vec<Merge> = Vec::with_capacity(n - 1);
+    let mut chain: Vec<usize> = Vec::with_capacity(n);
+    let mut next_seed = 0usize; // cursor for picking a fresh chain root
 
-    // Cluster label mapping: original index → current cluster id
-    // New merged clusters get ids n, n+1, …
-    for _step in 0..(n - 1) {
-        // Find closest pair among active clusters
-        let mut best_i = 0;
-        let mut best_j = 0;
-        let mut best_d = f64::INFINITY;
+    for _ in 0..(n - 1) {
+        if chain.is_empty() {
+            while sizes[next_seed] == 0 {
+                next_seed += 1;
+            }
+            chain.push(next_seed);
+        }
 
-        let active_indices: Vec<usize> = (0..active.len()).filter(|&i| active[i]).collect();
+        // Grow the chain until its last two clusters are reciprocal NNs.
+        let (mut a, mut b, best_d);
+        loop {
+            let x = *chain.last().expect("chain non-empty");
 
-        for ai in 0..active_indices.len() {
-            for aj in (ai + 1)..active_indices.len() {
-                let ci = active_indices[ai];
-                let cj = active_indices[aj];
-                let d_val = dist[condensed_index(active.len(), ci, cj)];
-                if d_val < best_d {
-                    best_d = d_val;
-                    best_i = ci;
-                    best_j = cj;
+            // Nearest active neighbor of x. Seed with the previous chain element
+            // and only replace on a strict improvement, so ties resolve toward
+            // the previous element — this guarantees the chain terminates.
+            let mut y = usize::MAX;
+            let mut y_d = f64::INFINITY;
+            if chain.len() >= 2 {
+                let prev = chain[chain.len() - 2];
+                y = prev;
+                y_d = dist[condensed_index(n, x.min(prev), x.max(prev))];
+            }
+            for c in 0..n {
+                if c == x || sizes[c] == 0 {
+                    continue;
+                }
+                let d_xc = dist[condensed_index(n, x.min(c), x.max(c))];
+                if d_xc < y_d {
+                    y_d = d_xc;
+                    y = c;
                 }
             }
+
+            if chain.len() >= 2 && y == chain[chain.len() - 2] {
+                a = x;
+                b = y;
+                best_d = y_d;
+                chain.pop(); // remove x
+                chain.pop(); // remove y
+                break;
+            }
+            chain.push(y);
         }
 
+        // Normalize a < b; dissolve slot a, keep slot b as the merged cluster.
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        let na = sizes[a];
+        let nb = sizes[b];
         let merge_dist = if use_sq { best_d.sqrt() } else { best_d };
-
         merges.push(Merge {
-            cluster_a: best_i,
-            cluster_b: best_j,
+            cluster_a: a, // original slot indices; canonicalized below
+            cluster_b: b,
             distance: merge_dist,
-            size: sizes[best_i] + sizes[best_j],
+            size: na + nb,
         });
 
-        // Update distances from new cluster to all remaining clusters
-        // using Lance-Williams formula.
-        let si = sizes[best_i];
-        let sj = sizes[best_j];
-        let d_ij = best_d;
-
-        for &ck in &active_indices {
-            if ck == best_i || ck == best_j {
+        // Lance-Williams update of the surviving cluster b's row.
+        let d_ab = best_d;
+        sizes[a] = 0;
+        sizes[b] = na + nb;
+        for c in 0..n {
+            if c == b || sizes[c] == 0 {
                 continue;
             }
-            let d_ik = dist[condensed_index(active.len(), best_i.min(ck), best_i.max(ck))];
-            let d_jk = dist[condensed_index(active.len(), best_j.min(ck), best_j.max(ck))];
-            let sk = sizes[ck];
-
-            let d_new = lance_williams(config.linkage, d_ik, d_jk, d_ij, si, sj, sk);
-
-            // Store in best_i's row (we reuse best_i as the merged cluster)
-            let idx = condensed_index(active.len(), best_i.min(ck), best_i.max(ck));
-            dist[idx] = d_new;
+            let d_ac = dist[condensed_index(n, a.min(c), a.max(c))];
+            let d_bc = dist[condensed_index(n, b.min(c), b.max(c))];
+            let d_new = lance_williams(config.linkage, d_ac, d_bc, d_ab, na, nb, sizes[c]);
+            let lo = b.min(c);
+            let hi = b.max(c);
+            dist[condensed_index(n, lo, hi)] = d_new;
         }
-
-        // Deactivate best_j, keep best_i as the merged cluster
-        active[best_j] = false;
-        sizes[best_i] = si + sj;
-
-        // Remap cluster ids for the merge record
-        merges.last_mut().expect("just pushed").cluster_a = best_i;
-        merges.last_mut().expect("just pushed").cluster_b = best_j;
     }
 
-    // Assign sequential cluster IDs to the merge history.
-    // Original points: 0..n, merged clusters: n, n+1, ...
-    let mut id_map: Vec<usize> = (0..n).collect();
-    for (next_merge_id, merge) in (n..).zip(merges.iter_mut()) {
-        let a = merge.cluster_a;
-        let b = merge.cluster_b;
-        merge.cluster_a = id_map[a];
-        merge.cluster_b = id_map[b];
-        id_map[a] = next_merge_id;
-    }
+    // Canonicalize the dendrogram: NN-chain emits merges in reciprocal-NN order,
+    // so stable-sort by ascending height (reducibility makes this a valid
+    // topological order) and relabel pair references to sequential ids
+    // (original points 0..n, the i-th sorted merge → id n+i) via union-find —
+    // the convention the naive scan produced and `cut_dendrogram_*` expects.
+    merges.sort_by(|m1, m2| m1.distance.total_cmp(&m2.distance));
+    label_merges(&mut merges, n);
 
     // Cut dendrogram if requested
     let (labels, n_clusters) = if let Some(k) = config.n_clusters {
@@ -1188,6 +1253,41 @@ fn lance_williams(
 }
 
 /// Cut dendrogram to produce exactly `k` flat clusters.
+/// Relabels merge pair references to the canonical dendrogram id scheme after
+/// the merges have been stable-sorted by ascending height.
+///
+/// On entry each `Merge`'s `cluster_a`/`cluster_b` are the original *slot*
+/// indices (`0..n`) of the two clusters merged. On exit they are node ids in
+/// the SciPy convention: original points keep `0..n`, and the `i`-th merge (in
+/// the now-sorted order) forms cluster `n + i`, with `cluster_a < cluster_b`.
+/// A union-find over `2n − 1` nodes resolves each slot to its current cluster.
+///
+/// Reference: SciPy `scipy.cluster.hierarchy` `label` / `LinkageUnionFind`.
+fn label_merges(merges: &mut [Merge], n: usize) {
+    // n ≥ 2 guaranteed by the caller, so 2n − 1 ≥ 3.
+    let mut parent: Vec<usize> = (0..(2 * n - 1)).collect();
+
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]]; // path compression
+            x = parent[x];
+        }
+        x
+    }
+
+    // The i-th merge (in sorted order) forms cluster n + i.
+    for (i, merge) in merges.iter_mut().enumerate() {
+        let ra = find(&mut parent, merge.cluster_a);
+        let rb = find(&mut parent, merge.cluster_b);
+        let (lo, hi) = if ra < rb { (ra, rb) } else { (rb, ra) };
+        merge.cluster_a = lo;
+        merge.cluster_b = hi;
+        let new_label = n + i;
+        parent[ra] = new_label;
+        parent[rb] = new_label;
+    }
+}
+
 fn cut_dendrogram_k(merges: &[Merge], n: usize, k: usize) -> Vec<usize> {
     if k >= n {
         // Each point is its own cluster
@@ -1208,13 +1308,11 @@ fn cut_dendrogram_k(merges: &[Merge], n: usize, k: usize) -> Vec<usize> {
         x
     }
 
-    for merge in merges.iter().take(n_merges_to_apply) {
-        let new_id = n + merges
-            .iter()
-            .position(|m| std::ptr::eq(m, merge))
-            .unwrap_or(0);
-        // Actually we know merge ids: cluster_a and cluster_b are already
-        // in the sequential id scheme (0..n original, n.. merged)
+    // The i-th merge (in ascending-height order) formed cluster n + i, matching
+    // the id scheme produced by `label_merges` (and mirroring the sibling
+    // `cut_dendrogram_threshold`).
+    for (i, merge) in merges.iter().take(n_merges_to_apply).enumerate() {
+        let new_id = n + i;
         let ra = find(&mut parent, merge.cluster_a);
         let rb = find(&mut parent, merge.cluster_b);
         parent[ra] = new_id;
@@ -3161,6 +3259,7 @@ mod tests {
             linkage: Linkage::Ward,
             n_clusters: None,
             distance_threshold: None,
+            max_points: DEFAULT_MAX_POINTS,
         };
         let result = hierarchical(&data, &config).unwrap();
 
@@ -3219,6 +3318,153 @@ mod tests {
         assert_eq!(result.merges.len(), 1);
         assert!((result.merges[0].distance - 5.0).abs() < 1e-10);
         assert_eq!(result.merges[0].size, 2);
+    }
+
+    #[test]
+    fn hierarchical_max_points_guard() {
+        let data: Vec<Vec<f64>> = (0..12).map(|i| vec![i as f64, 0.0]).collect();
+
+        // Over the limit → rejected with a clear parameter error (which a
+        // consumer can surface as a user-facing message).
+        let over = hierarchical(&data, &HierarchicalConfig::with_k(2).max_points(10));
+        assert!(matches!(over, Err(InsightError::InvalidParameter { .. })));
+
+        // At the limit → accepted.
+        assert!(hierarchical(&data, &HierarchicalConfig::with_k(2).max_points(12)).is_ok());
+
+        // 0 disables the guard.
+        assert!(hierarchical(&data, &HierarchicalConfig::with_k(2).max_points(0)).is_ok());
+
+        // The guard is active by default (opt-out, not opt-in).
+        assert_eq!(HierarchicalConfig::with_k(2).max_points, DEFAULT_MAX_POINTS);
+        assert_eq!(HierarchicalConfig::with_threshold(1.0).max_points, DEFAULT_MAX_POINTS);
+    }
+
+    #[test]
+    fn hierarchical_large_n_is_bounded() {
+        // Regression (ISSUE-20260707b): the merge phase must be O(n² log n),
+        // not O(n³). The old naive min-scan froze the browser main thread
+        // (~1.4s at n=2000, ~7.5s at n=3000, release). The heap search is
+        // sub-second in release. This runs in a (slow, unoptimized) debug test
+        // build, so the ceiling is generous — it still cleanly separates
+        // O(n² log n) from a reintroduced O(n³) scan (which is tens of seconds
+        // at this n even in release, minutes in debug).
+        let n = 2000;
+        let data: Vec<Vec<f64>> = (0..n)
+            .map(|i| vec![((i * 37) % 100) as f64, ((i * 53) % 100) as f64])
+            .collect();
+        let config = HierarchicalConfig::with_k(3).linkage(Linkage::Ward);
+
+        let t = std::time::Instant::now();
+        let result = hierarchical(&data, &config).unwrap();
+        let elapsed = t.elapsed();
+
+        // Correct, complete output under the faster algorithm.
+        assert_eq!(result.merges.len(), n - 1);
+        assert_eq!(result.n_clusters, Some(3));
+        assert_eq!(result.labels.as_ref().unwrap().len(), n);
+        // Merge heights are non-decreasing (global-min semantics preserved).
+        for i in 1..result.merges.len() {
+            assert!(result.merges[i].distance >= result.merges[i - 1].distance - 1e-9);
+        }
+        assert!(
+            elapsed.as_secs() < 10,
+            "hierarchical must be sub-O(n³); n={n} took {elapsed:?}"
+        );
+    }
+
+    /// Brute-force O(n³) global-minimum-scan agglomeration — the previous
+    /// shipping algorithm, kept here as a correctness oracle for the NN-chain
+    /// implementation. Produces flat labels via the same `cut_dendrogram_k`.
+    fn naive_hierarchical_labels(data: &[Vec<f64>], linkage: Linkage, k: usize) -> Vec<usize> {
+        let n = data.len();
+        let use_sq = linkage == Linkage::Ward;
+        let cond_len = n * (n - 1) / 2;
+        let mut dist = vec![0.0_f64; cond_len];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d_sq = euclidean_dist_sq(&data[i], &data[j]);
+                dist[condensed_index(n, i, j)] = if use_sq { d_sq } else { d_sq.sqrt() };
+            }
+        }
+        let mut active = vec![true; n];
+        let mut sizes = vec![1_usize; n];
+        let mut merges: Vec<Merge> = Vec::with_capacity(n - 1);
+        for _ in 0..(n - 1) {
+            let (mut bi, mut bj, mut bd) = (0usize, 0usize, f64::INFINITY);
+            let act: Vec<usize> = (0..n).filter(|&i| active[i]).collect();
+            for ai in 0..act.len() {
+                for aj in (ai + 1)..act.len() {
+                    let d = dist[condensed_index(n, act[ai], act[aj])];
+                    if d < bd {
+                        bd = d;
+                        bi = act[ai];
+                        bj = act[aj];
+                    }
+                }
+            }
+            let merge_dist = if use_sq { bd.sqrt() } else { bd };
+            merges.push(Merge {
+                cluster_a: bi,
+                cluster_b: bj,
+                distance: merge_dist,
+                size: sizes[bi] + sizes[bj],
+            });
+            let (si, sj) = (sizes[bi], sizes[bj]);
+            for &ck in &act {
+                if ck == bi || ck == bj {
+                    continue;
+                }
+                let d_ik = dist[condensed_index(n, bi.min(ck), bi.max(ck))];
+                let d_jk = dist[condensed_index(n, bj.min(ck), bj.max(ck))];
+                let d_new = lance_williams(linkage, d_ik, d_jk, bd, si, sj, sizes[ck]);
+                dist[condensed_index(n, bi.min(ck), bi.max(ck))] = d_new;
+            }
+            active[bj] = false;
+            sizes[bi] = si + sj;
+        }
+        let mut id_map: Vec<usize> = (0..n).collect();
+        for (nid, m) in (n..).zip(merges.iter_mut()) {
+            let (a, b) = (m.cluster_a, m.cluster_b);
+            m.cluster_a = id_map[a];
+            m.cluster_b = id_map[b];
+            id_map[a] = nid;
+        }
+        cut_dendrogram_k(&merges, n, k)
+    }
+
+    #[test]
+    fn hierarchical_matches_naive_reference() {
+        // NN-chain must produce the same flat clusters as the brute-force
+        // reference across every supported linkage. Deterministic hash-based
+        // coordinates give distinct pairwise distances (general position), so
+        // the dendrogram — hence the flat labels — is unique and must match
+        // exactly. Guards the exactness of the O(n²) rewrite (ISSUE-20260707b).
+        let n = 40;
+        let data: Vec<Vec<f64>> = (0..n)
+            .map(|i| {
+                let f = i as f64 + 1.0;
+                let a = (f * 12.9898).sin() * 43758.5453;
+                let b = (f * 78.233).sin() * 12345.6789;
+                vec![a.fract().abs() * 100.0, b.fract().abs() * 100.0]
+            })
+            .collect();
+
+        for linkage in [
+            Linkage::Single,
+            Linkage::Complete,
+            Linkage::Average,
+            Linkage::Ward,
+        ] {
+            for k in [2usize, 4, 7] {
+                let got = hierarchical(&data, &HierarchicalConfig::with_k(k).linkage(linkage))
+                    .unwrap()
+                    .labels
+                    .unwrap();
+                let want = naive_hierarchical_labels(&data, linkage, k);
+                assert_eq!(got, want, "linkage {linkage:?}, k={k}: NN-chain != naive");
+            }
+        }
     }
 
     // ── HDBSCAN ────────────────────────────────────────────────────

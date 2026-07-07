@@ -534,6 +534,9 @@ struct HierarchicalConfigDto {
     n_clusters: Option<usize>,
     /// Distance threshold for dendrogram cut (mutually exclusive with n_clusters).
     distance_threshold: Option<f64>,
+    /// Max input points (memory guard). Omit for the default; `0` disables it.
+    /// Rejects oversized inputs before allocating the O(n²) distance matrix.
+    max_points: Option<usize>,
 }
 
 fn default_linkage() -> String {
@@ -584,7 +587,7 @@ pub fn hierarchical(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> 
         _ => Linkage::Ward,
     };
 
-    let config = match (cfg.n_clusters, cfg.distance_threshold) {
+    let mut config = match (cfg.n_clusters, cfg.distance_threshold) {
         (Some(k), _) => HierarchicalConfig::with_k(k).linkage(linkage),
         (None, Some(t)) => HierarchicalConfig::with_threshold(t).linkage(linkage),
         (None, None) => {
@@ -593,6 +596,9 @@ pub fn hierarchical(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> 
             ))
         }
     };
+    if let Some(mp) = cfg.max_points {
+        config.max_points = mp;
+    }
 
     let result = hier_fn(&data, &config).map_err(js_err)?;
 

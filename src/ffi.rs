@@ -1654,6 +1654,7 @@ pub unsafe extern "C" fn insight_hierarchical(
                 linkage: linkage_method,
                 n_clusters: None,
                 distance_threshold: None,
+                max_points: crate::clustering::DEFAULT_MAX_POINTS,
             }
         };
 

@@ -8,6 +8,28 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- **`hierarchical` is now O(n²) instead of O(n³)** (all bindings). The merge
+  phase rescanned every active pair each step, so on normal dataset sizes it
+  froze the calling thread — ~1.4 s at n=2000, ~7.5 s at n=3000, ~12.5 s at
+  n=4000 — blocking the browser main thread (an effective DoS on ordinary
+  input). Replaced the naive min-scan with the nearest-neighbor-chain algorithm
+  (valid for all supported reducible linkages: single/complete/average/Ward);
+  measured n=4000 drops from ~12.5 s to ~66 ms (~190×), with clean O(n²)
+  scaling. Output is unchanged for inputs in general position (verified against
+  a brute-force reference across every linkage); for tied distances the `merges`
+  array *ordering* may differ, but the tree and flat labels are equivalent.
+
+### Added
+
+- **`max_points` memory guard for `hierarchical`.** Because the O(n²) rewrite
+  makes time cheap, the O(n²) distance matrix is now the binding constraint;
+  inputs larger than `max_points` are rejected with a clear error (stating the
+  count, the limit, and the estimated matrix size) before allocating. Exposed in
+  the WASM config (`max_points?: number`); defaults to `10000` (≈400 MB matrix),
+  `0` disables it. C-FFI callers get the default guard (no ABI change).
+
 ## [0.12.2] - 2026-07-05
 
 ### Fixed

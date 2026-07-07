@@ -334,7 +334,18 @@ DBSCAN density-based clustering. `config`: `{ "epsilon": 1.5, "min_samples": 3 }
 
 #### `hierarchical(data, config) -> HierarchicalResult`
 
-Hierarchical agglomerative clustering. `config`: `{ "linkage": "ward", "n_clusters": 3 }` or `{ "linkage": "single", "distance_threshold": 5.0 }`.
+Hierarchical agglomerative clustering (nearest-neighbor-chain, **O(n²)** time / O(n²) memory). `config`: `{ "linkage": "ward", "n_clusters": 3 }` or `{ "linkage": "single", "distance_threshold": 5.0 }`.
+
+**Config fields:**
+- `linkage` — `"single" | "complete" | "average" | "ward"` (default `"ward"`).
+- `n_clusters` — flat clusters to extract (mutually exclusive with `distance_threshold`).
+- `distance_threshold` — dendrogram cut height (mutually exclusive with `n_clusters`).
+- `max_points` — memory guard; inputs with more points are rejected before allocating the O(n²) distance matrix. Omit for the default (`10000`, ≈400 MB matrix); set `0` to disable. Raise it for large native batches; lower it for tight memory (e.g. a browser tab).
+
+```js
+// large dataset on a memory-constrained page: cap it explicitly
+hierarchical(data, { linkage: "ward", n_clusters: 3, max_points: 5000 });
+```
 
 **Output:**
 ```json
