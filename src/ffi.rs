@@ -1647,14 +1647,20 @@ pub unsafe extern "C" fn insight_hierarchical(
             _ => Linkage::Ward,
         };
 
+        // The C ABI exposes no max_points override, so preserve prior unlimited
+        // behavior (`max_points: 0`) for native callers rather than impose an
+        // un-escapable default guard. The Rust/WASM APIs keep the protective
+        // default (and can override it).
         let config = if n_clusters > 0 {
-            HierarchicalConfig::with_k(n_clusters as usize).linkage(linkage_method)
+            HierarchicalConfig::with_k(n_clusters as usize)
+                .linkage(linkage_method)
+                .max_points(0)
         } else {
             HierarchicalConfig {
                 linkage: linkage_method,
                 n_clusters: None,
                 distance_threshold: None,
-                max_points: crate::clustering::DEFAULT_MAX_POINTS,
+                max_points: 0,
             }
         };
 
