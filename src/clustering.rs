@@ -3337,7 +3337,10 @@ mod tests {
 
         // The guard is active by default (opt-out, not opt-in).
         assert_eq!(HierarchicalConfig::with_k(2).max_points, DEFAULT_MAX_POINTS);
-        assert_eq!(HierarchicalConfig::with_threshold(1.0).max_points, DEFAULT_MAX_POINTS);
+        assert_eq!(
+            HierarchicalConfig::with_threshold(1.0).max_points,
+            DEFAULT_MAX_POINTS
+        );
     }
 
     #[test]
