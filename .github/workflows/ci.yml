@@ -15,6 +15,14 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  version-consistency:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: NuGet binding must share the crate version
+        run: bash scripts/check-version-consistency.sh
+
   check:
     name: Check
     runs-on: ubuntu-latest
