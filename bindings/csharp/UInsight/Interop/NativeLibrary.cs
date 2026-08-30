@@ -268,6 +268,25 @@ internal static partial class NativeLibrary
     public static partial void insight_free_kde_result(
         ref NativeStructs.CKdeResult result);
 
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_xbar_r_chart(
+        double* data, uint nSubgroups, uint subgroupSize,
+        ref NativeStructs.CVariablesChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_xbar_s_chart(
+        double* data, uint nSubgroups, uint subgroupSize,
+        ref NativeStructs.CVariablesChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_individual_mr_chart(
+        double* data, uint n,
+        ref NativeStructs.CVariablesChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_variables_chart_result(
+        ref NativeStructs.CVariablesChartResult result);
+
     #endregion
 
     #region Helper Methods

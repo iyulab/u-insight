@@ -626,6 +626,82 @@ typedef struct CKdeResult {
 } CKdeResult;
 
 /**
+ * A single point on a control chart, with Nelson-rule violations as a bitmask.
+ *
+ * Bit `i` of `violation_mask` is set when Nelson rule `i + 1` fires at this
+ * point (bit 0 = beyond limits ... bit 7 = eight beyond 1-sigma). Zero means
+ * no violations were detected at this point.
+ */
+typedef struct CSpcChartPoint {
+  /**
+   * The computed statistic value (subgroup mean, range, standard deviation,
+   * individual observation, or moving range — depending on which series
+   * this point belongs to).
+   */
+  double value;
+  /**
+   * Bitmask of Nelson-rule violations detected at this point.
+   */
+  uint32_t violation_mask;
+} CSpcChartPoint;
+
+/**
+ * C-compatible result for a two-series variables control chart
+ * (X-bar-R, X-bar-S, or Individual-MR).
+ *
+ * The primary series is the mean/individual chart; the secondary series is
+ * the variation chart (R, S, or MR). `n_primary_points` and
+ * `n_secondary_points` may differ — the MR chart has one fewer point than
+ * the I chart (the first moving range is undefined).
+ */
+typedef struct CVariablesChartResult {
+  /**
+   * Primary (X-bar or Individual) chart upper control limit.
+   */
+  double primary_ucl;
+  /**
+   * Primary chart center line.
+   */
+  double primary_cl;
+  /**
+   * Primary chart lower control limit.
+   */
+  double primary_lcl;
+  /**
+   * Primary chart points. Caller must free with `insight_free_variables_chart_result`.
+   */
+  struct CSpcChartPoint *primary_points;
+  /**
+   * Number of primary chart points.
+   */
+  uint32_t n_primary_points;
+  /**
+   * Secondary (R, S, or MR) chart upper control limit.
+   */
+  double secondary_ucl;
+  /**
+   * Secondary chart center line.
+   */
+  double secondary_cl;
+  /**
+   * Secondary chart lower control limit.
+   */
+  double secondary_lcl;
+  /**
+   * Secondary chart points.
+   */
+  struct CSpcChartPoint *secondary_points;
+  /**
+   * Number of secondary chart points.
+   */
+  uint32_t n_secondary_points;
+  /**
+   * 1 if no Nelson-rule violations were detected on either series, 0 otherwise.
+   */
+  uint8_t in_control;
+} CVariablesChartResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1206,5 +1282,74 @@ int32_t insight_kde(const double *data,
  * The result must have been allocated by `insight_kde` and not yet freed.
  */
 INSIGHT_API void insight_free_kde_result(struct CKdeResult *result);
+
+/**
+ * Computes an X-bar-R control chart (subgroup mean + range).
+ *
+ * `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
+ * `subgroup_size`: fixed subgroup size, 2..=10.
+ * `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
+ * secondary series is R.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_variables_chart_result`.
+ *
+ * # Safety
+ * `data` must point to `n_subgroups * subgroup_size` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_xbar_r_chart(const double *data,
+                             uint32_t n_subgroups,
+                             uint32_t subgroup_size,
+                             struct CVariablesChartResult *out);
+
+/**
+ * Computes an X-bar-S control chart (subgroup mean + standard deviation).
+ *
+ * `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
+ * `subgroup_size`: fixed subgroup size, 2..=10.
+ * `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
+ * secondary series is S.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_variables_chart_result`.
+ *
+ * # Safety
+ * `data` must point to `n_subgroups * subgroup_size` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_xbar_s_chart(const double *data,
+                             uint32_t n_subgroups,
+                             uint32_t subgroup_size,
+                             struct CVariablesChartResult *out);
+
+/**
+ * Computes an Individual-MR control chart (single observations + moving range).
+ *
+ * `data`: individual observations, length `n`.
+ * `out`: pointer to a `CVariablesChartResult` — primary series is
+ * Individual (I), secondary series is Moving Range (MR, one fewer point
+ * than I — the first moving range is undefined).
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_variables_chart_result`.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_individual_mr_chart(const double *data,
+                                    uint32_t n,
+                                    struct CVariablesChartResult *out);
+
+/**
+ * Frees a `CVariablesChartResult` allocated by `insight_xbar_r_chart`,
+ * `insight_xbar_s_chart`, or `insight_individual_mr_chart`.
+ *
+ * # Safety
+ * The result must have been allocated by one of those functions and not
+ * yet freed.
+ */
+INSIGHT_API void insight_free_variables_chart_result(struct CVariablesChartResult *result);
 
 #endif  /* U_INSIGHT_H */

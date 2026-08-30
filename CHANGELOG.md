@@ -16,9 +16,15 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 - **`insight_kde`** / **`insight_free_kde_result`**: Gaussian kernel density
   estimation with Silverman/Scott/manual bandwidth selection (FFI + C#
   `InsightClient.Kde`). Exposes `u-analytics::distribution::kde`.
+- **`insight_xbar_r_chart`**, **`insight_xbar_s_chart`**,
+  **`insight_individual_mr_chart`**, **`insight_free_variables_chart_result`**:
+  SPC variables control charts (X-bar-R, X-bar-S, Individual-MR) with
+  Nelson-rule violation detection, exposed as bit flags per point (FFI + C#
+  `InsightClient.XBarRChart` / `XBarSChart` / `IndividualMrChart`). Exposes
+  `u-analytics::spc::{XBarRChart, XBarSChart, IndividualMRChart}`.
 
-First of several `u-analytics` domains planned for FFI exposure (SPC
-control charts, process capability, and Weibull reliability remain).
+Second and third of several `u-analytics` domains planned for FFI exposure
+(SPC attributes charts, process capability, and Weibull reliability remain).
 
 ## [0.13.0] - 2026-07-07
 

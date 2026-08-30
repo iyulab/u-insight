@@ -2665,6 +2665,356 @@ pub unsafe extern "C" fn insight_free_kde_result(result: *mut CKdeResult) {
     }
 }
 
+// ── SPC Variables Control Charts FFI (X-bar-R, X-bar-S, Individual-MR) ──
+
+/// A single point on a control chart, with Nelson-rule violations as a bitmask.
+///
+/// Bit `i` of `violation_mask` is set when Nelson rule `i + 1` fires at this
+/// point (bit 0 = beyond limits ... bit 7 = eight beyond 1-sigma). Zero means
+/// no violations were detected at this point.
+#[repr(C)]
+pub struct CSpcChartPoint {
+    /// The computed statistic value (subgroup mean, range, standard deviation,
+    /// individual observation, or moving range — depending on which series
+    /// this point belongs to).
+    pub value: f64,
+    /// Bitmask of Nelson-rule violations detected at this point.
+    pub violation_mask: u32,
+}
+
+/// C-compatible result for a two-series variables control chart
+/// (X-bar-R, X-bar-S, or Individual-MR).
+///
+/// The primary series is the mean/individual chart; the secondary series is
+/// the variation chart (R, S, or MR). `n_primary_points` and
+/// `n_secondary_points` may differ — the MR chart has one fewer point than
+/// the I chart (the first moving range is undefined).
+#[repr(C)]
+pub struct CVariablesChartResult {
+    /// Primary (X-bar or Individual) chart upper control limit.
+    pub primary_ucl: f64,
+    /// Primary chart center line.
+    pub primary_cl: f64,
+    /// Primary chart lower control limit.
+    pub primary_lcl: f64,
+    /// Primary chart points. Caller must free with `insight_free_variables_chart_result`.
+    pub primary_points: *mut CSpcChartPoint,
+    /// Number of primary chart points.
+    pub n_primary_points: u32,
+    /// Secondary (R, S, or MR) chart upper control limit.
+    pub secondary_ucl: f64,
+    /// Secondary chart center line.
+    pub secondary_cl: f64,
+    /// Secondary chart lower control limit.
+    pub secondary_lcl: f64,
+    /// Secondary chart points.
+    pub secondary_points: *mut CSpcChartPoint,
+    /// Number of secondary chart points.
+    pub n_secondary_points: u32,
+    /// 1 if no Nelson-rule violations were detected on either series, 0 otherwise.
+    pub in_control: u8,
+}
+
+fn spc_violation_mask(violations: &[u_analytics::spc::ViolationType]) -> u32 {
+    use u_analytics::spc::ViolationType::*;
+    let mut mask = 0u32;
+    for v in violations {
+        let bit = match v {
+            BeyondLimits => 0,
+            NineOneSide => 1,
+            SixTrend => 2,
+            FourteenAlternating => 3,
+            TwoOfThreeBeyond2Sigma => 4,
+            FourOfFiveBeyond1Sigma => 5,
+            FifteenWithin1Sigma => 6,
+            EightBeyond1Sigma => 7,
+        };
+        mask |= 1 << bit;
+    }
+    mask
+}
+
+fn spc_points_to_c_array(points: &[u_analytics::spc::ChartPoint]) -> (*mut CSpcChartPoint, u32) {
+    if points.is_empty() {
+        return (ptr::null_mut(), 0);
+    }
+    let arr: Vec<CSpcChartPoint> = points
+        .iter()
+        .map(|p| CSpcChartPoint {
+            value: p.value,
+            violation_mask: spc_violation_mask(&p.violations),
+        })
+        .collect();
+    let n = arr.len() as u32;
+    let mut boxed = arr.into_boxed_slice();
+    let out_ptr = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    (out_ptr, n)
+}
+
+fn build_variables_chart_result(
+    primary_limits: u_analytics::spc::ControlLimits,
+    primary_points: &[u_analytics::spc::ChartPoint],
+    secondary_limits: u_analytics::spc::ControlLimits,
+    secondary_points: &[u_analytics::spc::ChartPoint],
+    in_control: bool,
+) -> CVariablesChartResult {
+    let (primary_ptr, n_primary) = spc_points_to_c_array(primary_points);
+    let (secondary_ptr, n_secondary) = spc_points_to_c_array(secondary_points);
+    CVariablesChartResult {
+        primary_ucl: primary_limits.ucl,
+        primary_cl: primary_limits.cl,
+        primary_lcl: primary_limits.lcl,
+        primary_points: primary_ptr,
+        n_primary_points: n_primary,
+        secondary_ucl: secondary_limits.ucl,
+        secondary_cl: secondary_limits.cl,
+        secondary_lcl: secondary_limits.lcl,
+        secondary_points: secondary_ptr,
+        n_secondary_points: n_secondary,
+        in_control: u8::from(in_control),
+    }
+}
+
+/// Computes an X-bar-R control chart (subgroup mean + range).
+///
+/// `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
+/// `subgroup_size`: fixed subgroup size, 2..=10.
+/// `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
+/// secondary series is R.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_variables_chart_result`.
+///
+/// # Safety
+/// `data` must point to `n_subgroups * subgroup_size` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_xbar_r_chart(
+    data: *const f64,
+    n_subgroups: u32,
+    subgroup_size: u32,
+    out: *mut CVariablesChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+        if !(2..=10).contains(&subgroup_size) {
+            set_last_error("subgroup_size must be 2..=10");
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
+
+        use u_analytics::spc::ControlChart;
+
+        let ns = n_subgroups as usize;
+        let sg = subgroup_size as usize;
+        let raw = unsafe { slice::from_raw_parts(data, ns * sg) };
+
+        let mut chart = u_analytics::spc::XBarRChart::new(sg);
+        for i in 0..ns {
+            chart.add_sample(&raw[i * sg..(i + 1) * sg]);
+        }
+
+        match (chart.control_limits(), chart.r_limits()) {
+            (Some(xbar_limits), Some(r_limits)) => {
+                unsafe {
+                    (*out) = build_variables_chart_result(
+                        xbar_limits,
+                        chart.points(),
+                        r_limits,
+                        chart.r_points(),
+                        chart.is_in_control(),
+                    );
+                }
+                INSIGHT_OK
+            }
+            _ => {
+                set_last_error(
+                    "insufficient valid subgroups (need at least 1, all finite, all of \
+                     subgroup_size length)",
+                );
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_xbar_r_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Computes an X-bar-S control chart (subgroup mean + standard deviation).
+///
+/// `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
+/// `subgroup_size`: fixed subgroup size, 2..=10.
+/// `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
+/// secondary series is S.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_variables_chart_result`.
+///
+/// # Safety
+/// `data` must point to `n_subgroups * subgroup_size` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_xbar_s_chart(
+    data: *const f64,
+    n_subgroups: u32,
+    subgroup_size: u32,
+    out: *mut CVariablesChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+        if !(2..=10).contains(&subgroup_size) {
+            set_last_error("subgroup_size must be 2..=10");
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
+
+        use u_analytics::spc::ControlChart;
+
+        let ns = n_subgroups as usize;
+        let sg = subgroup_size as usize;
+        let raw = unsafe { slice::from_raw_parts(data, ns * sg) };
+
+        let mut chart = u_analytics::spc::XBarSChart::new(sg);
+        for i in 0..ns {
+            chart.add_sample(&raw[i * sg..(i + 1) * sg]);
+        }
+
+        match (chart.control_limits(), chart.s_limits()) {
+            (Some(xbar_limits), Some(s_limits)) => {
+                unsafe {
+                    (*out) = build_variables_chart_result(
+                        xbar_limits,
+                        chart.points(),
+                        s_limits,
+                        chart.s_points(),
+                        chart.is_in_control(),
+                    );
+                }
+                INSIGHT_OK
+            }
+            _ => {
+                set_last_error(
+                    "insufficient valid subgroups (need at least 1, all finite, all of \
+                     subgroup_size length)",
+                );
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_xbar_s_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Computes an Individual-MR control chart (single observations + moving range).
+///
+/// `data`: individual observations, length `n`.
+/// `out`: pointer to a `CVariablesChartResult` — primary series is
+/// Individual (I), secondary series is Moving Range (MR, one fewer point
+/// than I — the first moving range is undefined).
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_variables_chart_result`.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_individual_mr_chart(
+    data: *const f64,
+    n: u32,
+    out: *mut CVariablesChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        use u_analytics::spc::ControlChart;
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(data, len) };
+
+        let mut chart = u_analytics::spc::IndividualMRChart::new();
+        for &v in raw {
+            chart.add_sample(&[v]);
+        }
+
+        match (chart.control_limits(), chart.mr_limits()) {
+            (Some(i_limits), Some(mr_limits)) => {
+                unsafe {
+                    (*out) = build_variables_chart_result(
+                        i_limits,
+                        chart.points(),
+                        mr_limits,
+                        chart.mr_points(),
+                        chart.is_in_control(),
+                    );
+                }
+                INSIGHT_OK
+            }
+            _ => {
+                set_last_error("insufficient valid observations (need at least 2, all finite)");
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_individual_mr_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees a `CVariablesChartResult` allocated by `insight_xbar_r_chart`,
+/// `insight_xbar_s_chart`, or `insight_individual_mr_chart`.
+///
+/// # Safety
+/// The result must have been allocated by one of those functions and not
+/// yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_variables_chart_result(result: *mut CVariablesChartResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &*result };
+    if !r.primary_points.is_null() && r.n_primary_points > 0 {
+        let _ = unsafe {
+            Vec::from_raw_parts(
+                r.primary_points,
+                r.n_primary_points as usize,
+                r.n_primary_points as usize,
+            )
+        };
+    }
+    if !r.secondary_points.is_null() && r.n_secondary_points > 0 {
+        let _ = unsafe {
+            Vec::from_raw_parts(
+                r.secondary_points,
+                r.n_secondary_points as usize,
+                r.n_secondary_points as usize,
+            )
+        };
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4023,6 +4373,137 @@ mod tests {
                 &mut result,
             )
         };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    fn empty_variables_result() -> CVariablesChartResult {
+        CVariablesChartResult {
+            primary_ucl: 0.0,
+            primary_cl: 0.0,
+            primary_lcl: 0.0,
+            primary_points: ptr::null_mut(),
+            n_primary_points: 0,
+            secondary_ucl: 0.0,
+            secondary_cl: 0.0,
+            secondary_lcl: 0.0,
+            secondary_points: ptr::null_mut(),
+            n_secondary_points: 0,
+            in_control: 0,
+        }
+    }
+
+    #[test]
+    fn ffi_xbar_r_chart_in_control() {
+        // 10 subgroups of size 5, small stable variation.
+        let data: Vec<f64> = vec![
+            25.0, 26.0, 24.5, 25.5, 25.0, 25.2, 24.8, 25.1, 24.9, 25.3, 25.1, 25.0, 24.7, 25.3,
+            24.9, 24.9, 25.2, 25.0, 24.8, 25.1, 25.0, 24.9, 25.1, 25.0, 24.9, 25.2, 24.8, 25.0,
+            25.1, 24.9, 24.9, 25.0, 25.1, 24.8, 25.2, 25.0, 25.0, 24.9, 25.1, 25.0, 25.1, 24.9,
+            25.0, 25.0, 25.0, 24.9, 25.1, 25.0, 24.9, 25.1,
+        ];
+        let mut result = empty_variables_result();
+
+        let rc = unsafe { insight_xbar_r_chart(data.as_ptr(), 10, 5, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_primary_points, 10);
+        assert_eq!(result.n_secondary_points, 10);
+        assert!(result.primary_ucl > result.primary_cl);
+        assert!(result.primary_cl > result.primary_lcl);
+        assert!(result.secondary_ucl > result.secondary_lcl);
+
+        unsafe { insight_free_variables_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_xbar_r_chart_detects_violation() {
+        let mut data: Vec<f64> = vec![
+            25.0, 26.0, 24.5, 25.5, 25.0, 25.2, 24.8, 25.1, 24.9, 25.3, 25.1, 25.0, 24.7, 25.3,
+            24.9, 24.9, 25.2, 25.0, 24.8, 25.1,
+        ];
+        // One wildly out-of-range subgroup to trigger a BeyondLimits violation.
+        data.extend_from_slice(&[100.0, 101.0, 99.0, 100.5, 99.5]);
+
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_xbar_r_chart(data.as_ptr(), 5, 5, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.in_control, 0);
+
+        let points = unsafe {
+            slice::from_raw_parts(result.primary_points, result.n_primary_points as usize)
+        };
+        assert!(points.iter().any(|p| p.violation_mask & 1 != 0));
+
+        unsafe { insight_free_variables_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_xbar_r_chart_invalid_subgroup_size() {
+        let data = [1.0_f64; 20];
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_xbar_r_chart(data.as_ptr(), 2, 1, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
+    fn ffi_xbar_r_chart_null_pointer() {
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_xbar_r_chart(ptr::null(), 10, 5, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_xbar_s_chart_in_control() {
+        let data: Vec<f64> = vec![
+            25.0, 26.0, 24.5, 25.5, 25.0, 25.2, 24.8, 25.1, 24.9, 25.3, 25.1, 25.0, 24.7, 25.3,
+            24.9, 24.9, 25.2, 25.0, 24.8, 25.1,
+        ];
+        let mut result = empty_variables_result();
+
+        let rc = unsafe { insight_xbar_s_chart(data.as_ptr(), 4, 5, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_primary_points, 4);
+        assert_eq!(result.n_secondary_points, 4);
+        assert!(result.primary_ucl > result.primary_lcl);
+        assert!(result.secondary_ucl >= result.secondary_lcl);
+
+        unsafe { insight_free_variables_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_xbar_s_chart_null_pointer() {
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_xbar_s_chart(ptr::null(), 10, 5, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_individual_mr_chart_basic() {
+        let data: Vec<f64> = vec![10.0, 10.2, 9.8, 10.1, 9.9, 10.0, 10.3, 9.7, 10.1, 9.9];
+        let mut result = empty_variables_result();
+
+        let rc = unsafe { insight_individual_mr_chart(data.as_ptr(), 10, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_primary_points, 10);
+        // Moving-range chart has one fewer point than the individual chart.
+        assert_eq!(result.n_secondary_points, 9);
+        assert!(result.primary_ucl > result.primary_cl);
+        assert!(result.primary_cl > result.primary_lcl);
+
+        unsafe { insight_free_variables_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_individual_mr_chart_insufficient_data() {
+        let data = [10.0_f64];
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_individual_mr_chart(data.as_ptr(), 1, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_individual_mr_chart_null_pointer() {
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_individual_mr_chart(ptr::null(), 10, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 }

@@ -232,4 +232,27 @@ internal static class NativeStructs
         public uint NPoints;
         public double Bandwidth;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CSpcChartPoint
+    {
+        public double Value;
+        public uint ViolationMask;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CVariablesChartResult
+    {
+        public double PrimaryUcl;
+        public double PrimaryCl;
+        public double PrimaryLcl;
+        public IntPtr PrimaryPoints;
+        public uint NPrimaryPoints;
+        public double SecondaryUcl;
+        public double SecondaryCl;
+        public double SecondaryLcl;
+        public IntPtr SecondaryPoints;
+        public uint NSecondaryPoints;
+        public byte InControl;
+    }
 }

@@ -937,6 +937,144 @@ public sealed class InsightClient : IDisposable
 
     #endregion
 
+    #region SPC Variables Control Charts
+
+    /// <summary>
+    /// X-bar-R control chart (subgroup mean + range). Suitable for subgroup
+    /// sizes 2-10.
+    /// </summary>
+    /// <param name="data">
+    /// Subgroup observations matrix. Rows = subgroups, columns = individual
+    /// measurements within each subgroup — same convention as <see cref="PeltMulti"/>.
+    /// </param>
+    public VariablesChartResult XBarRChart(double[,] data)
+    {
+        var (nSubgroups, subgroupSize, flat) = Flatten(data);
+        var native = new NativeStructs.CVariablesChartResult();
+
+        unsafe
+        {
+            fixed (double* ptr = flat)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_xbar_r_chart(ptr, nSubgroups, subgroupSize, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildVariablesChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_variables_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// X-bar-S control chart (subgroup mean + standard deviation). Preferred
+    /// over X-bar-R for larger subgroups. Suitable for subgroup sizes 2-10.
+    /// </summary>
+    /// <param name="data">
+    /// Subgroup observations matrix. Rows = subgroups, columns = individual
+    /// measurements within each subgroup — same convention as <see cref="PeltMulti"/>.
+    /// </param>
+    public VariablesChartResult XBarSChart(double[,] data)
+    {
+        var (nSubgroups, subgroupSize, flat) = Flatten(data);
+        var native = new NativeStructs.CVariablesChartResult();
+
+        unsafe
+        {
+            fixed (double* ptr = flat)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_xbar_s_chart(ptr, nSubgroups, subgroupSize, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildVariablesChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_variables_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// Individual-MR control chart (single observations + moving range).
+    /// The MR (secondary) series has one fewer point than the I (primary)
+    /// series — the first moving range is undefined.
+    /// </summary>
+    /// <param name="data">Individual observations (needs at least 2 points).</param>
+    public VariablesChartResult IndividualMrChart(double[] data)
+    {
+        var native = new NativeStructs.CVariablesChartResult();
+
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_individual_mr_chart(ptr, (uint)data.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildVariablesChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_variables_chart_result(ref native);
+        }
+    }
+
+    private static unsafe VariablesChartResult BuildVariablesChartResult(
+        NativeStructs.CVariablesChartResult native)
+    {
+        return new VariablesChartResult
+        {
+            Primary = new ControlLimits
+            {
+                Ucl = native.PrimaryUcl,
+                Cl = native.PrimaryCl,
+                Lcl = native.PrimaryLcl,
+            },
+            PrimaryPoints = CopySpcPoints(native.PrimaryPoints, native.NPrimaryPoints),
+            Secondary = new ControlLimits
+            {
+                Ucl = native.SecondaryUcl,
+                Cl = native.SecondaryCl,
+                Lcl = native.SecondaryLcl,
+            },
+            SecondaryPoints = CopySpcPoints(native.SecondaryPoints, native.NSecondaryPoints),
+            InControl = native.InControl != 0,
+        };
+    }
+
+    private static unsafe SpcChartPoint[] CopySpcPoints(IntPtr ptr, uint count)
+    {
+        var result = new SpcChartPoint[count];
+        if (count > 0 && ptr != IntPtr.Zero)
+        {
+            var native = (NativeStructs.CSpcChartPoint*)ptr;
+            for (var i = 0; i < count; i++)
+            {
+                result[i] = new SpcChartPoint
+                {
+                    Value = native[i].Value,
+                    ViolationMask = (SpcViolation)native[i].ViolationMask,
+                };
+            }
+        }
+        return result;
+    }
+
+    #endregion
+
     #region Helpers
 
     private static (uint nRows, uint nCols, double[] flat) Flatten(double[,] data)
@@ -1382,6 +1520,79 @@ public class KdeResult
     public double[] Density { get; init; } = [];
     /// <summary>Bandwidth actually used.</summary>
     public double Bandwidth { get; init; }
+}
+
+/// <summary>Control chart limits (upper control limit, center line, lower control limit).</summary>
+public class ControlLimits
+{
+    /// <summary>Upper control limit.</summary>
+    public double Ucl { get; init; }
+    /// <summary>Center line (process mean or target).</summary>
+    public double Cl { get; init; }
+    /// <summary>Lower control limit.</summary>
+    public double Lcl { get; init; }
+}
+
+/// <summary>
+/// Nelson's eight control chart rules for detecting special-cause variation.
+/// Values are bit flags — a point can violate more than one rule at once.
+/// </summary>
+/// <remarks>
+/// Nelson, L.S. (1984). "The Shewhart Control Chart — Tests for Special
+/// Causes", Journal of Quality Technology 16(4), pp. 237-239.
+/// </remarks>
+[Flags]
+public enum SpcViolation : uint
+{
+    /// <summary>No violations detected.</summary>
+    None = 0,
+    /// <summary>Point beyond control limits (Rule 1).</summary>
+    BeyondLimits = 1u << 0,
+    /// <summary>9 points in a row on the same side of the center line (Rule 2).</summary>
+    NineOneSide = 1u << 1,
+    /// <summary>6 points in a row steadily increasing or decreasing (Rule 3).</summary>
+    SixTrend = 1u << 2,
+    /// <summary>14 points in a row alternating up and down (Rule 4).</summary>
+    FourteenAlternating = 1u << 3,
+    /// <summary>2 out of 3 points beyond 2-sigma on the same side (Rule 5).</summary>
+    TwoOfThreeBeyond2Sigma = 1u << 4,
+    /// <summary>4 out of 5 points beyond 1-sigma on the same side (Rule 6).</summary>
+    FourOfFiveBeyond1Sigma = 1u << 5,
+    /// <summary>15 points in a row within 1-sigma of the center line (Rule 7).</summary>
+    FifteenWithin1Sigma = 1u << 6,
+    /// <summary>8 points in a row beyond 1-sigma on either side (Rule 8).</summary>
+    EightBeyond1Sigma = 1u << 7,
+}
+
+/// <summary>A single point on a control chart.</summary>
+public class SpcChartPoint
+{
+    /// <summary>The computed statistic value (subgroup mean, range, standard deviation, individual observation, or moving range).</summary>
+    public double Value { get; init; }
+    /// <summary>Nelson-rule violations detected at this point (bit flags, <see cref="SpcViolation.None"/> if none).</summary>
+    public SpcViolation ViolationMask { get; init; }
+}
+
+/// <summary>
+/// Result of a two-series variables control chart (X-bar-R, X-bar-S, or
+/// Individual-MR). The primary series is the mean/individual chart; the
+/// secondary series is the variation chart (R, S, or MR).
+/// </summary>
+public class VariablesChartResult
+{
+    /// <summary>Primary (X-bar or Individual) chart control limits.</summary>
+    public ControlLimits Primary { get; init; } = new();
+    /// <summary>Primary chart points.</summary>
+    public SpcChartPoint[] PrimaryPoints { get; init; } = [];
+    /// <summary>Secondary (R, S, or MR) chart control limits.</summary>
+    public ControlLimits Secondary { get; init; } = new();
+    /// <summary>
+    /// Secondary chart points. May contain one fewer point than <see cref="PrimaryPoints"/>
+    /// for Individual-MR charts (the first moving range is undefined).
+    /// </summary>
+    public SpcChartPoint[] SecondaryPoints { get; init; } = [];
+    /// <summary>True if no Nelson-rule violations were detected on either series.</summary>
+    public bool InControl { get; init; }
 }
 
 #endregion
