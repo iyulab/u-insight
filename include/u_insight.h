@@ -47,6 +47,21 @@
 #define INSIGHT_CORR_KENDALL 2
 
 /**
+ * Silverman's rule of thumb bandwidth.
+ */
+#define INSIGHT_KDE_SILVERMAN 0
+
+/**
+ * Scott's rule bandwidth.
+ */
+#define INSIGHT_KDE_SCOTT 1
+
+/**
+ * Manually specified bandwidth (see `bandwidth` parameter of [`insight_kde`]).
+ */
+#define INSIGHT_KDE_MANUAL 2
+
+/**
  * Opaque handle for a profiling context.
  * Holds the parsed DataFrame and computed profiles.
  */
@@ -557,6 +572,58 @@ typedef struct CPeltResult {
    */
   uint32_t n_changepoints;
 } CPeltResult;
+
+/**
+ * C-compatible Mann-Kendall trend test result.
+ */
+typedef struct CMannKendallResult {
+  /**
+   * Mann-Kendall S statistic: Σ sign(xⱼ - xᵢ) for all i < j.
+   */
+  int64_t s_statistic;
+  /**
+   * Variance of S (with tie correction).
+   */
+  double variance;
+  /**
+   * Z statistic (with continuity correction).
+   */
+  double z_statistic;
+  /**
+   * Two-tailed p-value.
+   */
+  double p_value;
+  /**
+   * Kendall's tau: S / [n(n-1)/2]. Range [-1, 1].
+   */
+  double kendall_tau;
+  /**
+   * Sen's slope estimator (median of pairwise slopes).
+   */
+  double sen_slope;
+} CMannKendallResult;
+
+/**
+ * C-compatible kernel density estimation result.
+ */
+typedef struct CKdeResult {
+  /**
+   * Evaluation points (x-axis), length `n_points`. Caller must free with `insight_free_kde_result`.
+   */
+  double *x;
+  /**
+   * Density estimates at each evaluation point (y-axis), length `n_points`.
+   */
+  double *density;
+  /**
+   * Number of evaluation grid points (length of `x` and `density`).
+   */
+  uint32_t n_points;
+  /**
+   * Bandwidth actually used (echoes the manual value, or the computed automatic one).
+   */
+  double bandwidth;
+} CKdeResult;
 
 /**
  * Returns the last error message, or null if no error.
@@ -1091,5 +1158,53 @@ int32_t insight_pelt_multi(const double *data,
  * and not yet freed.
  */
 INSIGHT_API void insight_free_pelt_result(struct CPeltResult *result);
+
+/**
+ * Mann-Kendall non-parametric trend test with Sen's slope estimator.
+ *
+ * `data`: time-ordered observations, length `n`.
+ * `out`: pointer to a `CMannKendallResult`.
+ *
+ * Returns 0 on success, negative on error (fewer than 4 points, non-finite
+ * values, or zero variance — e.g. all values identical).
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_mann_kendall(const double *data,
+                             uint32_t n,
+                             struct CMannKendallResult *out);
+
+/**
+ * Gaussian kernel density estimation.
+ *
+ * `data`: sample observations, length `n`.
+ * `method`: one of `INSIGHT_KDE_SILVERMAN` (0) / `_SCOTT` (1) / `_MANUAL` (2).
+ * `bandwidth`: used only when `method == INSIGHT_KDE_MANUAL`; ignored otherwise.
+ * `n_points`: number of evaluation grid points (typical: 256–1024).
+ * `out`: pointer to a `CKdeResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_kde_result`.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_kde(const double *data,
+                    uint32_t n,
+                    uint32_t method,
+                    double bandwidth,
+                    uint32_t n_points,
+                    struct CKdeResult *out);
+
+/**
+ * Frees a `CKdeResult` allocated by `insight_kde`.
+ *
+ * # Safety
+ * The result must have been allocated by `insight_kde` and not yet freed.
+ */
+INSIGHT_API void insight_free_kde_result(struct CKdeResult *result);
 
 #endif  /* U_INSIGHT_H */

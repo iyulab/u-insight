@@ -212,4 +212,24 @@ internal static class NativeStructs
         public IntPtr Changepoints;
         public uint NChangepoints;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CMannKendallResult
+    {
+        public long SStatistic;
+        public double Variance;
+        public double ZStatistic;
+        public double PValue;
+        public double KendallTau;
+        public double SenSlope;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CKdeResult
+    {
+        public IntPtr X;
+        public IntPtr Density;
+        public uint NPoints;
+        public double Bandwidth;
+    }
 }

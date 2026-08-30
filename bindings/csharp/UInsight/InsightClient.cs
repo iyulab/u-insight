@@ -865,6 +865,78 @@ public sealed class InsightClient : IDisposable
 
     #endregion
 
+    #region Trend & Density Estimation
+
+    /// <summary>
+    /// Mann-Kendall non-parametric trend test with Sen's slope estimator.
+    /// Tests H0: no monotonic trend vs H1: monotonic trend exists.
+    /// </summary>
+    /// <param name="data">Time-ordered observations (needs at least 4 points).</param>
+    public MannKendallResult MannKendall(double[] data)
+    {
+        var native = new NativeStructs.CMannKendallResult();
+
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_mann_kendall(ptr, (uint)data.Length, ref native));
+            }
+        }
+
+        return new MannKendallResult
+        {
+            SStatistic = native.SStatistic,
+            Variance = native.Variance,
+            ZStatistic = native.ZStatistic,
+            PValue = native.PValue,
+            KendallTau = native.KendallTau,
+            SenSlope = native.SenSlope,
+        };
+    }
+
+    /// <summary>
+    /// Gaussian kernel density estimation.
+    /// </summary>
+    /// <param name="data">Sample observations (needs at least 2 points).</param>
+    /// <param name="method">Bandwidth selection method.</param>
+    /// <param name="bandwidth">Used only when <paramref name="method"/> is <see cref="KdeBandwidthMethod.Manual"/>.</param>
+    /// <param name="nPoints">Number of evaluation grid points (typical: 256-1024).</param>
+    public KdeResult Kde(
+        double[] data,
+        KdeBandwidthMethod method = KdeBandwidthMethod.Silverman,
+        double bandwidth = 0.0,
+        uint nPoints = 512)
+    {
+        var native = new NativeStructs.CKdeResult();
+
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_kde(ptr, (uint)data.Length, (uint)method, bandwidth, nPoints, ref native));
+            }
+        }
+
+        try
+        {
+            return new KdeResult
+            {
+                X = CopyF64Array(native.X, native.NPoints),
+                Density = CopyF64Array(native.Density, native.NPoints),
+                Bandwidth = native.Bandwidth,
+            };
+        }
+        finally
+        {
+            Native.insight_free_kde_result(ref native);
+        }
+    }
+
+    #endregion
+
     #region Helpers
 
     private static (uint nRows, uint nCols, double[] flat) Flatten(double[,] data)
@@ -1268,6 +1340,48 @@ public class PeltResult
     public uint[] Changepoints { get; init; } = [];
     /// <summary>Number of segments (changepoints + 1).</summary>
     public uint NSegments { get; init; }
+}
+
+/// <summary>Mann-Kendall trend test result.</summary>
+public class MannKendallResult
+{
+    /// <summary>Mann-Kendall S statistic: sum of sign(x_j - x_i) for all i &lt; j.</summary>
+    public long SStatistic { get; init; }
+    /// <summary>Variance of S (with tie correction).</summary>
+    public double Variance { get; init; }
+    /// <summary>Z statistic (with continuity correction).</summary>
+    public double ZStatistic { get; init; }
+    /// <summary>Two-tailed p-value.</summary>
+    public double PValue { get; init; }
+    /// <summary>Kendall's tau: S / [n(n-1)/2]. Range [-1, 1].</summary>
+    public double KendallTau { get; init; }
+    /// <summary>Sen's slope estimator (median of pairwise slopes).</summary>
+    public double SenSlope { get; init; }
+}
+
+/// <summary>
+/// Bandwidth selection method for kernel density estimation. Numeric values
+/// match the native <c>INSIGHT_KDE_*</c> constants.
+/// </summary>
+public enum KdeBandwidthMethod : uint
+{
+    /// <summary>Silverman's rule of thumb (robust to outliers and multimodal distributions).</summary>
+    Silverman = 0,
+    /// <summary>Scott's rule (slightly smoother, assumes approximately normal data).</summary>
+    Scott = 1,
+    /// <summary>Manually specified bandwidth — see the <c>bandwidth</c> parameter of <see cref="InsightClient.Kde"/>.</summary>
+    Manual = 2,
+}
+
+/// <summary>Kernel density estimation result.</summary>
+public class KdeResult
+{
+    /// <summary>Evaluation points (x-axis).</summary>
+    public double[] X { get; init; } = [];
+    /// <summary>Density estimates at each evaluation point (y-axis).</summary>
+    public double[] Density { get; init; } = [];
+    /// <summary>Bandwidth actually used.</summary>
+    public double Bandwidth { get; init; }
 }
 
 #endregion

@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Added
+
+- **`insight_mann_kendall`**: Mann-Kendall non-parametric trend test with
+  Sen's slope estimator (FFI + C# `InsightClient.MannKendall`). Exposes
+  `u-analytics::testing::mann_kendall_test`.
+- **`insight_kde`** / **`insight_free_kde_result`**: Gaussian kernel density
+  estimation with Silverman/Scott/manual bandwidth selection (FFI + C#
+  `InsightClient.Kde`). Exposes `u-analytics::distribution::kde`.
+
+First of several `u-analytics` domains planned for FFI exposure (SPC
+control charts, process capability, and Weibull reliability remain).
+
 ## [0.13.0] - 2026-07-07
 
 ### Changed

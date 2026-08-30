@@ -2467,6 +2467,204 @@ pub unsafe extern "C" fn insight_free_pelt_result(result: *mut CPeltResult) {
     }
 }
 
+// ── Mann-Kendall trend test FFI ─────────────────────────────────────────
+
+/// C-compatible Mann-Kendall trend test result.
+#[repr(C)]
+pub struct CMannKendallResult {
+    /// Mann-Kendall S statistic: Σ sign(xⱼ - xᵢ) for all i < j.
+    pub s_statistic: i64,
+    /// Variance of S (with tie correction).
+    pub variance: f64,
+    /// Z statistic (with continuity correction).
+    pub z_statistic: f64,
+    /// Two-tailed p-value.
+    pub p_value: f64,
+    /// Kendall's tau: S / [n(n-1)/2]. Range [-1, 1].
+    pub kendall_tau: f64,
+    /// Sen's slope estimator (median of pairwise slopes).
+    pub sen_slope: f64,
+}
+
+/// Mann-Kendall non-parametric trend test with Sen's slope estimator.
+///
+/// `data`: time-ordered observations, length `n`.
+/// `out`: pointer to a `CMannKendallResult`.
+///
+/// Returns 0 on success, negative on error (fewer than 4 points, non-finite
+/// values, or zero variance — e.g. all values identical).
+///
+/// # Safety
+/// `data` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_mann_kendall(
+    data: *const f64,
+    n: u32,
+    out: *mut CMannKendallResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        if len < 4 {
+            set_last_error("need at least 4 data points");
+            return INSIGHT_ERR_INSUFFICIENT_DATA;
+        }
+
+        let raw = unsafe { slice::from_raw_parts(data, len) };
+
+        match u_analytics::testing::mann_kendall_test(raw) {
+            Some(r) => {
+                unsafe {
+                    (*out) = CMannKendallResult {
+                        s_statistic: r.s_statistic,
+                        variance: r.variance,
+                        z_statistic: r.z_statistic,
+                        p_value: r.p_value,
+                        kendall_tau: r.kendall_tau,
+                        sen_slope: r.sen_slope,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error("invalid input (non-finite values or zero variance)");
+                INSIGHT_ERR_INVALID_INPUT
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_mann_kendall");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+// ── Kernel Density Estimation FFI ───────────────────────────────────────
+
+/// Silverman's rule of thumb bandwidth.
+pub const INSIGHT_KDE_SILVERMAN: u32 = 0;
+/// Scott's rule bandwidth.
+pub const INSIGHT_KDE_SCOTT: u32 = 1;
+/// Manually specified bandwidth (see `bandwidth` parameter of [`insight_kde`]).
+pub const INSIGHT_KDE_MANUAL: u32 = 2;
+
+/// C-compatible kernel density estimation result.
+#[repr(C)]
+pub struct CKdeResult {
+    /// Evaluation points (x-axis), length `n_points`. Caller must free with `insight_free_kde_result`.
+    pub x: *mut f64,
+    /// Density estimates at each evaluation point (y-axis), length `n_points`.
+    pub density: *mut f64,
+    /// Number of evaluation grid points (length of `x` and `density`).
+    pub n_points: u32,
+    /// Bandwidth actually used (echoes the manual value, or the computed automatic one).
+    pub bandwidth: f64,
+}
+
+/// Gaussian kernel density estimation.
+///
+/// `data`: sample observations, length `n`.
+/// `method`: one of `INSIGHT_KDE_SILVERMAN` (0) / `_SCOTT` (1) / `_MANUAL` (2).
+/// `bandwidth`: used only when `method == INSIGHT_KDE_MANUAL`; ignored otherwise.
+/// `n_points`: number of evaluation grid points (typical: 256–1024).
+/// `out`: pointer to a `CKdeResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_kde_result`.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_kde(
+    data: *const f64,
+    n: u32,
+    method: u32,
+    bandwidth: f64,
+    n_points: u32,
+    out: *mut CKdeResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let bw_method = match method {
+            INSIGHT_KDE_SILVERMAN => u_analytics::distribution::BandwidthMethod::Silverman,
+            INSIGHT_KDE_SCOTT => u_analytics::distribution::BandwidthMethod::Scott,
+            INSIGHT_KDE_MANUAL => u_analytics::distribution::BandwidthMethod::Manual(bandwidth),
+            _ => {
+                set_last_error("invalid method (use 0=Silverman, 1=Scott, 2=Manual)");
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(data, len) };
+
+        match u_analytics::distribution::kde(raw, bw_method, n_points as usize) {
+            Some(r) => {
+                let mut x = r.x.into_boxed_slice();
+                let mut density = r.density.into_boxed_slice();
+                let x_ptr = x.as_mut_ptr();
+                let density_ptr = density.as_mut_ptr();
+                std::mem::forget(x);
+                std::mem::forget(density);
+
+                unsafe {
+                    (*out) = CKdeResult {
+                        x: x_ptr,
+                        density: density_ptr,
+                        n_points,
+                        bandwidth: r.bandwidth,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error(
+                    "invalid input (need >= 2 data points and >= 2 grid points, finite values, \
+                     nonzero variance for automatic bandwidth)",
+                );
+                INSIGHT_ERR_INVALID_INPUT
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_kde");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees a `CKdeResult` allocated by `insight_kde`.
+///
+/// # Safety
+/// The result must have been allocated by `insight_kde` and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_kde_result(result: *mut CKdeResult) {
+    if !result.is_null() {
+        let r = unsafe { &*result };
+        if !r.x.is_null() && r.n_points > 0 {
+            let _ = unsafe { Vec::from_raw_parts(r.x, r.n_points as usize, r.n_points as usize) };
+        }
+        if !r.density.is_null() && r.n_points > 0 {
+            let _ =
+                unsafe { Vec::from_raw_parts(r.density, r.n_points as usize, r.n_points as usize) };
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3687,6 +3885,144 @@ mod tests {
         };
         // n_samples=50, n_channels=2
         let rc = unsafe { insight_pelt_multi(ptr::null(), 50, 2, 0, 0.0, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_mann_kendall_upward_trend() {
+        let data: Vec<f64> = vec![1.0, 2.3, 3.1, 4.5, 5.2, 6.8, 7.1, 8.9, 9.5, 10.2];
+        let mut result = CMannKendallResult {
+            s_statistic: 0,
+            variance: 0.0,
+            z_statistic: 0.0,
+            p_value: 0.0,
+            kendall_tau: 0.0,
+            sen_slope: 0.0,
+        };
+
+        let rc = unsafe { insight_mann_kendall(data.as_ptr(), data.len() as u32, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(result.p_value < 0.01);
+        assert!(result.kendall_tau > 0.8);
+        assert!(result.sen_slope > 0.0);
+    }
+
+    #[test]
+    fn ffi_mann_kendall_insufficient_data() {
+        let data = [1.0_f64, 2.0, 3.0];
+        let mut result = CMannKendallResult {
+            s_statistic: 0,
+            variance: 0.0,
+            z_statistic: 0.0,
+            p_value: 0.0,
+            kendall_tau: 0.0,
+            sen_slope: 0.0,
+        };
+
+        let rc = unsafe { insight_mann_kendall(data.as_ptr(), 3, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_mann_kendall_null_pointer() {
+        let mut result = CMannKendallResult {
+            s_statistic: 0,
+            variance: 0.0,
+            z_statistic: 0.0,
+            p_value: 0.0,
+            kendall_tau: 0.0,
+            sen_slope: 0.0,
+        };
+        let rc = unsafe { insight_mann_kendall(ptr::null(), 10, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_kde_silverman_basic() {
+        let data = [1.0_f64, 1.1, 1.2, 2.0, 2.1, 2.2, 5.0];
+        let mut result = CKdeResult {
+            x: ptr::null_mut(),
+            density: ptr::null_mut(),
+            n_points: 0,
+            bandwidth: 0.0,
+        };
+
+        let rc = unsafe {
+            insight_kde(
+                data.as_ptr(),
+                data.len() as u32,
+                INSIGHT_KDE_SILVERMAN,
+                0.0,
+                512,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 512);
+        assert!(result.bandwidth > 0.0);
+        assert!(!result.x.is_null());
+        assert!(!result.density.is_null());
+
+        unsafe { insight_free_kde_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_kde_manual_bandwidth() {
+        let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0];
+        let mut result = CKdeResult {
+            x: ptr::null_mut(),
+            density: ptr::null_mut(),
+            n_points: 0,
+            bandwidth: 0.0,
+        };
+
+        let rc = unsafe {
+            insight_kde(
+                data.as_ptr(),
+                data.len() as u32,
+                INSIGHT_KDE_MANUAL,
+                0.5,
+                128,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.bandwidth, 0.5);
+
+        unsafe { insight_free_kde_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_kde_invalid_method() {
+        let data = [1.0_f64, 2.0, 3.0];
+        let mut result = CKdeResult {
+            x: ptr::null_mut(),
+            density: ptr::null_mut(),
+            n_points: 0,
+            bandwidth: 0.0,
+        };
+        let rc = unsafe { insight_kde(data.as_ptr(), 3, 99, 0.0, 256, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
+    fn ffi_kde_null_pointer() {
+        let mut result = CKdeResult {
+            x: ptr::null_mut(),
+            density: ptr::null_mut(),
+            n_points: 0,
+            bandwidth: 0.0,
+        };
+        let rc = unsafe {
+            insight_kde(
+                ptr::null(),
+                10,
+                INSIGHT_KDE_SILVERMAN,
+                0.0,
+                256,
+                &mut result,
+            )
+        };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 }

@@ -253,6 +253,21 @@ internal static partial class NativeLibrary
     public static partial void insight_free_pelt_result(
         ref NativeStructs.CPeltResult result);
 
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_mann_kendall(
+        double* data, uint n,
+        ref NativeStructs.CMannKendallResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_kde(
+        double* data, uint n,
+        uint method, double bandwidth, uint nPoints,
+        ref NativeStructs.CKdeResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_kde_result(
+        ref NativeStructs.CKdeResult result);
+
     #endregion
 
     #region Helper Methods
