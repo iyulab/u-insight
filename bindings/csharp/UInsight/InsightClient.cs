@@ -1186,16 +1186,158 @@ public sealed class InsightClient : IDisposable
         }
     }
 
-    private static unsafe AttributeChartResult BuildAttributeChartResult(
+    private static AttributeChartResult BuildAttributeChartResult(
         NativeStructs.CAttributeChartResult native)
     {
-        var points = new AttributeChartPoint[native.NPoints];
-        if (native.NPoints > 0 && native.Points != IntPtr.Zero)
+        return new AttributeChartResult
         {
-            var raw = (NativeStructs.CAttributeChartPoint*)native.Points;
-            for (var i = 0; i < native.NPoints; i++)
+            Points = CopyAttributePoints(native.Points, native.NPoints),
+        };
+    }
+
+    #endregion
+
+    #region SPC Laney P'/U' + G/T Charts
+
+    /// <summary>
+    /// Laney P' chart (overdispersion-adjusted proportion nonconforming).
+    /// Needs at least 3 subgroups.
+    /// </summary>
+    /// <param name="defectives">Number of defective items per subgroup.</param>
+    /// <param name="sampleSizes">Total sample size per subgroup (parallel to <paramref name="defectives"/>).</param>
+    public LaneyChartResult LaneyPChart(ulong[] defectives, ulong[] sampleSizes)
+    {
+        var native = new NativeStructs.CLaneyChartResult();
+        unsafe
+        {
+            fixed (ulong* defPtr = defectives)
+            fixed (ulong* sizePtr = sampleSizes)
             {
-                points[i] = new AttributeChartPoint
+                Native.ThrowIfFailed(
+                    Native.insight_laney_p_chart(defPtr, sizePtr, (uint)defectives.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildLaneyChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_laney_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// Laney U' chart (overdispersion-adjusted defect rate).
+    /// Needs at least 3 subgroups.
+    /// </summary>
+    /// <param name="defects">Defect count per subgroup.</param>
+    /// <param name="unitsInspected">Units inspected per subgroup (parallel to <paramref name="defects"/>).</param>
+    public LaneyChartResult LaneyUChart(ulong[] defects, double[] unitsInspected)
+    {
+        var native = new NativeStructs.CLaneyChartResult();
+        unsafe
+        {
+            fixed (ulong* defPtr = defects)
+            fixed (double* unitPtr = unitsInspected)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_laney_u_chart(defPtr, unitPtr, (uint)defects.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildLaneyChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_laney_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// G chart (geometric distribution) for rare-event monitoring — number
+    /// of conforming units between consecutive defects. Needs at least 3 points.
+    /// </summary>
+    public RareEventChartResult GChart(double[] interEventCounts)
+    {
+        var native = new NativeStructs.CRareEventChartResult();
+        unsafe
+        {
+            fixed (double* ptr = interEventCounts)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_g_chart(ptr, (uint)interEventCounts.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildRareEventChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_rare_event_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// T chart (exponential distribution) for rare-event monitoring — time
+    /// between consecutive defects. Needs at least 3 points.
+    /// </summary>
+    public RareEventChartResult TChart(double[] interEventTimes)
+    {
+        var native = new NativeStructs.CRareEventChartResult();
+        unsafe
+        {
+            fixed (double* ptr = interEventTimes)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_t_chart(ptr, (uint)interEventTimes.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildRareEventChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_rare_event_chart_result(ref native);
+        }
+    }
+
+    private static unsafe LaneyChartResult BuildLaneyChartResult(NativeStructs.CLaneyChartResult native)
+    {
+        return new LaneyChartResult
+        {
+            Bar = native.Bar,
+            Phi = native.Phi,
+            Points = CopyAttributePoints(native.Points, native.NPoints),
+        };
+    }
+
+    private static unsafe RareEventChartResult BuildRareEventChartResult(
+        NativeStructs.CRareEventChartResult native)
+    {
+        return new RareEventChartResult
+        {
+            Bar = native.Bar,
+            Points = CopyAttributePoints(native.Points, native.NPoints),
+        };
+    }
+
+    private static unsafe AttributeChartPoint[] CopyAttributePoints(IntPtr ptr, uint count)
+    {
+        var result = new AttributeChartPoint[count];
+        if (count > 0 && ptr != IntPtr.Zero)
+        {
+            var raw = (NativeStructs.CAttributeChartPoint*)ptr;
+            for (var i = 0; i < count; i++)
+            {
+                result[i] = new AttributeChartPoint
                 {
                     Value = raw[i].Value,
                     Ucl = raw[i].Ucl,
@@ -1205,7 +1347,7 @@ public sealed class InsightClient : IDisposable
                 };
             }
         }
-        return new AttributeChartResult { Points = points };
+        return result;
     }
 
     #endregion
@@ -1749,6 +1891,29 @@ public class AttributeChartPoint
 public class AttributeChartResult
 {
     /// <summary>Chart points.</summary>
+    public AttributeChartPoint[] Points { get; init; } = [];
+}
+
+/// <summary>Result of a Laney P' or U' chart (overdispersion-adjusted attributes chart).</summary>
+public class LaneyChartResult
+{
+    /// <summary>Overall proportion defective (P') or defect rate (U').</summary>
+    public double Bar { get; init; }
+    /// <summary>
+    /// Overdispersion/underdispersion correction factor. 1.0 means no
+    /// correction was needed (equivalent to an ordinary P or U chart).
+    /// </summary>
+    public double Phi { get; init; }
+    /// <summary>Per-subgroup chart points.</summary>
+    public AttributeChartPoint[] Points { get; init; } = [];
+}
+
+/// <summary>Result of a G or T chart (rare-event monitoring).</summary>
+public class RareEventChartResult
+{
+    /// <summary>Mean inter-event conforming count (G chart) or inter-event time (T chart).</summary>
+    public double Bar { get; init; }
+    /// <summary>Per-observation chart points.</summary>
     public AttributeChartPoint[] Points { get; init; } = [];
 }
 

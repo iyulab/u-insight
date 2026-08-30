@@ -747,6 +747,48 @@ typedef struct CAttributeChartResult {
 } CAttributeChartResult;
 
 /**
+ * C-compatible result for a Laney P' or U' chart (overdispersion-adjusted
+ * attributes chart).
+ */
+typedef struct CLaneyChartResult {
+  /**
+   * Overall proportion defective (P') or defect rate (U').
+   */
+  double bar;
+  /**
+   * Overdispersion/underdispersion correction factor. 1.0 means no
+   * correction was needed (equivalent to an ordinary P or U chart).
+   */
+  double phi;
+  /**
+   * Per-subgroup chart points. Caller must free with `insight_free_laney_chart_result`.
+   */
+  struct CAttributeChartPoint *points;
+  /**
+   * Number of chart points.
+   */
+  uint32_t n_points;
+} CLaneyChartResult;
+
+/**
+ * C-compatible result for a G or T chart (rare-event monitoring).
+ */
+typedef struct CRareEventChartResult {
+  /**
+   * Mean inter-event conforming count (G chart) or inter-event time (T chart).
+   */
+  double bar;
+  /**
+   * Per-observation chart points. Caller must free with `insight_free_rare_event_chart_result`.
+   */
+  struct CAttributeChartPoint *points;
+  /**
+   * Number of chart points.
+   */
+  uint32_t n_points;
+} CRareEventChartResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1482,5 +1524,100 @@ int32_t insight_u_chart(const uint64_t *defects,
  * yet freed.
  */
 INSIGHT_API void insight_free_attribute_chart_result(struct CAttributeChartResult *result);
+
+/**
+ * Computes a Laney P' chart (overdispersion-adjusted proportion nonconforming).
+ *
+ * `defectives` / `sample_sizes`: parallel arrays of length `n` (needs at
+ * least 3 subgroups).
+ * `out`: pointer to a `CLaneyChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_laney_chart_result`.
+ *
+ * # Safety
+ * `defectives` and `sample_sizes` must each point to `n` u64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_laney_p_chart(const uint64_t *defectives,
+                              const uint64_t *sample_sizes,
+                              uint32_t n,
+                              struct CLaneyChartResult *out);
+
+/**
+ * Computes a Laney U' chart (overdispersion-adjusted defect rate).
+ *
+ * `defects` / `units_inspected`: parallel arrays of length `n` (needs at
+ * least 3 subgroups, all `units_inspected` positive and finite).
+ * `out`: pointer to a `CLaneyChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_laney_chart_result`.
+ *
+ * # Safety
+ * `defects` must point to `n` u64s, `units_inspected` to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_laney_u_chart(const uint64_t *defects,
+                              const double *units_inspected,
+                              uint32_t n,
+                              struct CLaneyChartResult *out);
+
+/**
+ * Frees a `CLaneyChartResult` allocated by `insight_laney_p_chart` or
+ * `insight_laney_u_chart`.
+ *
+ * # Safety
+ * The result must have been allocated by one of those functions and not
+ * yet freed.
+ */
+INSIGHT_API void insight_free_laney_chart_result(struct CLaneyChartResult *result);
+
+/**
+ * Computes a G chart (geometric distribution — inter-defect conforming
+ * count) for rare-event monitoring.
+ *
+ * `inter_event_counts`: conforming-unit counts between successive defects,
+ * length `n`.
+ * `out`: pointer to a `CRareEventChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_rare_event_chart_result`.
+ *
+ * # Safety
+ * `inter_event_counts` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_g_chart(const double *inter_event_counts,
+                        uint32_t n,
+                        struct CRareEventChartResult *out);
+
+/**
+ * Computes a T chart (exponential distribution — inter-defect time) for
+ * rare-event monitoring.
+ *
+ * `inter_event_times`: time between successive defects, length `n`.
+ * `out`: pointer to a `CRareEventChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_rare_event_chart_result`.
+ *
+ * # Safety
+ * `inter_event_times` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_t_chart(const double *inter_event_times,
+                        uint32_t n,
+                        struct CRareEventChartResult *out);
+
+/**
+ * Frees a `CRareEventChartResult` allocated by `insight_g_chart` or
+ * `insight_t_chart`.
+ *
+ * # Safety
+ * The result must have been allocated by one of those functions and not
+ * yet freed.
+ */
+INSIGHT_API void insight_free_rare_event_chart_result(struct CRareEventChartResult *result);
 
 #endif  /* U_INSIGHT_H */

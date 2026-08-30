@@ -3308,6 +3308,330 @@ pub unsafe extern "C" fn insight_free_attribute_chart_result(result: *mut CAttri
     }
 }
 
+// ── SPC Laney P'/U' + G/T Charts FFI ─────────────────────────────────────
+
+/// C-compatible result for a Laney P' or U' chart (overdispersion-adjusted
+/// attributes chart).
+#[repr(C)]
+pub struct CLaneyChartResult {
+    /// Overall proportion defective (P') or defect rate (U').
+    pub bar: f64,
+    /// Overdispersion/underdispersion correction factor. 1.0 means no
+    /// correction was needed (equivalent to an ordinary P or U chart).
+    pub phi: f64,
+    /// Per-subgroup chart points. Caller must free with `insight_free_laney_chart_result`.
+    pub points: *mut CAttributeChartPoint,
+    /// Number of chart points.
+    pub n_points: u32,
+}
+
+/// C-compatible result for a G or T chart (rare-event monitoring).
+#[repr(C)]
+pub struct CRareEventChartResult {
+    /// Mean inter-event conforming count (G chart) or inter-event time (T chart).
+    pub bar: f64,
+    /// Per-observation chart points. Caller must free with `insight_free_rare_event_chart_result`.
+    pub points: *mut CAttributeChartPoint,
+    /// Number of chart points.
+    pub n_points: u32,
+}
+
+fn attribute_points_from<'a, T: 'a>(
+    points: &'a [T],
+    field: impl Fn(&'a T) -> (f64, f64, f64, f64, bool),
+) -> (*mut CAttributeChartPoint, u32) {
+    if points.is_empty() {
+        return (ptr::null_mut(), 0);
+    }
+    let arr: Vec<CAttributeChartPoint> = points
+        .iter()
+        .map(|p| {
+            let (value, ucl, cl, lcl, out_of_control) = field(p);
+            CAttributeChartPoint {
+                value,
+                ucl,
+                cl,
+                lcl,
+                out_of_control: u8::from(out_of_control),
+            }
+        })
+        .collect();
+    let n = arr.len() as u32;
+    let mut boxed = arr.into_boxed_slice();
+    let out_ptr = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    (out_ptr, n)
+}
+
+/// Computes a Laney P' chart (overdispersion-adjusted proportion nonconforming).
+///
+/// `defectives` / `sample_sizes`: parallel arrays of length `n` (needs at
+/// least 3 subgroups).
+/// `out`: pointer to a `CLaneyChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_laney_chart_result`.
+///
+/// # Safety
+/// `defectives` and `sample_sizes` must each point to `n` u64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_laney_p_chart(
+    defectives: *const u64,
+    sample_sizes: *const u64,
+    n: u32,
+    out: *mut CLaneyChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if defectives.is_null() || sample_sizes.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let defs = unsafe { slice::from_raw_parts(defectives, len) };
+        let sizes = unsafe { slice::from_raw_parts(sample_sizes, len) };
+        let samples: Vec<(u64, u64)> = defs.iter().zip(sizes).map(|(&d, &s)| (d, s)).collect();
+
+        match u_analytics::spc::laney_p_chart(&samples) {
+            Some(chart) => {
+                let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
+                    (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
+                });
+                unsafe {
+                    (*out) = CLaneyChartResult {
+                        bar: chart.p_bar,
+                        phi: chart.phi,
+                        points: points_ptr,
+                        n_points,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error("invalid input (need at least 3 subgroups, total sample size > 0)");
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_laney_p_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Computes a Laney U' chart (overdispersion-adjusted defect rate).
+///
+/// `defects` / `units_inspected`: parallel arrays of length `n` (needs at
+/// least 3 subgroups, all `units_inspected` positive and finite).
+/// `out`: pointer to a `CLaneyChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_laney_chart_result`.
+///
+/// # Safety
+/// `defects` must point to `n` u64s, `units_inspected` to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_laney_u_chart(
+    defects: *const u64,
+    units_inspected: *const f64,
+    n: u32,
+    out: *mut CLaneyChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if defects.is_null() || units_inspected.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let defs = unsafe { slice::from_raw_parts(defects, len) };
+        let units = unsafe { slice::from_raw_parts(units_inspected, len) };
+        let samples: Vec<(u64, f64)> = defs.iter().zip(units).map(|(&d, &u)| (d, u)).collect();
+
+        match u_analytics::spc::laney_u_chart(&samples) {
+            Some(chart) => {
+                let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
+                    (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
+                });
+                unsafe {
+                    (*out) = CLaneyChartResult {
+                        bar: chart.u_bar,
+                        phi: chart.phi,
+                        points: points_ptr,
+                        n_points,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error(
+                    "invalid input (need at least 3 subgroups, all units_inspected > 0 and finite)",
+                );
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_laney_u_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees a `CLaneyChartResult` allocated by `insight_laney_p_chart` or
+/// `insight_laney_u_chart`.
+///
+/// # Safety
+/// The result must have been allocated by one of those functions and not
+/// yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_laney_chart_result(result: *mut CLaneyChartResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &*result };
+    if !r.points.is_null() && r.n_points > 0 {
+        let _ = unsafe { Vec::from_raw_parts(r.points, r.n_points as usize, r.n_points as usize) };
+    }
+}
+
+/// Computes a G chart (geometric distribution — inter-defect conforming
+/// count) for rare-event monitoring.
+///
+/// `inter_event_counts`: conforming-unit counts between successive defects,
+/// length `n`.
+/// `out`: pointer to a `CRareEventChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_rare_event_chart_result`.
+///
+/// # Safety
+/// `inter_event_counts` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_g_chart(
+    inter_event_counts: *const f64,
+    n: u32,
+    out: *mut CRareEventChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if inter_event_counts.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(inter_event_counts, len) };
+
+        match u_analytics::spc::g_chart(raw) {
+            Some(chart) => {
+                let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
+                    (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
+                });
+                unsafe {
+                    (*out) = CRareEventChartResult {
+                        bar: chart.g_bar,
+                        points: points_ptr,
+                        n_points,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error("invalid input (need at least 3 points, all finite and >= 0.0)");
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_g_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Computes a T chart (exponential distribution — inter-defect time) for
+/// rare-event monitoring.
+///
+/// `inter_event_times`: time between successive defects, length `n`.
+/// `out`: pointer to a `CRareEventChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_rare_event_chart_result`.
+///
+/// # Safety
+/// `inter_event_times` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_t_chart(
+    inter_event_times: *const f64,
+    n: u32,
+    out: *mut CRareEventChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if inter_event_times.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(inter_event_times, len) };
+
+        match u_analytics::spc::t_chart(raw) {
+            Some(chart) => {
+                let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
+                    (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
+                });
+                unsafe {
+                    (*out) = CRareEventChartResult {
+                        bar: chart.t_bar,
+                        points: points_ptr,
+                        n_points,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error("invalid input (need at least 3 points, all finite and > 0.0)");
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_t_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees a `CRareEventChartResult` allocated by `insight_g_chart` or
+/// `insight_t_chart`.
+///
+/// # Safety
+/// The result must have been allocated by one of those functions and not
+/// yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_rare_event_chart_result(result: *mut CRareEventChartResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &*result };
+    if !r.points.is_null() && r.n_points > 0 {
+        let _ = unsafe { Vec::from_raw_parts(r.points, r.n_points as usize, r.n_points as usize) };
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4904,6 +5228,139 @@ mod tests {
         let units: [f64; 1] = [10.0];
         let mut result = empty_attribute_result();
         let rc = unsafe { insight_u_chart(ptr::null(), units.as_ptr(), 1, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    fn empty_laney_result() -> CLaneyChartResult {
+        CLaneyChartResult {
+            bar: 0.0,
+            phi: 0.0,
+            points: ptr::null_mut(),
+            n_points: 0,
+        }
+    }
+
+    fn empty_rare_event_result() -> CRareEventChartResult {
+        CRareEventChartResult {
+            bar: 0.0,
+            points: ptr::null_mut(),
+            n_points: 0,
+        }
+    }
+
+    #[test]
+    fn ffi_laney_p_chart_basic() {
+        let defectives: [u64; 5] = [3, 5, 2, 4, 6];
+        let sample_sizes: [u64; 5] = [100, 150, 80, 120, 200];
+        let mut result = empty_laney_result();
+
+        let rc = unsafe {
+            insight_laney_p_chart(defectives.as_ptr(), sample_sizes.as_ptr(), 5, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 5);
+        assert!(result.bar > 0.0);
+
+        unsafe { insight_free_laney_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_laney_p_chart_insufficient_data() {
+        let defectives: [u64; 2] = [3, 5];
+        let sample_sizes: [u64; 2] = [100, 100];
+        let mut result = empty_laney_result();
+        let rc = unsafe {
+            insight_laney_p_chart(defectives.as_ptr(), sample_sizes.as_ptr(), 2, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_laney_p_chart_null_pointer() {
+        let sample_sizes: [u64; 3] = [100, 100, 100];
+        let mut result = empty_laney_result();
+        let rc =
+            unsafe { insight_laney_p_chart(ptr::null(), sample_sizes.as_ptr(), 3, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_laney_u_chart_basic() {
+        let defects: [u64; 5] = [2, 3, 1, 4, 2];
+        let units: [f64; 5] = [10.0, 12.0, 8.0, 15.0, 11.0];
+        let mut result = empty_laney_result();
+
+        let rc = unsafe { insight_laney_u_chart(defects.as_ptr(), units.as_ptr(), 5, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 5);
+
+        unsafe { insight_free_laney_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_laney_u_chart_null_pointer() {
+        let units: [f64; 3] = [10.0, 12.0, 8.0];
+        let mut result = empty_laney_result();
+        let rc = unsafe { insight_laney_u_chart(ptr::null(), units.as_ptr(), 3, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_g_chart_basic() {
+        let gaps: [f64; 5] = [100.0, 120.0, 95.0, 110.0, 105.0];
+        let mut result = empty_rare_event_result();
+
+        let rc = unsafe { insight_g_chart(gaps.as_ptr(), 5, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 5);
+        assert!(result.bar > 0.0);
+
+        let points = unsafe { slice::from_raw_parts(result.points, result.n_points as usize) };
+        assert!(points[0].ucl > points[0].cl);
+
+        unsafe { insight_free_rare_event_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_g_chart_insufficient_data() {
+        let gaps: [f64; 2] = [100.0, 120.0];
+        let mut result = empty_rare_event_result();
+        let rc = unsafe { insight_g_chart(gaps.as_ptr(), 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_g_chart_null_pointer() {
+        let mut result = empty_rare_event_result();
+        let rc = unsafe { insight_g_chart(ptr::null(), 5, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_t_chart_basic() {
+        let times: [f64; 5] = [24.0, 30.0, 18.0, 26.0, 22.0];
+        let mut result = empty_rare_event_result();
+
+        let rc = unsafe { insight_t_chart(times.as_ptr(), 5, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 5);
+        assert!(result.bar > 0.0);
+
+        unsafe { insight_free_rare_event_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_t_chart_insufficient_data() {
+        let times: [f64; 2] = [24.0, 30.0];
+        let mut result = empty_rare_event_result();
+        let rc = unsafe { insight_t_chart(times.as_ptr(), 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_t_chart_null_pointer() {
+        let mut result = empty_rare_event_result();
+        let rc = unsafe { insight_t_chart(ptr::null(), 5, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 }

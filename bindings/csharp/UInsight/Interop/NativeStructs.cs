@@ -272,4 +272,21 @@ internal static class NativeStructs
         public IntPtr Points;
         public uint NPoints;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CLaneyChartResult
+    {
+        public double Bar;
+        public double Phi;
+        public IntPtr Points;
+        public uint NPoints;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CRareEventChartResult
+    {
+        public double Bar;
+        public IntPtr Points;
+        public uint NPoints;
+    }
 }

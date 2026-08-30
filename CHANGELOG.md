@@ -27,9 +27,17 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   attributes control charts (proportion/count/defect-rate) with per-point
   control limits (FFI + C# `InsightClient.PChart` / `NpChart` / `CChart` /
   `UChart`). Exposes `u-analytics::spc::{PChart, NPChart, CChart, UChart}`.
+- **`insight_laney_p_chart`**, **`insight_laney_u_chart`**,
+  **`insight_free_laney_chart_result`**: overdispersion-adjusted P'/U'
+  charts (FFI + C# `InsightClient.LaneyPChart` / `LaneyUChart`).
+- **`insight_g_chart`**, **`insight_t_chart`**,
+  **`insight_free_rare_event_chart_result`**: rare-event control charts
+  (geometric/exponential distributions) (FFI + C# `InsightClient.GChart` /
+  `TChart`). Exposes `u-analytics::spc::{laney_p_chart, laney_u_chart,
+  g_chart, t_chart}`.
 
-Fourth of several `u-analytics` domains planned for FFI exposure (SPC
-Laney/G/T charts, process capability, and Weibull reliability remain).
+SPC control charts are now fully exposed. Process capability indices and
+Weibull reliability remain of the originally planned `u-analytics` domains.
 
 ## [0.13.0] - 2026-07-07
 

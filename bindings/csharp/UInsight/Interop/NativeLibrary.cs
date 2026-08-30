@@ -311,6 +311,34 @@ internal static partial class NativeLibrary
     public static partial void insight_free_attribute_chart_result(
         ref NativeStructs.CAttributeChartResult result);
 
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_laney_p_chart(
+        ulong* defectives, ulong* sampleSizes, uint n,
+        ref NativeStructs.CLaneyChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_laney_u_chart(
+        ulong* defects, double* unitsInspected, uint n,
+        ref NativeStructs.CLaneyChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_laney_chart_result(
+        ref NativeStructs.CLaneyChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_g_chart(
+        double* interEventCounts, uint n,
+        ref NativeStructs.CRareEventChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_t_chart(
+        double* interEventTimes, uint n,
+        ref NativeStructs.CRareEventChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_rare_event_chart_result(
+        ref NativeStructs.CRareEventChartResult result);
+
     #endregion
 
     #region Helper Methods
