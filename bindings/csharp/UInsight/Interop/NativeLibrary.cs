@@ -360,6 +360,29 @@ internal static partial class NativeLibrary
     [LibraryImport(LibraryName)]
     public static partial double insight_ppm_to_sigma(double ppm);
 
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_weibull_mle(
+        double* failureTimes, uint n, ref NativeStructs.CWeibullMleResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_weibull_mrr(
+        double* failureTimes, uint n, ref NativeStructs.CWeibullMrrResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial double insight_weibull_reliability(double shape, double scale, double t);
+
+    [LibraryImport(LibraryName)]
+    public static partial double insight_weibull_hazard_rate(double shape, double scale, double t);
+
+    [LibraryImport(LibraryName)]
+    public static partial double insight_weibull_mtbf(double shape, double scale);
+
+    [LibraryImport(LibraryName)]
+    public static partial double insight_weibull_time_to_reliability(double shape, double scale, double p);
+
+    [LibraryImport(LibraryName)]
+    public static partial double insight_weibull_b_life(double shape, double scale, double fractionFailed);
+
     #endregion
 
     #region Helper Methods

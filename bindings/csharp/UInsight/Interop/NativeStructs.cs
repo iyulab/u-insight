@@ -325,4 +325,21 @@ internal static class NativeStructs
         public double PercentileLower;
         public double PercentileUpper;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CWeibullMleResult
+    {
+        public double Shape;
+        public double Scale;
+        public double LogLikelihood;
+        public uint Iterations;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CWeibullMrrResult
+    {
+        public double Shape;
+        public double Scale;
+        public double RSquared;
+    }
 }

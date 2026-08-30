@@ -895,6 +895,46 @@ typedef struct CPercentileCapabilityResult {
 } CPercentileCapabilityResult;
 
 /**
+ * C-compatible result of Weibull Maximum Likelihood Estimation.
+ */
+typedef struct CWeibullMleResult {
+  /**
+   * Shape parameter (beta).
+   */
+  double shape;
+  /**
+   * Scale parameter (eta).
+   */
+  double scale;
+  /**
+   * Log-likelihood at the fitted parameters.
+   */
+  double log_likelihood;
+  /**
+   * Number of Newton-Raphson iterations used.
+   */
+  uint32_t iterations;
+} CWeibullMleResult;
+
+/**
+ * C-compatible result of Weibull Median Rank Regression fitting.
+ */
+typedef struct CWeibullMrrResult {
+  /**
+   * Shape parameter (beta).
+   */
+  double shape;
+  /**
+   * Scale parameter (eta).
+   */
+  double scale;
+  /**
+   * Coefficient of determination (R-squared) measuring goodness of fit.
+   */
+  double r_squared;
+} CWeibullMrrResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1806,5 +1846,77 @@ INSIGHT_API double insight_sigma_to_ppm(double sigma);
  * the valid range `(0, 1_000_000)` exclusive, or is itself `NaN`.
  */
 INSIGHT_API double insight_ppm_to_sigma(double ppm);
+
+/**
+ * Fits Weibull distribution parameters via Maximum Likelihood Estimation.
+ *
+ * `failure_times`: positive failure times, length `n` (needs at least 2 values).
+ * `out`: pointer to a `CWeibullMleResult`.
+ *
+ * Returns 0 on success, negative on error (insufficient data, non-positive
+ * values, or non-convergence).
+ *
+ * # Safety
+ * `failure_times` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_weibull_mle(const double *failure_times,
+                            uint32_t n,
+                            struct CWeibullMleResult *out);
+
+/**
+ * Fits Weibull distribution parameters via Median Rank Regression.
+ *
+ * `failure_times`: positive failure times, length `n` (needs at least 2 values).
+ * `out`: pointer to a `CWeibullMrrResult`.
+ *
+ * Returns 0 on success, negative on error.
+ *
+ * # Safety
+ * `failure_times` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_weibull_mrr(const double *failure_times,
+                            uint32_t n,
+                            struct CWeibullMrrResult *out);
+
+/**
+ * Weibull reliability (survival) function R(t) = exp(-(t/eta)^beta).
+ *
+ * Returns `NaN` if `shape` or `scale` is non-positive or non-finite.
+ * For `t <= 0`, returns 1.0 (no failure before time zero).
+ */
+INSIGHT_API double insight_weibull_reliability(double shape, double scale, double t);
+
+/**
+ * Weibull hazard (instantaneous failure) rate at time t.
+ *
+ * Returns `NaN` if `shape` or `scale` is non-positive or non-finite.
+ * For `t <= 0`, returns 0.0.
+ */
+INSIGHT_API double insight_weibull_hazard_rate(double shape, double scale, double t);
+
+/**
+ * Mean Time Between Failures (MTBF) = eta * Gamma(1 + 1/beta).
+ *
+ * Returns `NaN` if `shape` or `scale` is non-positive or non-finite.
+ */
+INSIGHT_API double insight_weibull_mtbf(double shape, double scale);
+
+/**
+ * Time at which reliability drops to level `p` (solves R(t) = p for t).
+ *
+ * Returns `NaN` if `shape`/`scale` are invalid, or `p` is outside `(0, 1)`.
+ */
+INSIGHT_API double insight_weibull_time_to_reliability(double shape, double scale, double p);
+
+/**
+ * B-life: time at which `fraction_failed` of the population has failed
+ * (e.g. `fraction_failed = 0.10` gives the B10 life).
+ *
+ * Returns `NaN` if `shape`/`scale` are invalid, or `fraction_failed` is
+ * outside `(0, 1)`.
+ */
+INSIGHT_API double insight_weibull_b_life(double shape, double scale, double fraction_failed);
 
 #endif  /* U_INSIGHT_H */

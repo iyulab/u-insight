@@ -1470,6 +1470,83 @@ public sealed class InsightClient : IDisposable
 
     #endregion
 
+    #region Weibull Reliability
+
+    /// <summary>
+    /// Fits Weibull distribution parameters via Maximum Likelihood Estimation.
+    /// </summary>
+    /// <param name="failureTimes">Positive failure times (needs at least 2 values).</param>
+    public WeibullMleResult WeibullMle(double[] failureTimes)
+    {
+        var native = new NativeStructs.CWeibullMleResult();
+        unsafe
+        {
+            fixed (double* ptr = failureTimes)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_weibull_mle(ptr, (uint)failureTimes.Length, ref native));
+            }
+        }
+        return new WeibullMleResult
+        {
+            Shape = native.Shape,
+            Scale = native.Scale,
+            LogLikelihood = native.LogLikelihood,
+            Iterations = native.Iterations,
+        };
+    }
+
+    /// <summary>
+    /// Fits Weibull distribution parameters via Median Rank Regression.
+    /// </summary>
+    /// <param name="failureTimes">Positive failure times (needs at least 2 values).</param>
+    public WeibullMrrResult WeibullMrr(double[] failureTimes)
+    {
+        var native = new NativeStructs.CWeibullMrrResult();
+        unsafe
+        {
+            fixed (double* ptr = failureTimes)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_weibull_mrr(ptr, (uint)failureTimes.Length, ref native));
+            }
+        }
+        return new WeibullMrrResult
+        {
+            Shape = native.Shape,
+            Scale = native.Scale,
+            RSquared = native.RSquared,
+        };
+    }
+
+    /// <summary>Weibull reliability (survival) function R(t) = exp(-(t/eta)^beta). For t &lt;= 0, returns 1.0.</summary>
+    public double WeibullReliability(double shape, double scale, double t) =>
+        Native.insight_weibull_reliability(shape, scale, t);
+
+    /// <summary>Weibull hazard (instantaneous failure) rate at time t. For t &lt;= 0, returns 0.0.</summary>
+    public double WeibullHazardRate(double shape, double scale, double t) =>
+        Native.insight_weibull_hazard_rate(shape, scale, t);
+
+    /// <summary>Mean Time Between Failures (MTBF) = eta * Gamma(1 + 1/beta).</summary>
+    public double WeibullMtbf(double shape, double scale) =>
+        Native.insight_weibull_mtbf(shape, scale);
+
+    /// <summary>
+    /// Time at which reliability drops to level <paramref name="p"/> (solves R(t) = p for t).
+    /// Returns <c>null</c> if <paramref name="p"/> is outside <c>(0, 1)</c>.
+    /// </summary>
+    public double? WeibullTimeToReliability(double shape, double scale, double p) =>
+        NanToNull(Native.insight_weibull_time_to_reliability(shape, scale, p));
+
+    /// <summary>
+    /// B-life: time at which <paramref name="fractionFailed"/> of the population has failed
+    /// (e.g. 0.10 gives the B10 life). Returns <c>null</c> if out of range <c>(0, 1)</c>.
+    /// </summary>
+    public double? WeibullBLife(double shape, double scale, double fractionFailed) =>
+        NanToNull(Native.insight_weibull_b_life(shape, scale, fractionFailed));
+
+    #endregion
+
     #region Helpers
 
     private static (uint nRows, uint nCols, double[] flat) Flatten(double[,] data)
@@ -2093,6 +2170,30 @@ public class PercentileCapabilityResult
     public double PercentileLower { get; init; }
     /// <summary>99.865th percentile value (upper natural process limit).</summary>
     public double PercentileUpper { get; init; }
+}
+
+/// <summary>Result of Weibull Maximum Likelihood Estimation.</summary>
+public class WeibullMleResult
+{
+    /// <summary>Shape parameter (beta).</summary>
+    public double Shape { get; init; }
+    /// <summary>Scale parameter (eta).</summary>
+    public double Scale { get; init; }
+    /// <summary>Log-likelihood at the fitted parameters.</summary>
+    public double LogLikelihood { get; init; }
+    /// <summary>Number of Newton-Raphson iterations used.</summary>
+    public uint Iterations { get; init; }
+}
+
+/// <summary>Result of Weibull Median Rank Regression fitting.</summary>
+public class WeibullMrrResult
+{
+    /// <summary>Shape parameter (beta).</summary>
+    public double Shape { get; init; }
+    /// <summary>Scale parameter (eta).</summary>
+    public double Scale { get; init; }
+    /// <summary>Coefficient of determination (R-squared) measuring goodness of fit.</summary>
+    public double RSquared { get; init; }
 }
 
 #endregion

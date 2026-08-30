@@ -47,8 +47,19 @@ SPC control charts are now fully exposed.
   level <-> PPM defect rate conversions (FFI + C# `InsightClient.SigmaToPpm`
   / `PpmToSigma`). Exposes `u-analytics::capability::*`.
 
-Process capability indices are now fully exposed. Weibull reliability
-remains of the originally planned `u-analytics` domains.
+Process capability indices are now fully exposed.
+- **`insight_weibull_mle`** / **`insight_weibull_mrr`**: Weibull parameter
+  fitting via Maximum Likelihood Estimation and Median Rank Regression
+  (FFI + C# `InsightClient.WeibullMle` / `WeibullMrr`).
+- **`insight_weibull_reliability`**, **`insight_weibull_hazard_rate`**,
+  **`insight_weibull_mtbf`**, **`insight_weibull_time_to_reliability`**,
+  **`insight_weibull_b_life`**: Weibull reliability analysis — survival
+  function, hazard rate, MTBF, and B-life (FFI + C#
+  `InsightClient.Weibull*`). Exposes `u-analytics::weibull::*`.
+
+**All 5 originally planned `u-analytics` domains are now exposed through
+this crate's FFI**: Mann-Kendall, KDE, SPC control charts, process
+capability, and Weibull reliability.
 
 ## [0.13.0] - 2026-07-07
 

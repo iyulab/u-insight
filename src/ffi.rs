@@ -3937,6 +3937,197 @@ pub extern "C" fn insight_ppm_to_sigma(ppm: f64) -> f64 {
     u_analytics::capability::ppm_to_sigma(ppm).unwrap_or(f64::NAN)
 }
 
+// ── Weibull Reliability FFI ──────────────────────────────────────────────
+
+/// C-compatible result of Weibull Maximum Likelihood Estimation.
+#[repr(C)]
+pub struct CWeibullMleResult {
+    /// Shape parameter (beta).
+    pub shape: f64,
+    /// Scale parameter (eta).
+    pub scale: f64,
+    /// Log-likelihood at the fitted parameters.
+    pub log_likelihood: f64,
+    /// Number of Newton-Raphson iterations used.
+    pub iterations: u32,
+}
+
+/// Fits Weibull distribution parameters via Maximum Likelihood Estimation.
+///
+/// `failure_times`: positive failure times, length `n` (needs at least 2 values).
+/// `out`: pointer to a `CWeibullMleResult`.
+///
+/// Returns 0 on success, negative on error (insufficient data, non-positive
+/// values, or non-convergence).
+///
+/// # Safety
+/// `failure_times` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_weibull_mle(
+    failure_times: *const f64,
+    n: u32,
+    out: *mut CWeibullMleResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if failure_times.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(failure_times, len) };
+
+        match u_analytics::weibull::weibull_mle(raw) {
+            Some(r) => {
+                unsafe {
+                    (*out) = CWeibullMleResult {
+                        shape: r.shape,
+                        scale: r.scale,
+                        log_likelihood: r.log_likelihood,
+                        iterations: r.iterations as u32,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error(
+                    "invalid input (need >= 2 positive finite values, and Newton-Raphson must converge)",
+                );
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_weibull_mle");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// C-compatible result of Weibull Median Rank Regression fitting.
+#[repr(C)]
+pub struct CWeibullMrrResult {
+    /// Shape parameter (beta).
+    pub shape: f64,
+    /// Scale parameter (eta).
+    pub scale: f64,
+    /// Coefficient of determination (R-squared) measuring goodness of fit.
+    pub r_squared: f64,
+}
+
+/// Fits Weibull distribution parameters via Median Rank Regression.
+///
+/// `failure_times`: positive failure times, length `n` (needs at least 2 values).
+/// `out`: pointer to a `CWeibullMrrResult`.
+///
+/// Returns 0 on success, negative on error.
+///
+/// # Safety
+/// `failure_times` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_weibull_mrr(
+    failure_times: *const f64,
+    n: u32,
+    out: *mut CWeibullMrrResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if failure_times.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(failure_times, len) };
+
+        match u_analytics::weibull::weibull_mrr(raw) {
+            Some(r) => {
+                unsafe {
+                    (*out) = CWeibullMrrResult {
+                        shape: r.shape,
+                        scale: r.scale,
+                        r_squared: r.r_squared,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error("invalid input (need >= 2 positive finite values)");
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_weibull_mrr");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Weibull reliability (survival) function R(t) = exp(-(t/eta)^beta).
+///
+/// Returns `NaN` if `shape` or `scale` is non-positive or non-finite.
+/// For `t <= 0`, returns 1.0 (no failure before time zero).
+#[no_mangle]
+pub extern "C" fn insight_weibull_reliability(shape: f64, scale: f64, t: f64) -> f64 {
+    match u_analytics::weibull::ReliabilityAnalysis::new(shape, scale) {
+        Some(ra) => ra.reliability(t),
+        None => f64::NAN,
+    }
+}
+
+/// Weibull hazard (instantaneous failure) rate at time t.
+///
+/// Returns `NaN` if `shape` or `scale` is non-positive or non-finite.
+/// For `t <= 0`, returns 0.0.
+#[no_mangle]
+pub extern "C" fn insight_weibull_hazard_rate(shape: f64, scale: f64, t: f64) -> f64 {
+    match u_analytics::weibull::ReliabilityAnalysis::new(shape, scale) {
+        Some(ra) => ra.hazard_rate(t),
+        None => f64::NAN,
+    }
+}
+
+/// Mean Time Between Failures (MTBF) = eta * Gamma(1 + 1/beta).
+///
+/// Returns `NaN` if `shape` or `scale` is non-positive or non-finite.
+#[no_mangle]
+pub extern "C" fn insight_weibull_mtbf(shape: f64, scale: f64) -> f64 {
+    match u_analytics::weibull::ReliabilityAnalysis::new(shape, scale) {
+        Some(ra) => ra.mtbf(),
+        None => f64::NAN,
+    }
+}
+
+/// Time at which reliability drops to level `p` (solves R(t) = p for t).
+///
+/// Returns `NaN` if `shape`/`scale` are invalid, or `p` is outside `(0, 1)`.
+#[no_mangle]
+pub extern "C" fn insight_weibull_time_to_reliability(shape: f64, scale: f64, p: f64) -> f64 {
+    match u_analytics::weibull::ReliabilityAnalysis::new(shape, scale) {
+        Some(ra) => ra.time_to_reliability(p).unwrap_or(f64::NAN),
+        None => f64::NAN,
+    }
+}
+
+/// B-life: time at which `fraction_failed` of the population has failed
+/// (e.g. `fraction_failed = 0.10` gives the B10 life).
+///
+/// Returns `NaN` if `shape`/`scale` are invalid, or `fraction_failed` is
+/// outside `(0, 1)`.
+#[no_mangle]
+pub extern "C" fn insight_weibull_b_life(shape: f64, scale: f64, fraction_failed: f64) -> f64 {
+    match u_analytics::weibull::ReliabilityAnalysis::new(shape, scale) {
+        Some(ra) => ra.b_life(fraction_failed).unwrap_or(f64::NAN),
+        None => f64::NAN,
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -5889,5 +6080,137 @@ mod tests {
         assert!(sigma.is_nan());
         let sigma = insight_ppm_to_sigma(2_000_000.0);
         assert!(sigma.is_nan());
+    }
+
+    #[test]
+    fn ffi_weibull_mle_basic() {
+        let data: Vec<f64> = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+        let mut result = CWeibullMleResult {
+            shape: 0.0,
+            scale: 0.0,
+            log_likelihood: 0.0,
+            iterations: 0,
+        };
+
+        let rc = unsafe { insight_weibull_mle(data.as_ptr(), data.len() as u32, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(result.shape > 0.0);
+        assert!(result.scale > 0.0);
+        assert!(result.log_likelihood.is_finite());
+    }
+
+    #[test]
+    fn ffi_weibull_mle_insufficient_data() {
+        let data = [10.0_f64];
+        let mut result = CWeibullMleResult {
+            shape: 0.0,
+            scale: 0.0,
+            log_likelihood: 0.0,
+            iterations: 0,
+        };
+        let rc = unsafe { insight_weibull_mle(data.as_ptr(), 1, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_weibull_mle_null_pointer() {
+        let mut result = CWeibullMleResult {
+            shape: 0.0,
+            scale: 0.0,
+            log_likelihood: 0.0,
+            iterations: 0,
+        };
+        let rc = unsafe { insight_weibull_mle(ptr::null(), 10, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_weibull_mrr_basic() {
+        let data: Vec<f64> = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0];
+        let mut result = CWeibullMrrResult {
+            shape: 0.0,
+            scale: 0.0,
+            r_squared: 0.0,
+        };
+
+        let rc = unsafe { insight_weibull_mrr(data.as_ptr(), data.len() as u32, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(result.shape > 0.0);
+        assert!(result.scale > 0.0);
+        assert!(result.r_squared >= 0.0 && result.r_squared <= 1.0);
+    }
+
+    #[test]
+    fn ffi_weibull_mrr_null_pointer() {
+        let mut result = CWeibullMrrResult {
+            shape: 0.0,
+            scale: 0.0,
+            r_squared: 0.0,
+        };
+        let rc = unsafe { insight_weibull_mrr(ptr::null(), 10, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_weibull_reliability_basic() {
+        let r0 = insight_weibull_reliability(2.0, 100.0, 0.0);
+        assert!((r0 - 1.0).abs() < 1e-10);
+        let r_eta = insight_weibull_reliability(2.0, 100.0, 100.0);
+        assert!((r_eta - (-1.0_f64).exp()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn ffi_weibull_reliability_invalid_params() {
+        let r = insight_weibull_reliability(-1.0, 100.0, 50.0);
+        assert!(r.is_nan());
+    }
+
+    #[test]
+    fn ffi_weibull_hazard_rate_basic() {
+        let h1 = insight_weibull_hazard_rate(2.0, 100.0, 50.0);
+        let h2 = insight_weibull_hazard_rate(2.0, 100.0, 80.0);
+        assert!(h1 > 0.0);
+        assert!(h2 > h1, "hazard rate should increase for shape > 1");
+    }
+
+    #[test]
+    fn ffi_weibull_mtbf_basic() {
+        let mtbf = insight_weibull_mtbf(1.0, 50.0);
+        assert!(
+            (mtbf - 50.0).abs() < 1e-8,
+            "MTBF should equal scale when shape=1"
+        );
+    }
+
+    #[test]
+    fn ffi_weibull_mtbf_invalid_params() {
+        let mtbf = insight_weibull_mtbf(0.0, 50.0);
+        assert!(mtbf.is_nan());
+    }
+
+    #[test]
+    fn ffi_weibull_time_to_reliability_basic() {
+        let t = insight_weibull_time_to_reliability(2.0, 100.0, 0.9);
+        assert!(t > 0.0 && t < 100.0);
+    }
+
+    #[test]
+    fn ffi_weibull_time_to_reliability_out_of_range() {
+        let t = insight_weibull_time_to_reliability(2.0, 100.0, 1.5);
+        assert!(t.is_nan());
+    }
+
+    #[test]
+    fn ffi_weibull_b_life_ordering() {
+        let b5 = insight_weibull_b_life(2.0, 100.0, 0.05);
+        let b10 = insight_weibull_b_life(2.0, 100.0, 0.10);
+        let b50 = insight_weibull_b_life(2.0, 100.0, 0.50);
+        assert!(b5 < b10 && b10 < b50);
+    }
+
+    #[test]
+    fn ffi_weibull_b_life_out_of_range() {
+        let b = insight_weibull_b_life(2.0, 100.0, 0.0);
+        assert!(b.is_nan());
     }
 }
