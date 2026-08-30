@@ -287,6 +287,30 @@ internal static partial class NativeLibrary
     public static partial void insight_free_variables_chart_result(
         ref NativeStructs.CVariablesChartResult result);
 
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_p_chart(
+        ulong* defectives, ulong* sampleSizes, uint n,
+        ref NativeStructs.CAttributeChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_np_chart(
+        ulong* defectiveCounts, uint n, ulong sampleSize,
+        ref NativeStructs.CAttributeChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_c_chart(
+        ulong* defectCounts, uint n,
+        ref NativeStructs.CAttributeChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_u_chart(
+        ulong* defects, double* unitsInspected, uint n,
+        ref NativeStructs.CAttributeChartResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_attribute_chart_result(
+        ref NativeStructs.CAttributeChartResult result);
+
     #endregion
 
     #region Helper Methods

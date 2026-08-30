@@ -702,6 +702,51 @@ typedef struct CVariablesChartResult {
 } CVariablesChartResult;
 
 /**
+ * A single point on an attributes control chart.
+ *
+ * Unlike variables charts, attributes charts may have control limits that
+ * vary per point (P and U charts, when sample sizes/inspection areas
+ * differ) — so each point carries its own `ucl`/`cl`/`lcl`.
+ */
+typedef struct CAttributeChartPoint {
+  /**
+   * The computed statistic (proportion, count, or rate).
+   */
+  double value;
+  /**
+   * Upper control limit at this point.
+   */
+  double ucl;
+  /**
+   * Center line at this point.
+   */
+  double cl;
+  /**
+   * Lower control limit at this point.
+   */
+  double lcl;
+  /**
+   * 1 if this point is beyond its control limits, 0 otherwise.
+   */
+  uint8_t out_of_control;
+} CAttributeChartPoint;
+
+/**
+ * C-compatible result for a single-series attributes control chart
+ * (P, NP, C, or U).
+ */
+typedef struct CAttributeChartResult {
+  /**
+   * Chart points. Caller must free with `insight_free_attribute_chart_result`.
+   */
+  struct CAttributeChartPoint *points;
+  /**
+   * Number of chart points.
+   */
+  uint32_t n_points;
+} CAttributeChartResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1351,5 +1396,91 @@ int32_t insight_individual_mr_chart(const double *data,
  * yet freed.
  */
 INSIGHT_API void insight_free_variables_chart_result(struct CVariablesChartResult *result);
+
+/**
+ * Computes a P chart (proportion nonconforming, variable sample size).
+ *
+ * `defectives` / `sample_sizes`: parallel arrays of length `n` — number of
+ * defective items and total sample size for each subgroup. Subgroups where
+ * `defectives > sample_size` or `sample_size == 0` are skipped.
+ * `out`: pointer to a `CAttributeChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_attribute_chart_result`.
+ *
+ * # Safety
+ * `defectives` and `sample_sizes` must each point to `n` u64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_p_chart(const uint64_t *defectives,
+                        const uint64_t *sample_sizes,
+                        uint32_t n,
+                        struct CAttributeChartResult *out);
+
+/**
+ * Computes an NP chart (count nonconforming, constant sample size).
+ *
+ * `defective_counts`: defective count per subgroup, length `n`.
+ * `sample_size`: constant sample size (> 0). Subgroups where
+ * `defective_count > sample_size` are skipped.
+ * `out`: pointer to a `CAttributeChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_attribute_chart_result`.
+ *
+ * # Safety
+ * `defective_counts` must point to `n` u64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_np_chart(const uint64_t *defective_counts,
+                         uint32_t n,
+                         uint64_t sample_size,
+                         struct CAttributeChartResult *out);
+
+/**
+ * Computes a C chart (defect count, constant area of opportunity).
+ *
+ * `defect_counts`: defect count per inspection unit, length `n`.
+ * `out`: pointer to a `CAttributeChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_attribute_chart_result`.
+ *
+ * # Safety
+ * `defect_counts` must point to `n` u64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_c_chart(const uint64_t *defect_counts,
+                        uint32_t n,
+                        struct CAttributeChartResult *out);
+
+/**
+ * Computes a U chart (defects per unit, variable area of opportunity).
+ *
+ * `defects` / `units_inspected`: parallel arrays of length `n` — defect
+ * count and units inspected for each subgroup.
+ * `out`: pointer to a `CAttributeChartResult`.
+ *
+ * Returns 0 on success, negative on error. Caller must free `out` with
+ * `insight_free_attribute_chart_result`.
+ *
+ * # Safety
+ * `defects` must point to `n` u64s, `units_inspected` to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_u_chart(const uint64_t *defects,
+                        const double *units_inspected,
+                        uint32_t n,
+                        struct CAttributeChartResult *out);
+
+/**
+ * Frees a `CAttributeChartResult` allocated by `insight_p_chart`,
+ * `insight_np_chart`, `insight_c_chart`, or `insight_u_chart`.
+ *
+ * # Safety
+ * The result must have been allocated by one of those functions and not
+ * yet freed.
+ */
+INSIGHT_API void insight_free_attribute_chart_result(struct CAttributeChartResult *result);
 
 #endif  /* U_INSIGHT_H */

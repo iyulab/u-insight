@@ -1075,6 +1075,141 @@ public sealed class InsightClient : IDisposable
 
     #endregion
 
+    #region SPC Attributes Control Charts
+
+    /// <summary>
+    /// P chart (proportion nonconforming, variable sample size).
+    /// </summary>
+    /// <param name="defectives">Number of defective items per subgroup.</param>
+    /// <param name="sampleSizes">Total sample size per subgroup (parallel to <paramref name="defectives"/>).</param>
+    public AttributeChartResult PChart(ulong[] defectives, ulong[] sampleSizes)
+    {
+        var native = new NativeStructs.CAttributeChartResult();
+        unsafe
+        {
+            fixed (ulong* defPtr = defectives)
+            fixed (ulong* sizePtr = sampleSizes)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_p_chart(defPtr, sizePtr, (uint)defectives.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildAttributeChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_attribute_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// NP chart (count nonconforming, constant sample size).
+    /// </summary>
+    /// <param name="defectiveCounts">Defective count per subgroup.</param>
+    /// <param name="sampleSize">Constant sample size (must be &gt; 0).</param>
+    public AttributeChartResult NpChart(ulong[] defectiveCounts, ulong sampleSize)
+    {
+        var native = new NativeStructs.CAttributeChartResult();
+        unsafe
+        {
+            fixed (ulong* ptr = defectiveCounts)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_np_chart(ptr, (uint)defectiveCounts.Length, sampleSize, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildAttributeChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_attribute_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// C chart (defect count, constant area of opportunity).
+    /// </summary>
+    /// <param name="defectCounts">Defect count per inspection unit.</param>
+    public AttributeChartResult CChart(ulong[] defectCounts)
+    {
+        var native = new NativeStructs.CAttributeChartResult();
+        unsafe
+        {
+            fixed (ulong* ptr = defectCounts)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_c_chart(ptr, (uint)defectCounts.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildAttributeChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_attribute_chart_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// U chart (defects per unit, variable area of opportunity).
+    /// </summary>
+    /// <param name="defects">Defect count per subgroup.</param>
+    /// <param name="unitsInspected">Units inspected per subgroup (parallel to <paramref name="defects"/>).</param>
+    public AttributeChartResult UChart(ulong[] defects, double[] unitsInspected)
+    {
+        var native = new NativeStructs.CAttributeChartResult();
+        unsafe
+        {
+            fixed (ulong* defPtr = defects)
+            fixed (double* unitPtr = unitsInspected)
+            {
+                Native.ThrowIfFailed(
+                    Native.insight_u_chart(defPtr, unitPtr, (uint)defects.Length, ref native));
+            }
+        }
+
+        try
+        {
+            return BuildAttributeChartResult(native);
+        }
+        finally
+        {
+            Native.insight_free_attribute_chart_result(ref native);
+        }
+    }
+
+    private static unsafe AttributeChartResult BuildAttributeChartResult(
+        NativeStructs.CAttributeChartResult native)
+    {
+        var points = new AttributeChartPoint[native.NPoints];
+        if (native.NPoints > 0 && native.Points != IntPtr.Zero)
+        {
+            var raw = (NativeStructs.CAttributeChartPoint*)native.Points;
+            for (var i = 0; i < native.NPoints; i++)
+            {
+                points[i] = new AttributeChartPoint
+                {
+                    Value = raw[i].Value,
+                    Ucl = raw[i].Ucl,
+                    Cl = raw[i].Cl,
+                    Lcl = raw[i].Lcl,
+                    OutOfControl = raw[i].OutOfControl != 0,
+                };
+            }
+        }
+        return new AttributeChartResult { Points = points };
+    }
+
+    #endregion
+
     #region Helpers
 
     private static (uint nRows, uint nCols, double[] flat) Flatten(double[,] data)
@@ -1593,6 +1728,28 @@ public class VariablesChartResult
     public SpcChartPoint[] SecondaryPoints { get; init; } = [];
     /// <summary>True if no Nelson-rule violations were detected on either series.</summary>
     public bool InControl { get; init; }
+}
+
+/// <summary>A single point on an attributes control chart (P, NP, C, or U).</summary>
+public class AttributeChartPoint
+{
+    /// <summary>The computed statistic (proportion, count, or rate).</summary>
+    public double Value { get; init; }
+    /// <summary>Upper control limit at this point (may vary per point for P and U charts).</summary>
+    public double Ucl { get; init; }
+    /// <summary>Center line at this point.</summary>
+    public double Cl { get; init; }
+    /// <summary>Lower control limit at this point.</summary>
+    public double Lcl { get; init; }
+    /// <summary>True if this point is beyond its control limits.</summary>
+    public bool OutOfControl { get; init; }
+}
+
+/// <summary>Result of a single-series attributes control chart (P, NP, C, or U).</summary>
+public class AttributeChartResult
+{
+    /// <summary>Chart points.</summary>
+    public AttributeChartPoint[] Points { get; init; } = [];
 }
 
 #endregion

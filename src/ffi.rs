@@ -3015,6 +3015,299 @@ pub unsafe extern "C" fn insight_free_variables_chart_result(result: *mut CVaria
     }
 }
 
+// ── SPC Attributes Control Charts FFI (P, NP, C, U) ─────────────────────
+
+/// A single point on an attributes control chart.
+///
+/// Unlike variables charts, attributes charts may have control limits that
+/// vary per point (P and U charts, when sample sizes/inspection areas
+/// differ) — so each point carries its own `ucl`/`cl`/`lcl`.
+#[repr(C)]
+pub struct CAttributeChartPoint {
+    /// The computed statistic (proportion, count, or rate).
+    pub value: f64,
+    /// Upper control limit at this point.
+    pub ucl: f64,
+    /// Center line at this point.
+    pub cl: f64,
+    /// Lower control limit at this point.
+    pub lcl: f64,
+    /// 1 if this point is beyond its control limits, 0 otherwise.
+    pub out_of_control: u8,
+}
+
+/// C-compatible result for a single-series attributes control chart
+/// (P, NP, C, or U).
+#[repr(C)]
+pub struct CAttributeChartResult {
+    /// Chart points. Caller must free with `insight_free_attribute_chart_result`.
+    pub points: *mut CAttributeChartPoint,
+    /// Number of chart points.
+    pub n_points: u32,
+}
+
+fn attribute_points_to_c_result(
+    points: &[u_analytics::spc::AttributeChartPoint],
+) -> CAttributeChartResult {
+    if points.is_empty() {
+        return CAttributeChartResult {
+            points: ptr::null_mut(),
+            n_points: 0,
+        };
+    }
+    let arr: Vec<CAttributeChartPoint> = points
+        .iter()
+        .map(|p| CAttributeChartPoint {
+            value: p.value,
+            ucl: p.ucl,
+            cl: p.cl,
+            lcl: p.lcl,
+            out_of_control: u8::from(p.out_of_control),
+        })
+        .collect();
+    let n = arr.len() as u32;
+    let mut boxed = arr.into_boxed_slice();
+    let out_ptr = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    CAttributeChartResult {
+        points: out_ptr,
+        n_points: n,
+    }
+}
+
+/// Computes a P chart (proportion nonconforming, variable sample size).
+///
+/// `defectives` / `sample_sizes`: parallel arrays of length `n` — number of
+/// defective items and total sample size for each subgroup. Subgroups where
+/// `defectives > sample_size` or `sample_size == 0` are skipped.
+/// `out`: pointer to a `CAttributeChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_attribute_chart_result`.
+///
+/// # Safety
+/// `defectives` and `sample_sizes` must each point to `n` u64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_p_chart(
+    defectives: *const u64,
+    sample_sizes: *const u64,
+    n: u32,
+    out: *mut CAttributeChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if defectives.is_null() || sample_sizes.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let defs = unsafe { slice::from_raw_parts(defectives, len) };
+        let sizes = unsafe { slice::from_raw_parts(sample_sizes, len) };
+
+        let mut chart = u_analytics::spc::PChart::new();
+        for i in 0..len {
+            chart.add_sample(defs[i], sizes[i]);
+        }
+
+        if chart.p_bar().is_none() {
+            set_last_error(
+                "no valid samples (each needs sample_size > 0 and defectives <= sample_size)",
+            );
+            return INSIGHT_ERR_INSUFFICIENT_DATA;
+        }
+
+        unsafe {
+            (*out) = attribute_points_to_c_result(chart.points());
+        }
+        INSIGHT_OK
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_p_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Computes an NP chart (count nonconforming, constant sample size).
+///
+/// `defective_counts`: defective count per subgroup, length `n`.
+/// `sample_size`: constant sample size (> 0). Subgroups where
+/// `defective_count > sample_size` are skipped.
+/// `out`: pointer to a `CAttributeChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_attribute_chart_result`.
+///
+/// # Safety
+/// `defective_counts` must point to `n` u64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_np_chart(
+    defective_counts: *const u64,
+    n: u32,
+    sample_size: u64,
+    out: *mut CAttributeChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if defective_counts.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+        if sample_size == 0 {
+            set_last_error("sample_size must be > 0");
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
+
+        let len = n as usize;
+        let counts = unsafe { slice::from_raw_parts(defective_counts, len) };
+
+        let mut chart = u_analytics::spc::NPChart::new(sample_size);
+        for &c in counts {
+            chart.add_sample(c);
+        }
+
+        if chart.control_limits().is_none() {
+            set_last_error("no valid samples (each needs defective_count <= sample_size)");
+            return INSIGHT_ERR_INSUFFICIENT_DATA;
+        }
+
+        unsafe {
+            (*out) = attribute_points_to_c_result(chart.points());
+        }
+        INSIGHT_OK
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_np_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Computes a C chart (defect count, constant area of opportunity).
+///
+/// `defect_counts`: defect count per inspection unit, length `n`.
+/// `out`: pointer to a `CAttributeChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_attribute_chart_result`.
+///
+/// # Safety
+/// `defect_counts` must point to `n` u64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_c_chart(
+    defect_counts: *const u64,
+    n: u32,
+    out: *mut CAttributeChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if defect_counts.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let counts = unsafe { slice::from_raw_parts(defect_counts, len) };
+
+        let mut chart = u_analytics::spc::CChart::new();
+        for &c in counts {
+            chart.add_sample(c);
+        }
+
+        if chart.control_limits().is_none() {
+            set_last_error("no samples provided");
+            return INSIGHT_ERR_INSUFFICIENT_DATA;
+        }
+
+        unsafe {
+            (*out) = attribute_points_to_c_result(chart.points());
+        }
+        INSIGHT_OK
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_c_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Computes a U chart (defects per unit, variable area of opportunity).
+///
+/// `defects` / `units_inspected`: parallel arrays of length `n` — defect
+/// count and units inspected for each subgroup.
+/// `out`: pointer to a `CAttributeChartResult`.
+///
+/// Returns 0 on success, negative on error. Caller must free `out` with
+/// `insight_free_attribute_chart_result`.
+///
+/// # Safety
+/// `defects` must point to `n` u64s, `units_inspected` to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_u_chart(
+    defects: *const u64,
+    units_inspected: *const f64,
+    n: u32,
+    out: *mut CAttributeChartResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if defects.is_null() || units_inspected.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let len = n as usize;
+        let defs = unsafe { slice::from_raw_parts(defects, len) };
+        let units = unsafe { slice::from_raw_parts(units_inspected, len) };
+
+        let mut chart = u_analytics::spc::UChart::new();
+        for i in 0..len {
+            chart.add_sample(defs[i], units[i]);
+        }
+
+        if chart.u_bar().is_none() {
+            set_last_error("no valid samples (each needs units_inspected > 0)");
+            return INSIGHT_ERR_INSUFFICIENT_DATA;
+        }
+
+        unsafe {
+            (*out) = attribute_points_to_c_result(chart.points());
+        }
+        INSIGHT_OK
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_u_chart");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees a `CAttributeChartResult` allocated by `insight_p_chart`,
+/// `insight_np_chart`, `insight_c_chart`, or `insight_u_chart`.
+///
+/// # Safety
+/// The result must have been allocated by one of those functions and not
+/// yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_attribute_chart_result(result: *mut CAttributeChartResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &*result };
+    if !r.points.is_null() && r.n_points > 0 {
+        let _ = unsafe { Vec::from_raw_parts(r.points, r.n_points as usize, r.n_points as usize) };
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4504,6 +4797,113 @@ mod tests {
     fn ffi_individual_mr_chart_null_pointer() {
         let mut result = empty_variables_result();
         let rc = unsafe { insight_individual_mr_chart(ptr::null(), 10, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    fn empty_attribute_result() -> CAttributeChartResult {
+        CAttributeChartResult {
+            points: ptr::null_mut(),
+            n_points: 0,
+        }
+    }
+
+    #[test]
+    fn ffi_p_chart_basic() {
+        let defectives: [u64; 4] = [3, 5, 2, 4];
+        let sample_sizes: [u64; 4] = [100, 100, 100, 100];
+        let mut result = empty_attribute_result();
+
+        let rc =
+            unsafe { insight_p_chart(defectives.as_ptr(), sample_sizes.as_ptr(), 4, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 4);
+
+        let points = unsafe { slice::from_raw_parts(result.points, result.n_points as usize) };
+        assert!((points[0].value - 0.03).abs() < 1e-9);
+        assert!(points[0].ucl > points[0].cl);
+        assert!(points[0].cl > points[0].lcl || points[0].lcl == 0.0);
+
+        unsafe { insight_free_attribute_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_p_chart_insufficient_data() {
+        let defectives: [u64; 1] = [5];
+        let sample_sizes: [u64; 1] = [0]; // invalid, gets skipped
+        let mut result = empty_attribute_result();
+        let rc =
+            unsafe { insight_p_chart(defectives.as_ptr(), sample_sizes.as_ptr(), 1, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_p_chart_null_pointer() {
+        let sample_sizes: [u64; 1] = [100];
+        let mut result = empty_attribute_result();
+        let rc = unsafe { insight_p_chart(ptr::null(), sample_sizes.as_ptr(), 1, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_np_chart_basic() {
+        let counts: [u64; 4] = [3, 5, 2, 4];
+        let mut result = empty_attribute_result();
+
+        let rc = unsafe { insight_np_chart(counts.as_ptr(), 4, 100, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 4);
+
+        unsafe { insight_free_attribute_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_np_chart_invalid_sample_size() {
+        let counts: [u64; 1] = [3];
+        let mut result = empty_attribute_result();
+        let rc = unsafe { insight_np_chart(counts.as_ptr(), 1, 0, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
+    fn ffi_c_chart_basic() {
+        let counts: [u64; 5] = [2, 3, 1, 4, 2];
+        let mut result = empty_attribute_result();
+
+        let rc = unsafe { insight_c_chart(counts.as_ptr(), 5, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 5);
+
+        let points = unsafe { slice::from_raw_parts(result.points, result.n_points as usize) };
+        assert!((points[0].cl - 2.4).abs() < 1e-9);
+
+        unsafe { insight_free_attribute_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_c_chart_null_pointer() {
+        let mut result = empty_attribute_result();
+        let rc = unsafe { insight_c_chart(ptr::null(), 5, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_u_chart_basic() {
+        let defects: [u64; 4] = [2, 3, 1, 4];
+        let units: [f64; 4] = [10.0, 12.0, 8.0, 15.0];
+        let mut result = empty_attribute_result();
+
+        let rc = unsafe { insight_u_chart(defects.as_ptr(), units.as_ptr(), 4, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.n_points, 4);
+
+        unsafe { insight_free_attribute_chart_result(&mut result) };
+    }
+
+    #[test]
+    fn ffi_u_chart_null_pointer() {
+        let units: [f64; 1] = [10.0];
+        let mut result = empty_attribute_result();
+        let rc = unsafe { insight_u_chart(ptr::null(), units.as_ptr(), 1, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 }

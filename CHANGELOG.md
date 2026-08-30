@@ -22,9 +22,14 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   Nelson-rule violation detection, exposed as bit flags per point (FFI + C#
   `InsightClient.XBarRChart` / `XBarSChart` / `IndividualMrChart`). Exposes
   `u-analytics::spc::{XBarRChart, XBarSChart, IndividualMRChart}`.
+- **`insight_p_chart`**, **`insight_np_chart`**, **`insight_c_chart`**,
+  **`insight_u_chart`**, **`insight_free_attribute_chart_result`**: SPC
+  attributes control charts (proportion/count/defect-rate) with per-point
+  control limits (FFI + C# `InsightClient.PChart` / `NpChart` / `CChart` /
+  `UChart`). Exposes `u-analytics::spc::{PChart, NPChart, CChart, UChart}`.
 
-Second and third of several `u-analytics` domains planned for FFI exposure
-(SPC attributes charts, process capability, and Weibull reliability remain).
+Fourth of several `u-analytics` domains planned for FFI exposure (SPC
+Laney/G/T charts, process capability, and Weibull reliability remain).
 
 ## [0.13.0] - 2026-07-07
 

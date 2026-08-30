@@ -255,4 +255,21 @@ internal static class NativeStructs
         public uint NSecondaryPoints;
         public byte InControl;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CAttributeChartPoint
+    {
+        public double Value;
+        public double Ucl;
+        public double Cl;
+        public double Lcl;
+        public byte OutOfControl;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CAttributeChartResult
+    {
+        public IntPtr Points;
+        public uint NPoints;
+    }
 }
