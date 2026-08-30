@@ -289,4 +289,40 @@ internal static class NativeStructs
         public IntPtr Points;
         public uint NPoints;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CCapabilityIndices
+    {
+        public double Cp;
+        public double Cpk;
+        public double Cpu;
+        public double Cpl;
+        public double Pp;
+        public double Ppk;
+        public double Ppu;
+        public double Ppl;
+        public double Cpm;
+        public double Mean;
+        public double StdDevWithin;
+        public double StdDevOverall;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CBoxCoxCapabilityResult
+    {
+        public double Lambda;
+        public CCapabilityIndices Indices;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CPercentileCapabilityResult
+    {
+        public double CpStar;
+        public double CpkStar;
+        public double CpuStar;
+        public double CplStar;
+        public double Median;
+        public double PercentileLower;
+        public double PercentileUpper;
+    }
 }

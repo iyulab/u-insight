@@ -339,6 +339,27 @@ internal static partial class NativeLibrary
     public static partial void insight_free_rare_event_chart_result(
         ref NativeStructs.CRareEventChartResult result);
 
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_process_capability(
+        double* data, uint n, double usl, double lsl, double target, double sigmaWithin,
+        ref NativeStructs.CCapabilityIndices result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_boxcox_capability(
+        double* data, uint n, double usl, double lsl,
+        ref NativeStructs.CBoxCoxCapabilityResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_percentile_capability(
+        double* data, uint n, double lsl, double usl,
+        ref NativeStructs.CPercentileCapabilityResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial double insight_sigma_to_ppm(double sigma);
+
+    [LibraryImport(LibraryName)]
+    public static partial double insight_ppm_to_sigma(double ppm);
+
     #endregion
 
     #region Helper Methods

@@ -789,6 +789,112 @@ typedef struct CRareEventChartResult {
 } CRareEventChartResult;
 
 /**
+ * C-compatible process capability indices.
+ *
+ * Fields are `f64::NAN` when the corresponding index could not be computed
+ * (e.g. Cp requires both USL and LSL) — the same "NaN means absent"
+ * convention already used elsewhere in this module for optional statistics.
+ */
+typedef struct CCapabilityIndices {
+  /**
+   * Cp = (USL - LSL) / (6 * sigma_within). NaN unless both limits are set.
+   */
+  double cp;
+  /**
+   * Cpk = min(Cpu, Cpl). NaN unless at least one limit is set.
+   */
+  double cpk;
+  /**
+   * Cpu = (USL - mean) / (3 * sigma_within). NaN unless USL is set.
+   */
+  double cpu;
+  /**
+   * Cpl = (mean - LSL) / (3 * sigma_within). NaN unless LSL is set.
+   */
+  double cpl;
+  /**
+   * Pp = (USL - LSL) / (6 * sigma_overall). NaN unless both limits are set.
+   */
+  double pp;
+  /**
+   * Ppk = min(Ppu, Ppl). NaN unless at least one limit is set.
+   */
+  double ppk;
+  /**
+   * Ppu = (USL - mean) / (3 * sigma_overall). NaN unless USL is set.
+   */
+  double ppu;
+  /**
+   * Ppl = (mean - LSL) / (3 * sigma_overall). NaN unless LSL is set.
+   */
+  double ppl;
+  /**
+   * Cpm (Taguchi index). NaN unless both limits and a target are available.
+   */
+  double cpm;
+  /**
+   * Sample mean of the data.
+   */
+  double mean;
+  /**
+   * Short-term (within-group) standard deviation.
+   */
+  double std_dev_within;
+  /**
+   * Long-term (overall) standard deviation.
+   */
+  double std_dev_overall;
+} CCapabilityIndices;
+
+/**
+ * C-compatible result of Box-Cox-based non-normal process capability analysis.
+ */
+typedef struct CBoxCoxCapabilityResult {
+  /**
+   * Estimated optimal Box-Cox transformation parameter lambda.
+   */
+  double lambda;
+  /**
+   * Capability indices computed on the Box-Cox-transformed scale.
+   */
+  struct CCapabilityIndices indices;
+} CBoxCoxCapabilityResult;
+
+/**
+ * C-compatible result of percentile-based (ISO 22514-2) process capability analysis.
+ */
+typedef struct CPercentileCapabilityResult {
+  /**
+   * Cp* = (USL - LSL) / (X_99.865 - X_0.135). NaN unless both limits are set.
+   */
+  double cp_star;
+  /**
+   * Cpk* = min(Cpu*, Cpl*). NaN unless at least one limit is set.
+   */
+  double cpk_star;
+  /**
+   * Cpu* = (USL - median) / (X_99.865 - median). NaN unless USL is set.
+   */
+  double cpu_star;
+  /**
+   * Cpl* = (median - LSL) / (median - X_0.135). NaN unless LSL is set.
+   */
+  double cpl_star;
+  /**
+   * Sample median.
+   */
+  double median;
+  /**
+   * 0.135th percentile value (lower natural process limit).
+   */
+  double percentile_lower;
+  /**
+   * 99.865th percentile value (upper natural process limit).
+   */
+  double percentile_upper;
+} CPercentileCapabilityResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1619,5 +1725,86 @@ int32_t insight_t_chart(const double *inter_event_times,
  * yet freed.
  */
 INSIGHT_API void insight_free_rare_event_chart_result(struct CRareEventChartResult *result);
+
+/**
+ * Computes standard process capability indices (Cp, Cpk, Pp, Ppk, Cpm).
+ *
+ * `data`: process observations, length `n`.
+ * `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
+ * one of the two must be a real number).
+ * `target`: target value for Cpm — pass `NaN` to default to the midpoint
+ * `(usl + lsl) / 2` when both limits are set.
+ * `sigma_within`: short-term standard deviation (e.g. from a control
+ * chart's R-bar/d2 or S-bar/c4) — pass `NaN` to use the overall sample
+ * standard deviation for both short- and long-term indices (in which case
+ * Cp == Pp and Cpk == Ppk).
+ * `out`: pointer to a `CCapabilityIndices`.
+ *
+ * Returns 0 on success, negative on error.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_process_capability(const double *data,
+                                   uint32_t n,
+                                   double usl,
+                                   double lsl,
+                                   double target,
+                                   double sigma_within,
+                                   struct CCapabilityIndices *out);
+
+/**
+ * Computes process capability for non-normal data via Box-Cox transformation.
+ *
+ * `data`: process observations, length `n` — must all be strictly positive.
+ * `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
+ * one must be a real, positive number).
+ * `out`: pointer to a `CBoxCoxCapabilityResult`.
+ *
+ * Returns 0 on success, negative on error.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_boxcox_capability(const double *data,
+                                  uint32_t n,
+                                  double usl,
+                                  double lsl,
+                                  struct CBoxCoxCapabilityResult *out);
+
+/**
+ * Computes percentile-based process capability indices (ISO 22514-2).
+ *
+ * `data`: process observations, length `n` (needs at least 20 points).
+ * `lsl` / `usl`: specification limits — pass `NaN` for "not set" (at least
+ * one must be a real number).
+ * `out`: pointer to a `CPercentileCapabilityResult`.
+ *
+ * Returns 0 on success, negative on error.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_percentile_capability(const double *data,
+                                      uint32_t n,
+                                      double lsl,
+                                      double usl,
+                                      struct CPercentileCapabilityResult *out);
+
+/**
+ * Converts a sigma quality level to a parts-per-million (PPM) defect rate,
+ * using the standard Motorola 1.5-sigma shift convention.
+ */
+INSIGHT_API double insight_sigma_to_ppm(double sigma);
+
+/**
+ * Converts a parts-per-million (PPM) defect rate to a sigma quality level
+ * (inverse of `insight_sigma_to_ppm`). Returns `NaN` if `ppm` is outside
+ * the valid range `(0, 1_000_000)` exclusive, or is itself `NaN`.
+ */
+INSIGHT_API double insight_ppm_to_sigma(double ppm);
 
 #endif  /* U_INSIGHT_H */

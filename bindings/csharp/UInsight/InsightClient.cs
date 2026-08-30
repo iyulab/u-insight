@@ -1352,6 +1352,124 @@ public sealed class InsightClient : IDisposable
 
     #endregion
 
+    #region Process Capability
+
+    /// <summary>
+    /// Standard process capability indices (Cp, Cpk, Pp, Ppk, Cpm).
+    /// </summary>
+    /// <param name="data">Process observations (needs at least 2 points).</param>
+    /// <param name="usl">Upper specification limit. At least one of <paramref name="usl"/>/<paramref name="lsl"/> must be set.</param>
+    /// <param name="lsl">Lower specification limit.</param>
+    /// <param name="target">Target value for Cpm. Defaults to the midpoint of <paramref name="usl"/>/<paramref name="lsl"/> when both are set.</param>
+    /// <param name="sigmaWithin">
+    /// Short-term standard deviation (e.g. from a control chart's R-bar/d2 or
+    /// S-bar/c4). When omitted, the overall sample standard deviation is used
+    /// for both short- and long-term indices (Cp == Pp, Cpk == Ppk).
+    /// </param>
+    public CapabilityIndices ProcessCapability(
+        double[] data, double? usl = null, double? lsl = null,
+        double? target = null, double? sigmaWithin = null)
+    {
+        var native = new NativeStructs.CCapabilityIndices();
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_process_capability(
+                    ptr, (uint)data.Length,
+                    usl ?? double.NaN, lsl ?? double.NaN,
+                    target ?? double.NaN, sigmaWithin ?? double.NaN,
+                    ref native));
+            }
+        }
+        return BuildCapabilityIndices(native);
+    }
+
+    /// <summary>
+    /// Process capability for non-normal data via Box-Cox transformation.
+    /// </summary>
+    /// <param name="data">Process observations (must all be strictly positive, needs at least 4 points).</param>
+    /// <param name="usl">Upper specification limit (must be positive if set).</param>
+    /// <param name="lsl">Lower specification limit (must be positive if set).</param>
+    public BoxCoxCapabilityResult BoxCoxCapability(double[] data, double? usl = null, double? lsl = null)
+    {
+        var native = new NativeStructs.CBoxCoxCapabilityResult();
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_boxcox_capability(
+                    ptr, (uint)data.Length, usl ?? double.NaN, lsl ?? double.NaN, ref native));
+            }
+        }
+        return new BoxCoxCapabilityResult
+        {
+            Lambda = native.Lambda,
+            Indices = BuildCapabilityIndices(native.Indices),
+        };
+    }
+
+    /// <summary>
+    /// Percentile-based process capability indices (ISO 22514-2), robust to non-normal data.
+    /// </summary>
+    /// <param name="data">Process observations (needs at least 20 points).</param>
+    /// <param name="lsl">Lower specification limit. At least one of <paramref name="lsl"/>/<paramref name="usl"/> must be set.</param>
+    /// <param name="usl">Upper specification limit.</param>
+    public PercentileCapabilityResult PercentileCapability(double[] data, double? lsl = null, double? usl = null)
+    {
+        var native = new NativeStructs.CPercentileCapabilityResult();
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_percentile_capability(
+                    ptr, (uint)data.Length, lsl ?? double.NaN, usl ?? double.NaN, ref native));
+            }
+        }
+        return new PercentileCapabilityResult
+        {
+            CpStar = NanToNull(native.CpStar),
+            CpkStar = NanToNull(native.CpkStar),
+            CpuStar = NanToNull(native.CpuStar),
+            CplStar = NanToNull(native.CplStar),
+            Median = native.Median,
+            PercentileLower = native.PercentileLower,
+            PercentileUpper = native.PercentileUpper,
+        };
+    }
+
+    /// <summary>Converts a sigma quality level to a parts-per-million (PPM) defect rate (Motorola 1.5-sigma shift convention).</summary>
+    public double SigmaToPpm(double sigma) => Native.insight_sigma_to_ppm(sigma);
+
+    /// <summary>
+    /// Converts a parts-per-million (PPM) defect rate to a sigma quality level.
+    /// Returns <c>null</c> if <paramref name="ppm"/> is outside <c>(0, 1_000_000)</c>.
+    /// </summary>
+    public double? PpmToSigma(double ppm) => NanToNull(Native.insight_ppm_to_sigma(ppm));
+
+    private static CapabilityIndices BuildCapabilityIndices(NativeStructs.CCapabilityIndices native)
+    {
+        return new CapabilityIndices
+        {
+            Cp = NanToNull(native.Cp),
+            Cpk = NanToNull(native.Cpk),
+            Cpu = NanToNull(native.Cpu),
+            Cpl = NanToNull(native.Cpl),
+            Pp = NanToNull(native.Pp),
+            Ppk = NanToNull(native.Ppk),
+            Ppu = NanToNull(native.Ppu),
+            Ppl = NanToNull(native.Ppl),
+            Cpm = NanToNull(native.Cpm),
+            Mean = native.Mean,
+            StdDevWithin = native.StdDevWithin,
+            StdDevOverall = native.StdDevOverall,
+        };
+    }
+
+    private static double? NanToNull(double value) => double.IsNaN(value) ? null : value;
+
+    #endregion
+
     #region Helpers
 
     private static (uint nRows, uint nCols, double[] flat) Flatten(double[,] data)
@@ -1915,6 +2033,66 @@ public class RareEventChartResult
     public double Bar { get; init; }
     /// <summary>Per-observation chart points.</summary>
     public AttributeChartPoint[] Points { get; init; } = [];
+}
+
+/// <summary>
+/// Standard process capability indices. Fields are <c>null</c> when the
+/// corresponding index could not be computed (e.g. Cp requires both USL and LSL).
+/// </summary>
+public class CapabilityIndices
+{
+    /// <summary>Cp = (USL - LSL) / (6 * sigma_within). Requires both limits.</summary>
+    public double? Cp { get; init; }
+    /// <summary>Cpk = min(Cpu, Cpl). Requires at least one limit.</summary>
+    public double? Cpk { get; init; }
+    /// <summary>Cpu = (USL - mean) / (3 * sigma_within). Requires USL.</summary>
+    public double? Cpu { get; init; }
+    /// <summary>Cpl = (mean - LSL) / (3 * sigma_within). Requires LSL.</summary>
+    public double? Cpl { get; init; }
+    /// <summary>Pp = (USL - LSL) / (6 * sigma_overall). Requires both limits.</summary>
+    public double? Pp { get; init; }
+    /// <summary>Ppk = min(Ppu, Ppl). Requires at least one limit.</summary>
+    public double? Ppk { get; init; }
+    /// <summary>Ppu = (USL - mean) / (3 * sigma_overall). Requires USL.</summary>
+    public double? Ppu { get; init; }
+    /// <summary>Ppl = (mean - LSL) / (3 * sigma_overall). Requires LSL.</summary>
+    public double? Ppl { get; init; }
+    /// <summary>Cpm (Taguchi index). Requires both limits and a target.</summary>
+    public double? Cpm { get; init; }
+    /// <summary>Sample mean of the data.</summary>
+    public double Mean { get; init; }
+    /// <summary>Short-term (within-group) standard deviation.</summary>
+    public double StdDevWithin { get; init; }
+    /// <summary>Long-term (overall) standard deviation.</summary>
+    public double StdDevOverall { get; init; }
+}
+
+/// <summary>Result of Box-Cox-based non-normal process capability analysis.</summary>
+public class BoxCoxCapabilityResult
+{
+    /// <summary>Estimated optimal Box-Cox transformation parameter lambda.</summary>
+    public double Lambda { get; init; }
+    /// <summary>Capability indices computed on the Box-Cox-transformed scale.</summary>
+    public CapabilityIndices Indices { get; init; } = new();
+}
+
+/// <summary>Result of percentile-based (ISO 22514-2) process capability analysis.</summary>
+public class PercentileCapabilityResult
+{
+    /// <summary>Cp* = (USL - LSL) / (X_99.865 - X_0.135). Requires both limits.</summary>
+    public double? CpStar { get; init; }
+    /// <summary>Cpk* = min(Cpu*, Cpl*). Requires at least one limit.</summary>
+    public double? CpkStar { get; init; }
+    /// <summary>Cpu* = (USL - median) / (X_99.865 - median). Requires USL.</summary>
+    public double? CpuStar { get; init; }
+    /// <summary>Cpl* = (median - LSL) / (median - X_0.135). Requires LSL.</summary>
+    public double? CplStar { get; init; }
+    /// <summary>Sample median.</summary>
+    public double Median { get; init; }
+    /// <summary>0.135th percentile value (lower natural process limit).</summary>
+    public double PercentileLower { get; init; }
+    /// <summary>99.865th percentile value (upper natural process limit).</summary>
+    public double PercentileUpper { get; init; }
 }
 
 #endregion

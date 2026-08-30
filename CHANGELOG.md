@@ -36,8 +36,19 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   `TChart`). Exposes `u-analytics::spc::{laney_p_chart, laney_u_chart,
   g_chart, t_chart}`.
 
-SPC control charts are now fully exposed. Process capability indices and
-Weibull reliability remain of the originally planned `u-analytics` domains.
+SPC control charts are now fully exposed.
+- **`insight_process_capability`**: standard capability indices
+  (Cp/Cpk/Pp/Ppk/Cpm) (FFI + C# `InsightClient.ProcessCapability`).
+- **`insight_boxcox_capability`**: non-normal process capability via
+  Box-Cox transformation (FFI + C# `InsightClient.BoxCoxCapability`).
+- **`insight_percentile_capability`**: percentile-based (ISO 22514-2)
+  process capability (FFI + C# `InsightClient.PercentileCapability`).
+- **`insight_sigma_to_ppm`** / **`insight_ppm_to_sigma`**: sigma quality
+  level <-> PPM defect rate conversions (FFI + C# `InsightClient.SigmaToPpm`
+  / `PpmToSigma`). Exposes `u-analytics::capability::*`.
+
+Process capability indices are now fully exposed. Weibull reliability
+remains of the originally planned `u-analytics` domains.
 
 ## [0.13.0] - 2026-07-07
 

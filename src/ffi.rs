@@ -3632,6 +3632,311 @@ pub unsafe extern "C" fn insight_free_rare_event_chart_result(result: *mut CRare
     }
 }
 
+// ── Process Capability FFI ───────────────────────────────────────────────
+
+/// C-compatible process capability indices.
+///
+/// Fields are `f64::NAN` when the corresponding index could not be computed
+/// (e.g. Cp requires both USL and LSL) — the same "NaN means absent"
+/// convention already used elsewhere in this module for optional statistics.
+#[repr(C)]
+pub struct CCapabilityIndices {
+    /// Cp = (USL - LSL) / (6 * sigma_within). NaN unless both limits are set.
+    pub cp: f64,
+    /// Cpk = min(Cpu, Cpl). NaN unless at least one limit is set.
+    pub cpk: f64,
+    /// Cpu = (USL - mean) / (3 * sigma_within). NaN unless USL is set.
+    pub cpu: f64,
+    /// Cpl = (mean - LSL) / (3 * sigma_within). NaN unless LSL is set.
+    pub cpl: f64,
+    /// Pp = (USL - LSL) / (6 * sigma_overall). NaN unless both limits are set.
+    pub pp: f64,
+    /// Ppk = min(Ppu, Ppl). NaN unless at least one limit is set.
+    pub ppk: f64,
+    /// Ppu = (USL - mean) / (3 * sigma_overall). NaN unless USL is set.
+    pub ppu: f64,
+    /// Ppl = (mean - LSL) / (3 * sigma_overall). NaN unless LSL is set.
+    pub ppl: f64,
+    /// Cpm (Taguchi index). NaN unless both limits and a target are available.
+    pub cpm: f64,
+    /// Sample mean of the data.
+    pub mean: f64,
+    /// Short-term (within-group) standard deviation.
+    pub std_dev_within: f64,
+    /// Long-term (overall) standard deviation.
+    pub std_dev_overall: f64,
+}
+
+impl From<u_analytics::capability::CapabilityIndices> for CCapabilityIndices {
+    fn from(idx: u_analytics::capability::CapabilityIndices) -> Self {
+        CCapabilityIndices {
+            cp: idx.cp.unwrap_or(f64::NAN),
+            cpk: idx.cpk.unwrap_or(f64::NAN),
+            cpu: idx.cpu.unwrap_or(f64::NAN),
+            cpl: idx.cpl.unwrap_or(f64::NAN),
+            pp: idx.pp.unwrap_or(f64::NAN),
+            ppk: idx.ppk.unwrap_or(f64::NAN),
+            ppu: idx.ppu.unwrap_or(f64::NAN),
+            ppl: idx.ppl.unwrap_or(f64::NAN),
+            cpm: idx.cpm.unwrap_or(f64::NAN),
+            mean: idx.mean,
+            std_dev_within: idx.std_dev_within,
+            std_dev_overall: idx.std_dev_overall,
+        }
+    }
+}
+
+/// Computes standard process capability indices (Cp, Cpk, Pp, Ppk, Cpm).
+///
+/// `data`: process observations, length `n`.
+/// `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
+/// one of the two must be a real number).
+/// `target`: target value for Cpm — pass `NaN` to default to the midpoint
+/// `(usl + lsl) / 2` when both limits are set.
+/// `sigma_within`: short-term standard deviation (e.g. from a control
+/// chart's R-bar/d2 or S-bar/c4) — pass `NaN` to use the overall sample
+/// standard deviation for both short- and long-term indices (in which case
+/// Cp == Pp and Cpk == Ppk).
+/// `out`: pointer to a `CCapabilityIndices`.
+///
+/// Returns 0 on success, negative on error.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_process_capability(
+    data: *const f64,
+    n: u32,
+    usl: f64,
+    lsl: f64,
+    target: f64,
+    sigma_within: f64,
+    out: *mut CCapabilityIndices,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let usl_opt = if usl.is_nan() { None } else { Some(usl) };
+        let lsl_opt = if lsl.is_nan() { None } else { Some(lsl) };
+
+        let mut spec = match u_analytics::capability::ProcessCapability::new(usl_opt, lsl_opt) {
+            Ok(s) => s,
+            Err(msg) => {
+                set_last_error(msg);
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+        if !target.is_nan() {
+            spec = spec.with_target(target);
+        }
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(data, len) };
+
+        let indices = if sigma_within.is_nan() {
+            spec.compute_overall(raw)
+        } else {
+            spec.compute(raw, sigma_within)
+        };
+
+        match indices {
+            Some(idx) => {
+                unsafe {
+                    (*out) = idx.into();
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error(
+                    "invalid input (need >= 2 data points, all finite; sigma_within must be \
+                     positive and finite when provided)",
+                );
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_process_capability");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// C-compatible result of Box-Cox-based non-normal process capability analysis.
+#[repr(C)]
+pub struct CBoxCoxCapabilityResult {
+    /// Estimated optimal Box-Cox transformation parameter lambda.
+    pub lambda: f64,
+    /// Capability indices computed on the Box-Cox-transformed scale.
+    pub indices: CCapabilityIndices,
+}
+
+/// Computes process capability for non-normal data via Box-Cox transformation.
+///
+/// `data`: process observations, length `n` — must all be strictly positive.
+/// `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
+/// one must be a real, positive number).
+/// `out`: pointer to a `CBoxCoxCapabilityResult`.
+///
+/// Returns 0 on success, negative on error.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_boxcox_capability(
+    data: *const f64,
+    n: u32,
+    usl: f64,
+    lsl: f64,
+    out: *mut CBoxCoxCapabilityResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let usl_opt = if usl.is_nan() { None } else { Some(usl) };
+        let lsl_opt = if lsl.is_nan() { None } else { Some(lsl) };
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(data, len) };
+
+        match u_analytics::capability::boxcox_capability(raw, usl_opt, lsl_opt) {
+            Ok(r) => {
+                unsafe {
+                    (*out) = CBoxCoxCapabilityResult {
+                        lambda: r.lambda,
+                        indices: r.indices.into(),
+                    };
+                }
+                INSIGHT_OK
+            }
+            Err(e) => {
+                use u_analytics::capability::NonNormalCapabilityError as E;
+                let code = match e {
+                    E::InsufficientData => INSIGHT_ERR_INSUFFICIENT_DATA,
+                    E::NoSpecLimits | E::SpecTransformError => INSIGHT_ERR_INVALID_PARAM,
+                    E::NonPositiveData => INSIGHT_ERR_INVALID_INPUT,
+                    E::CapabilityError => INSIGHT_ERR_DEGENERATE_DATA,
+                };
+                set_last_error(&e.to_string());
+                code
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_boxcox_capability");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// C-compatible result of percentile-based (ISO 22514-2) process capability analysis.
+#[repr(C)]
+pub struct CPercentileCapabilityResult {
+    /// Cp* = (USL - LSL) / (X_99.865 - X_0.135). NaN unless both limits are set.
+    pub cp_star: f64,
+    /// Cpk* = min(Cpu*, Cpl*). NaN unless at least one limit is set.
+    pub cpk_star: f64,
+    /// Cpu* = (USL - median) / (X_99.865 - median). NaN unless USL is set.
+    pub cpu_star: f64,
+    /// Cpl* = (median - LSL) / (median - X_0.135). NaN unless LSL is set.
+    pub cpl_star: f64,
+    /// Sample median.
+    pub median: f64,
+    /// 0.135th percentile value (lower natural process limit).
+    pub percentile_lower: f64,
+    /// 99.865th percentile value (upper natural process limit).
+    pub percentile_upper: f64,
+}
+
+/// Computes percentile-based process capability indices (ISO 22514-2).
+///
+/// `data`: process observations, length `n` (needs at least 20 points).
+/// `lsl` / `usl`: specification limits — pass `NaN` for "not set" (at least
+/// one must be a real number).
+/// `out`: pointer to a `CPercentileCapabilityResult`.
+///
+/// Returns 0 on success, negative on error.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_percentile_capability(
+    data: *const f64,
+    n: u32,
+    lsl: f64,
+    usl: f64,
+    out: *mut CPercentileCapabilityResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+
+        let lsl_opt = if lsl.is_nan() { None } else { Some(lsl) };
+        let usl_opt = if usl.is_nan() { None } else { Some(usl) };
+
+        let len = n as usize;
+        let raw = unsafe { slice::from_raw_parts(data, len) };
+
+        match u_analytics::capability::percentile_capability(raw, lsl_opt, usl_opt) {
+            Ok(r) => {
+                unsafe {
+                    (*out) = CPercentileCapabilityResult {
+                        cp_star: r.cp_star.unwrap_or(f64::NAN),
+                        cpk_star: r.cpk_star.unwrap_or(f64::NAN),
+                        cpu_star: r.cpu_star.unwrap_or(f64::NAN),
+                        cpl_star: r.cpl_star.unwrap_or(f64::NAN),
+                        median: r.median,
+                        percentile_lower: r.percentile_lower,
+                        percentile_upper: r.percentile_upper,
+                    };
+                }
+                INSIGHT_OK
+            }
+            Err(msg) => {
+                set_last_error(msg);
+                INSIGHT_ERR_INVALID_INPUT
+            }
+        }
+    });
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_percentile_capability");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Converts a sigma quality level to a parts-per-million (PPM) defect rate,
+/// using the standard Motorola 1.5-sigma shift convention.
+#[no_mangle]
+pub extern "C" fn insight_sigma_to_ppm(sigma: f64) -> f64 {
+    u_analytics::capability::sigma_to_ppm(sigma)
+}
+
+/// Converts a parts-per-million (PPM) defect rate to a sigma quality level
+/// (inverse of `insight_sigma_to_ppm`). Returns `NaN` if `ppm` is outside
+/// the valid range `(0, 1_000_000)` exclusive, or is itself `NaN`.
+#[no_mangle]
+pub extern "C" fn insight_ppm_to_sigma(ppm: f64) -> f64 {
+    u_analytics::capability::ppm_to_sigma(ppm).unwrap_or(f64::NAN)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -5362,5 +5667,227 @@ mod tests {
         let mut result = empty_rare_event_result();
         let rc = unsafe { insight_t_chart(ptr::null(), 5, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    fn empty_capability_result() -> CCapabilityIndices {
+        CCapabilityIndices {
+            cp: 0.0,
+            cpk: 0.0,
+            cpu: 0.0,
+            cpl: 0.0,
+            pp: 0.0,
+            ppk: 0.0,
+            ppu: 0.0,
+            ppl: 0.0,
+            cpm: 0.0,
+            mean: 0.0,
+            std_dev_within: 0.0,
+            std_dev_overall: 0.0,
+        }
+    }
+
+    #[test]
+    fn ffi_process_capability_two_sided() {
+        let data: Vec<f64> = vec![
+            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0, 209.0, 211.0,
+            210.0, 209.5, 210.5, 210.0, 210.0, 210.0, 209.0, 211.0,
+        ];
+        let mut result = empty_capability_result();
+
+        let rc = unsafe {
+            insight_process_capability(
+                data.as_ptr(),
+                data.len() as u32,
+                220.0,
+                200.0,
+                f64::NAN,
+                2.0,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!((result.cp - 1.6667).abs() < 0.001);
+        assert!(result.cpk > 0.0);
+        assert!(!result.cpm.is_nan());
+    }
+
+    #[test]
+    fn ffi_process_capability_one_sided_no_lsl() {
+        let data: Vec<f64> = vec![7.0, 8.0, 9.0, 7.5, 8.5, 8.0, 7.0, 9.0, 8.0, 8.5];
+        let mut result = empty_capability_result();
+
+        let rc = unsafe {
+            insight_process_capability(
+                data.as_ptr(),
+                data.len() as u32,
+                10.0,
+                f64::NAN,
+                f64::NAN,
+                0.5,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(!result.cpu.is_nan());
+        assert!(result.cpl.is_nan());
+        assert!(result.cp.is_nan(), "Cp requires both limits");
+    }
+
+    #[test]
+    fn ffi_process_capability_overall_sigma() {
+        let data: Vec<f64> = vec![
+            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0,
+        ];
+        let mut result = empty_capability_result();
+
+        let rc = unsafe {
+            insight_process_capability(
+                data.as_ptr(),
+                data.len() as u32,
+                220.0,
+                200.0,
+                f64::NAN,
+                f64::NAN, // NaN => use overall sigma for both
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!((result.cp - result.pp).abs() < 1e-15);
+    }
+
+    #[test]
+    fn ffi_process_capability_no_limits() {
+        let data = [1.0_f64, 2.0, 3.0];
+        let mut result = empty_capability_result();
+        let rc = unsafe {
+            insight_process_capability(
+                data.as_ptr(),
+                3,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                1.0,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
+    fn ffi_process_capability_null_pointer() {
+        let mut result = empty_capability_result();
+        let rc = unsafe {
+            insight_process_capability(ptr::null(), 10, 10.0, 0.0, f64::NAN, 1.0, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_boxcox_capability_basic() {
+        let data: Vec<f64> = (1..=20).map(|i| (i as f64 * 0.3_f64).exp()).collect();
+        let mut result = CBoxCoxCapabilityResult {
+            lambda: 0.0,
+            indices: empty_capability_result(),
+        };
+
+        let rc = unsafe {
+            insight_boxcox_capability(data.as_ptr(), data.len() as u32, 100.0, 1.0, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(result.lambda.is_finite());
+        assert!(!result.indices.ppk.is_nan());
+    }
+
+    #[test]
+    fn ffi_boxcox_capability_insufficient_data() {
+        let data = [1.0_f64, 2.0];
+        let mut result = CBoxCoxCapabilityResult {
+            lambda: 0.0,
+            indices: empty_capability_result(),
+        };
+        let rc = unsafe { insight_boxcox_capability(data.as_ptr(), 2, 100.0, 1.0, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    #[test]
+    fn ffi_boxcox_capability_null_pointer() {
+        let mut result = CBoxCoxCapabilityResult {
+            lambda: 0.0,
+            indices: empty_capability_result(),
+        };
+        let rc = unsafe { insight_boxcox_capability(ptr::null(), 10, 100.0, 1.0, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_percentile_capability_basic() {
+        let data: Vec<f64> = (0..100).map(|i| 10.0 + (i as f64) * 0.1).collect();
+        let mut result = CPercentileCapabilityResult {
+            cp_star: 0.0,
+            cpk_star: 0.0,
+            cpu_star: 0.0,
+            cpl_star: 0.0,
+            median: 0.0,
+            percentile_lower: 0.0,
+            percentile_upper: 0.0,
+        };
+
+        let rc = unsafe {
+            insight_percentile_capability(data.as_ptr(), data.len() as u32, 5.0, 15.0, &mut result)
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(!result.cp_star.is_nan());
+        assert!(result.median > 0.0);
+    }
+
+    #[test]
+    fn ffi_percentile_capability_insufficient_data() {
+        let data = [1.0_f64, 2.0, 3.0];
+        let mut result = CPercentileCapabilityResult {
+            cp_star: 0.0,
+            cpk_star: 0.0,
+            cpu_star: 0.0,
+            cpl_star: 0.0,
+            median: 0.0,
+            percentile_lower: 0.0,
+            percentile_upper: 0.0,
+        };
+        let rc = unsafe { insight_percentile_capability(data.as_ptr(), 3, 5.0, 15.0, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+    }
+
+    #[test]
+    fn ffi_percentile_capability_null_pointer() {
+        let mut result = CPercentileCapabilityResult {
+            cp_star: 0.0,
+            cpk_star: 0.0,
+            cpu_star: 0.0,
+            cpl_star: 0.0,
+            median: 0.0,
+            percentile_lower: 0.0,
+            percentile_upper: 0.0,
+        };
+        let rc = unsafe { insight_percentile_capability(ptr::null(), 10, 5.0, 15.0, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_sigma_to_ppm_six_sigma() {
+        let ppm = insight_sigma_to_ppm(6.0);
+        assert!((ppm - 3.4).abs() < 1.0);
+    }
+
+    #[test]
+    fn ffi_ppm_to_sigma_six_sigma() {
+        let sigma = insight_ppm_to_sigma(3.4);
+        assert!((sigma - 6.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn ffi_ppm_to_sigma_out_of_range() {
+        let sigma = insight_ppm_to_sigma(-1.0);
+        assert!(sigma.is_nan());
+        let sigma = insight_ppm_to_sigma(2_000_000.0);
+        assert!(sigma.is_nan());
     }
 }
