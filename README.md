@@ -7,6 +7,19 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
+## What's New in 0.14.0 (Unreleased)
+
+- **26 new FFI functions** exposing `u-analytics` domains that were already a
+  dependency but not previously reachable from outside this crate: Mann-Kendall
+  trend test, kernel density estimation, the full SPC control chart family
+  (X-bar-R/S, Individual-MR, P/NP/C/U, Laney P'/U', G/T), process capability
+  (Cp/Cpk/Pp/Ppk/Cpm, Box-Cox, percentile-based, sigma↔PPM), and Weibull
+  reliability analysis (MLE/MRR fitting, survival, hazard, MTBF, B-life). See
+  the C FFI section below and `CHANGELOG.md` for the full function list.
+- Matching C# bindings for all of the above, including the binding's first
+  `double?`-based optional parameters/return values (`ProcessCapability`,
+  `PpmToSigma`, etc.), converting to/from `NaN` only at the P/Invoke boundary.
+
 ## What's New in 0.9.1
 
 - **BREAKING — Rust**: `InsightError::NonNumericColumn` variant removed. The 0.9.0 audit redirected all internal call sites to `DegenerateData`, leaving the variant unused. Removed per `Delete over deprecate` policy. External `match` arms over `InsightError` must drop the corresponding branch.
@@ -129,6 +142,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | Function | Description |
 |----------|-------------|
 | `insight_profile_csv` | Profile a CSV string → opaque context |
+| `insight_profile_json` | Profile a JSON string → opaque context |
 | `insight_profile_free` | Free profile context |
 | `insight_profile_row_count` | Row count from profile |
 | `insight_profile_col_count` | Column count from profile |
@@ -144,6 +158,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_hierarchical` | Hierarchical Agglomerative clustering (4 linkages) |
 | `insight_hdbscan` | HDBSCAN clustering with membership probabilities |
 | `insight_gap_statistic` | Gap statistic for optimal K selection |
+| `insight_silhouette` | Silhouette score for cluster validation |
 
 ### Dimensionality Reduction
 
@@ -173,6 +188,63 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 |----------|-------------|
 | `insight_distribution` | Normality testing (KS, JB, SW, AD) |
 
+### Changepoint Detection
+
+| Function | Description |
+|----------|-------------|
+| `insight_pelt` | PELT changepoint detection (univariate) |
+| `insight_pelt_multi` | PELT changepoint detection (multivariate) |
+
+### Trend & Density Estimation
+
+| Function | Description |
+|----------|-------------|
+| `insight_mann_kendall` | Mann-Kendall trend test with Sen's slope |
+| `insight_kde` | Gaussian kernel density estimation (Silverman/Scott/manual bandwidth) |
+
+### SPC — Variables Control Charts
+
+| Function | Description |
+|----------|-------------|
+| `insight_xbar_r_chart` | X-bar-R control chart (subgroup mean + range) |
+| `insight_xbar_s_chart` | X-bar-S control chart (subgroup mean + std dev) |
+| `insight_individual_mr_chart` | Individual-MR control chart |
+
+### SPC — Attributes Control Charts
+
+| Function | Description |
+|----------|-------------|
+| `insight_p_chart` | P chart (proportion nonconforming) |
+| `insight_np_chart` | NP chart (count nonconforming, constant sample size) |
+| `insight_c_chart` | C chart (defect count, constant area) |
+| `insight_u_chart` | U chart (defects per unit, variable area) |
+| `insight_laney_p_chart` | Laney P' chart (overdispersion-adjusted) |
+| `insight_laney_u_chart` | Laney U' chart (overdispersion-adjusted) |
+| `insight_g_chart` | G chart (rare-event, geometric distribution) |
+| `insight_t_chart` | T chart (rare-event, exponential distribution) |
+
+### Process Capability
+
+| Function | Description |
+|----------|-------------|
+| `insight_process_capability` | Standard capability indices (Cp/Cpk/Pp/Ppk/Cpm) |
+| `insight_boxcox_capability` | Non-normal capability via Box-Cox transformation |
+| `insight_percentile_capability` | Percentile-based capability (ISO 22514-2) |
+| `insight_sigma_to_ppm` | Sigma quality level → PPM defect rate |
+| `insight_ppm_to_sigma` | PPM defect rate → sigma quality level |
+
+### Weibull Reliability
+
+| Function | Description |
+|----------|-------------|
+| `insight_weibull_mle` | Weibull parameter fitting (Maximum Likelihood Estimation) |
+| `insight_weibull_mrr` | Weibull parameter fitting (Median Rank Regression) |
+| `insight_weibull_reliability` | Reliability (survival) function R(t) |
+| `insight_weibull_hazard_rate` | Hazard (instantaneous failure) rate |
+| `insight_weibull_mtbf` | Mean Time Between Failures |
+| `insight_weibull_time_to_reliability` | Time at which reliability drops to a given level |
+| `insight_weibull_b_life` | B-life (time at which a given fraction has failed) |
+
 ### Feature Importance
 
 | Function | Description |
@@ -192,6 +264,12 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_free_anova_features` | Free ANOVA feature arrays |
 | `insight_free_mi_features` | Free MI feature arrays |
 | `insight_free_perm_features` | Free permutation importance arrays |
+| `insight_free_pelt_result` | Free PELT changepoint results |
+| `insight_free_kde_result` | Free KDE results |
+| `insight_free_variables_chart_result` | Free variables control chart results |
+| `insight_free_attribute_chart_result` | Free attributes control chart results |
+| `insight_free_laney_chart_result` | Free Laney P'/U' chart results |
+| `insight_free_rare_event_chart_result` | Free G/T chart results |
 
 ### Error & Version
 
@@ -201,7 +279,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_clear_error` | Clear error state |
 | `insight_version` | Library version string |
 
-All FFI functions use `catch_unwind` to prevent panics from crossing the FFI boundary.
+All FFI functions that accept data pointers use `catch_unwind` to prevent panics from crossing the FFI boundary. A handful of pure closed-form scalar conversions (e.g. `insight_sigma_to_ppm`, `insight_weibull_reliability`) skip the `catch_unwind`/error-code ceremony and return the value directly, since they cannot panic and have no data to validate.
 
 ## C# Binding (UInsight)
 
@@ -224,18 +302,18 @@ Console.WriteLine($"K={result.K}, WCSS={result.Wcss:F2}");
 
 The binding is in `bindings/csharp/UInsight/` with:
 
-- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 32 FFI functions
-- `Interop/NativeStructs.cs` — `[StructLayout]` mappings for all 20 C structs
+- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 67 FFI functions
+- `Interop/NativeStructs.cs` — `[StructLayout]` mappings for all 35 C structs
 - `InsightClient.cs` — High-level managed API (automatic memory management)
 - `InsightException.cs` — Error code to exception conversion
 
 ## Test Status
 
 ```
-357 lib tests + 49 doc-tests = 406 total
+474 lib tests + 53 doc-tests = 527 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
-C header: auto-generated via cbindgen (20 structs, 32 functions)
+C header: auto-generated via cbindgen (35 structs, 67 functions)
 ```
 
 ## Scope & Non-Goals
