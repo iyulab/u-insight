@@ -335,7 +335,7 @@ C header: auto-generated via cbindgen (35 structs, 67 functions)
 
 ## Requirements
 
-- Rust 1.75+
+- Rust 1.85+
 - Dependencies: `u-analytics`, `u-numflow`
 
 ## WebAssembly / npm

@@ -65,6 +65,16 @@ capability, and Weibull reliability.
 
 ### Changed
 
+- **The package now declares `rust-version = "1.85"`.** This was previously
+  undeclared, so a toolchain too old to build the crate failed somewhere inside
+  a dependency instead of reporting the requirement. The value is verified by
+  building on that exact toolchain.
+- **The `rand` dependency has been dropped.** It was declared but never used —
+  the sampling this crate performs runs on its own linear congruential
+  generator. Nothing in the public surface changes; builds pull one fewer
+  dependency tree.
+- **`getrandom` is now 0.4** on WebAssembly targets, reaching the browser
+  entropy source through its `wasm_js` crate feature alone.
 - **`hierarchical` is now O(n²) instead of O(n³)** (all bindings). The merge
   phase rescanned every active pair each step, so on normal dataset sizes it
   froze the calling thread — ~1.4 s at n=2000, ~7.5 s at n=3000, ~12.5 s at
