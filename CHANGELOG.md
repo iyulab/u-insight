@@ -8,6 +8,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-07
+
 ### Added
 
 - **`insight_mann_kendall`**: Mann-Kendall non-parametric trend test with
@@ -60,6 +62,17 @@ Process capability indices are now fully exposed.
 **All 5 originally planned `u-analytics` domains are now exposed through
 this crate's FFI**: Mann-Kendall, KDE, SPC control charts, process
 capability, and Weibull reliability.
+
+### Changed
+
+- **`rand` has been dropped** rather than updated. The dependency was declared
+  but never used — a pin's presence is not evidence of use — so the 0.9-to-0.10
+  ecosystem migration removed it here instead of bumping it.
+- **`u-analytics` is now required at 0.7 and `u-numflow` at 0.4** (previously 0.6
+  and 0.3), following those crates' own releases.
+- **The minimum supported Rust version is now declared as 1.85** and is verified
+  by building on that exact toolchain; 1.84 and below fail. The crate previously
+  declared no `rust-version` at all.
 
 ## [0.13.0] - 2026-07-07
 
