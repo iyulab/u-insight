@@ -8,6 +8,16 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.15.0]
+
+### Changed
+
+- Track `u-analytics` 0.8: its WebAssembly capability binding changed shape and
+  its control charts now expose the within-subgroup sigma they already computed.
+  Nothing in this crate's own surface changes -- the dependency's Rust API is
+  additive -- but a caret pin cannot cross a 0.x minor, so the version moves with
+  it rather than silently holding an older snapshot.
+
 ## [0.14.0] - 2026-09-07
 
 ### Added

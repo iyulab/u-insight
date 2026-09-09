@@ -7,7 +7,7 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
-## What's New in 0.14.0 (Unreleased)
+## What's New in 0.14.0
 
 - **26 new FFI functions** exposing `u-analytics` domains that were already a
   dependency but not previously reachable from outside this crate: Mann-Kendall
