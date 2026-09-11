@@ -2829,8 +2829,8 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
             ));
             return INSIGHT_ERR_INVALID_PARAM;
         }
-        for i in 0..ns {
-            chart.add_sample(&raw[i * sg..(i + 1) * sg]);
+        if let Err(code) = add_rows(ns, |g| chart.add_sample(&raw[g * sg..(g + 1) * sg])) {
+            return code;
         }
 
         match (chart.control_limits(), chart.r_limits()) {
@@ -2861,6 +2861,23 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
             INSIGHT_ERR_PANIC
         }
     }
+}
+
+/// Feeds subgroups `0..count` to a chart, naming the subgroup a rejection
+/// came from -- the chart knows why a sample is unusable but not where it sat
+/// in the caller's arrays. The inputs are validated before this runs, so a
+/// rejection here means the two checks have drifted apart.
+fn add_rows(
+    count: usize,
+    mut add: impl FnMut(usize) -> Result<(), u_analytics::spc::ControlChartError>,
+) -> Result<(), i32> {
+    for i in 0..count {
+        if let Err(e) = add(i) {
+            set_last_error(&format!("subgroup {i}: {e}"));
+            return Err(INSIGHT_ERR_INVALID_PARAM);
+        }
+    }
+    Ok(())
 }
 
 /// Computes an X-bar-S control chart (subgroup mean + standard deviation).
@@ -2911,8 +2928,8 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
             ));
             return INSIGHT_ERR_INVALID_PARAM;
         }
-        for i in 0..ns {
-            chart.add_sample(&raw[i * sg..(i + 1) * sg]);
+        if let Err(code) = add_rows(ns, |g| chart.add_sample(&raw[g * sg..(g + 1) * sg])) {
+            return code;
         }
 
         match (chart.control_limits(), chart.s_limits()) {
@@ -2979,8 +2996,8 @@ pub unsafe extern "C" fn insight_individual_mr_chart(
             return INSIGHT_ERR_INVALID_PARAM;
         }
         let mut chart = u_analytics::spc::IndividualMRChart::new();
-        for &v in raw {
-            chart.add_sample(&[v]);
+        if let Err(code) = add_rows(len, |i| chart.add_sample(&raw[i..=i])) {
+            return code;
         }
 
         match (chart.control_limits(), chart.mr_limits()) {
@@ -3159,8 +3176,8 @@ pub unsafe extern "C" fn insight_p_chart(
             return INSIGHT_ERR_INVALID_PARAM;
         }
         let mut chart = u_analytics::spc::PChart::new();
-        for i in 0..len {
-            chart.add_sample(defs[i], sizes[i]);
+        if let Err(code) = add_rows(len, |i| chart.add_sample(defs[i], sizes[i])) {
+            return code;
         }
 
         if chart.p_bar().is_none() {
@@ -3227,8 +3244,8 @@ pub unsafe extern "C" fn insight_np_chart(
             ));
             return INSIGHT_ERR_INVALID_PARAM;
         }
-        for &c in counts {
-            chart.add_sample(c);
+        if let Err(code) = add_rows(len, |i| chart.add_sample(counts[i])) {
+            return code;
         }
 
         if chart.control_limits().is_none() {
@@ -3339,8 +3356,8 @@ pub unsafe extern "C" fn insight_u_chart(
             return INSIGHT_ERR_INVALID_PARAM;
         }
         let mut chart = u_analytics::spc::UChart::new();
-        for i in 0..len {
-            chart.add_sample(defs[i], units[i]);
+        if let Err(code) = add_rows(len, |i| chart.add_sample(defs[i], units[i])) {
+            return code;
         }
 
         if chart.u_bar().is_none() {
