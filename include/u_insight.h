@@ -829,7 +829,8 @@ typedef struct CCapabilityIndices {
    */
   double ppl;
   /**
-   * Cpm (Taguchi index). NaN unless both limits and a target are available.
+   * Cpm (Taguchi index), from the spread of the data about the target. NaN
+   * unless both limits and a target within them are given.
    */
   double cpm;
   /**
@@ -1786,8 +1787,8 @@ INSIGHT_API void insight_free_rare_event_chart_result(struct CRareEventChartResu
  * `data`: process observations, length `n`.
  * `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
  * one of the two must be a real number).
- * `target`: target value for Cpm — pass `NaN` to default to the midpoint
- * `(usl + lsl) / 2` when both limits are set.
+ * `target`: target value for Cpm — pass `NaN` when there is none, and `cpm`
+ * comes back NaN. Pass `(usl + lsl) / 2` if the midpoint is the target.
  * `sigma_within`: short-term standard deviation (e.g. from a control
  * chart's R-bar/d2 or S-bar/c4) — pass `NaN` to use the overall sample
  * standard deviation for both short- and long-term indices (in which case

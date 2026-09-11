@@ -23,6 +23,11 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   (`insight_p_chart` and `insight_np_chart` documented doing so). The chart
   points carry no index, so every point after a skipped row was out of line
   with its input.
+- **Breaking (C FFI):** `insight_process_capability` reports `cpm` as NaN when
+  `target` is NaN. It used to measure Cpm against the specification midpoint;
+  u-analytics 0.9 computes Cpm only against a declared target, from the spread
+  of the data about it rather than from the within sigma. Pass the midpoint as
+  `target` if that is the target.
 
 ### Fixed
 

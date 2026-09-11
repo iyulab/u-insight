@@ -1360,7 +1360,7 @@ public sealed class InsightClient : IDisposable
     /// <param name="data">Process observations (needs at least 2 points).</param>
     /// <param name="usl">Upper specification limit. At least one of <paramref name="usl"/>/<paramref name="lsl"/> must be set.</param>
     /// <param name="lsl">Lower specification limit.</param>
-    /// <param name="target">Target value for Cpm. Defaults to the midpoint of <paramref name="usl"/>/<paramref name="lsl"/> when both are set.</param>
+    /// <param name="target">Target value for Cpm. Without it <c>Cpm</c> is <c>null</c>; pass the midpoint of <paramref name="usl"/>/<paramref name="lsl"/> explicitly if that is the target.</param>
     /// <param name="sigmaWithin">
     /// Short-term standard deviation (e.g. from a control chart's R-bar/d2 or
     /// S-bar/c4). When omitted, the overall sample standard deviation is used

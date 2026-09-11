@@ -3745,7 +3745,8 @@ pub struct CCapabilityIndices {
     pub ppu: f64,
     /// Ppl = (mean - LSL) / (3 * sigma_overall). NaN unless LSL is set.
     pub ppl: f64,
-    /// Cpm (Taguchi index). NaN unless both limits and a target are available.
+    /// Cpm (Taguchi index), from the spread of the data about the target. NaN
+    /// unless both limits and a target within them are given.
     pub cpm: f64,
     /// Sample mean of the data.
     pub mean: f64,
@@ -3779,8 +3780,8 @@ impl From<u_analytics::capability::CapabilityIndices> for CCapabilityIndices {
 /// `data`: process observations, length `n`.
 /// `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
 /// one of the two must be a real number).
-/// `target`: target value for Cpm — pass `NaN` to default to the midpoint
-/// `(usl + lsl) / 2` when both limits are set.
+/// `target`: target value for Cpm — pass `NaN` when there is none, and `cpm`
+/// comes back NaN. Pass `(usl + lsl) / 2` if the midpoint is the target.
 /// `sigma_within`: short-term standard deviation (e.g. from a control
 /// chart's R-bar/d2 or S-bar/c4) — pass `NaN` to use the overall sample
 /// standard deviation for both short- and long-term indices (in which case
@@ -6039,7 +6040,7 @@ mod tests {
                 data.len() as u32,
                 220.0,
                 200.0,
-                f64::NAN,
+                210.0,
                 2.0,
                 &mut result,
             )
@@ -6048,6 +6049,21 @@ mod tests {
         assert!((result.cp - 1.6667).abs() < 0.001);
         assert!(result.cpk > 0.0);
         assert!(!result.cpm.is_nan());
+
+        // Without a target there is no Cpm -- not one against the midpoint.
+        let rc = unsafe {
+            insight_process_capability(
+                data.as_ptr(),
+                data.len() as u32,
+                220.0,
+                200.0,
+                f64::NAN,
+                2.0,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(result.cpm.is_nan());
     }
 
     #[test]
