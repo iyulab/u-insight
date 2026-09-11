@@ -30,8 +30,12 @@ cbindgen = "0.29"
 
 [dev-dependencies]
 serde_json = "1.0"
-proptest = "1.4"
 
 [lib]
 name = "u_insight"
 crate-type = ["rlib", "cdylib", "staticlib"]
+
+# `getrandom` is named nowhere in the source: it is declared only to turn on its
+# `wasm_js` backend for wasm32, which `rand` needs to build there.
+[package.metadata.cargo-machete]
+ignored = ["getrandom"]
