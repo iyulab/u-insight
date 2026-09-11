@@ -1520,7 +1520,10 @@ INSIGHT_API void insight_free_kde_result(struct CKdeResult *result);
  * Computes an X-bar-R control chart (subgroup mean + range).
  *
  * `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
- * `subgroup_size`: fixed subgroup size, 2..=10.
+ * `subgroup_size`: fixed subgroup size. The supported range is u-analytics'
+ * (2 to 25); a size outside it is rejected with that range in the message.
+ * A non-finite value is rejected with its index rather than skipped, so every
+ * point stays in line with the subgroup it came from.
  * `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
  * secondary series is R.
  *
@@ -1540,7 +1543,10 @@ int32_t insight_xbar_r_chart(const double *data,
  * Computes an X-bar-S control chart (subgroup mean + standard deviation).
  *
  * `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
- * `subgroup_size`: fixed subgroup size, 2..=10.
+ * `subgroup_size`: fixed subgroup size. The supported range is u-analytics'
+ * (2 to 25); a size outside it is rejected with that range in the message.
+ * A non-finite value is rejected with its index rather than skipped, so every
+ * point stays in line with the subgroup it came from.
  * `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
  * secondary series is S.
  *
@@ -1589,8 +1595,11 @@ INSIGHT_API void insight_free_variables_chart_result(struct CVariablesChartResul
  * Computes a P chart (proportion nonconforming, variable sample size).
  *
  * `defectives` / `sample_sizes`: parallel arrays of length `n` — number of
- * defective items and total sample size for each subgroup. Subgroups where
- * `defectives > sample_size` or `sample_size == 0` are skipped.
+ * defective items and total sample size for each subgroup. A subgroup with
+ * `sample_size == 0`, or more defectives than `sample_size`, is rejected with
+ * `INSIGHT_ERR_INVALID_PARAM` and its index rather than skipped: the points
+ * carry no index, so a skipped subgroup would leave every later point out of
+ * line with its input.
  * `out`: pointer to a `CAttributeChartResult`.
  *
  * Returns 0 on success, negative on error. Caller must free `out` with
@@ -1609,8 +1618,9 @@ int32_t insight_p_chart(const uint64_t *defectives,
  * Computes an NP chart (count nonconforming, constant sample size).
  *
  * `defective_counts`: defective count per subgroup, length `n`.
- * `sample_size`: constant sample size (> 0). Subgroups where
- * `defective_count > sample_size` are skipped.
+ * `sample_size`: constant sample size (> 0). A subgroup with more defectives
+ * than `sample_size` is rejected with `INSIGHT_ERR_INVALID_PARAM` and its
+ * index rather than skipped.
  * `out`: pointer to a `CAttributeChartResult`.
  *
  * Returns 0 on success, negative on error. Caller must free `out` with
@@ -1646,7 +1656,9 @@ int32_t insight_c_chart(const uint64_t *defect_counts,
  * Computes a U chart (defects per unit, variable area of opportunity).
  *
  * `defects` / `units_inspected`: parallel arrays of length `n` — defect
- * count and units inspected for each subgroup.
+ * count and units inspected for each subgroup. A subgroup whose
+ * `units_inspected` is not a positive number is rejected with
+ * `INSIGHT_ERR_INVALID_PARAM` and its index rather than skipped.
  * `out`: pointer to a `CAttributeChartResult`.
  *
  * Returns 0 on success, negative on error. Caller must free `out` with
@@ -1675,7 +1687,9 @@ INSIGHT_API void insight_free_attribute_chart_result(struct CAttributeChartResul
  * Computes a Laney P' chart (overdispersion-adjusted proportion nonconforming).
  *
  * `defectives` / `sample_sizes`: parallel arrays of length `n` (needs at
- * least 3 subgroups).
+ * least 3 subgroups). A subgroup with `sample_size == 0`, or more defectives
+ * than `sample_size`, is rejected with `INSIGHT_ERR_INVALID_PARAM` and its
+ * index.
  * `out`: pointer to a `CLaneyChartResult`.
  *
  * Returns 0 on success, negative on error. Caller must free `out` with

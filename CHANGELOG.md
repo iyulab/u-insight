@@ -8,6 +8,29 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.16.0]
+
+### Changed
+
+- **`u-analytics` is now required at 0.9.** The control charts reached through
+  the C FFI take subgroup sizes up to 25, not 10. The range is u-analytics' own,
+  and a size outside it is rejected with that range in the message; this crate
+  no longer restates a bound of its own, which had fallen behind.
+- **Breaking (C FFI):** the chart entry points reject a row the chart cannot
+  use -- a non-finite value, a subgroup with nothing inspected or more
+  defectives than inspected, `units_inspected` that is not positive -- with
+  `INSIGHT_ERR_INVALID_PARAM` and its index. They used to skip it
+  (`insight_p_chart` and `insight_np_chart` documented doing so). The chart
+  points carry no index, so every point after a skipped row was out of line
+  with its input.
+
+### Fixed
+
+- `insight_laney_p_chart` could return a chart with every limit NaN -- which
+  reads as in control, because no comparison with NaN is true -- when one
+  subgroup had a sample size of zero. u-analytics 0.9 refuses such a subgroup,
+  and this entry point now names it.
+
 ## [0.15.0] - 2026-09-10
 
 ### Changed

@@ -941,7 +941,7 @@ public sealed class InsightClient : IDisposable
 
     /// <summary>
     /// X-bar-R control chart (subgroup mean + range). Suitable for subgroup
-    /// sizes 2-10.
+    /// sizes 2 to 25.
     /// </summary>
     /// <param name="data">
     /// Subgroup observations matrix. Rows = subgroups, columns = individual
@@ -973,7 +973,7 @@ public sealed class InsightClient : IDisposable
 
     /// <summary>
     /// X-bar-S control chart (subgroup mean + standard deviation). Preferred
-    /// over X-bar-R for larger subgroups. Suitable for subgroup sizes 2-10.
+    /// over X-bar-R for larger subgroups. Suitable for subgroup sizes 2 to 25.
     /// </summary>
     /// <param name="data">
     /// Subgroup observations matrix. Rows = subgroups, columns = individual

@@ -2776,10 +2776,18 @@ fn build_variables_chart_result(
     }
 }
 
+/// The first value a variables chart would drop without saying so.
+fn first_non_finite(values: &[f64]) -> Option<usize> {
+    values.iter().position(|v| !v.is_finite())
+}
+
 /// Computes an X-bar-R control chart (subgroup mean + range).
 ///
 /// `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
-/// `subgroup_size`: fixed subgroup size, 2..=10.
+/// `subgroup_size`: fixed subgroup size. The supported range is u-analytics'
+/// (2 to 25); a size outside it is rejected with that range in the message.
+/// A non-finite value is rejected with its index rather than skipped, so every
+/// point stays in line with the subgroup it came from.
 /// `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
 /// secondary series is R.
 ///
@@ -2800,10 +2808,6 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
             set_last_error("null pointer");
             return INSIGHT_ERR_NULL_PTR;
         }
-        if !(2..=10).contains(&subgroup_size) {
-            set_last_error("subgroup_size must be 2..=10");
-            return INSIGHT_ERR_INVALID_PARAM;
-        }
 
         use u_analytics::spc::ControlChart;
 
@@ -2811,7 +2815,20 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
         let sg = subgroup_size as usize;
         let raw = unsafe { slice::from_raw_parts(data, ns * sg) };
 
-        let mut chart = u_analytics::spc::XBarRChart::new(sg);
+        let mut chart = match u_analytics::spc::XBarRChart::new(sg) {
+            Ok(chart) => chart,
+            Err(e) => {
+                set_last_error(&e.to_string());
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+        if let Some(i) = first_non_finite(raw) {
+            set_last_error(&format!(
+                "data[{i}] (subgroup {}) is not a finite number",
+                i / sg
+            ));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         for i in 0..ns {
             chart.add_sample(&raw[i * sg..(i + 1) * sg]);
         }
@@ -2830,10 +2847,8 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
                 INSIGHT_OK
             }
             _ => {
-                set_last_error(
-                    "insufficient valid subgroups (need at least 1, all finite, all of \
-                     subgroup_size length)",
-                );
+                set_last_error("need at least 1 subgroup");
+
                 INSIGHT_ERR_INSUFFICIENT_DATA
             }
         }
@@ -2851,7 +2866,10 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
 /// Computes an X-bar-S control chart (subgroup mean + standard deviation).
 ///
 /// `data`: row-major array of shape `[n_subgroups, subgroup_size]`.
-/// `subgroup_size`: fixed subgroup size, 2..=10.
+/// `subgroup_size`: fixed subgroup size. The supported range is u-analytics'
+/// (2 to 25); a size outside it is rejected with that range in the message.
+/// A non-finite value is rejected with its index rather than skipped, so every
+/// point stays in line with the subgroup it came from.
 /// `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
 /// secondary series is S.
 ///
@@ -2872,10 +2890,6 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
             set_last_error("null pointer");
             return INSIGHT_ERR_NULL_PTR;
         }
-        if !(2..=10).contains(&subgroup_size) {
-            set_last_error("subgroup_size must be 2..=10");
-            return INSIGHT_ERR_INVALID_PARAM;
-        }
 
         use u_analytics::spc::ControlChart;
 
@@ -2883,7 +2897,20 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
         let sg = subgroup_size as usize;
         let raw = unsafe { slice::from_raw_parts(data, ns * sg) };
 
-        let mut chart = u_analytics::spc::XBarSChart::new(sg);
+        let mut chart = match u_analytics::spc::XBarSChart::new(sg) {
+            Ok(chart) => chart,
+            Err(e) => {
+                set_last_error(&e.to_string());
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+        if let Some(i) = first_non_finite(raw) {
+            set_last_error(&format!(
+                "data[{i}] (subgroup {}) is not a finite number",
+                i / sg
+            ));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         for i in 0..ns {
             chart.add_sample(&raw[i * sg..(i + 1) * sg]);
         }
@@ -2902,10 +2929,8 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
                 INSIGHT_OK
             }
             _ => {
-                set_last_error(
-                    "insufficient valid subgroups (need at least 1, all finite, all of \
-                     subgroup_size length)",
-                );
+                set_last_error("need at least 1 subgroup");
+
                 INSIGHT_ERR_INSUFFICIENT_DATA
             }
         }
@@ -2949,6 +2974,10 @@ pub unsafe extern "C" fn insight_individual_mr_chart(
         let len = n as usize;
         let raw = unsafe { slice::from_raw_parts(data, len) };
 
+        if let Some(i) = first_non_finite(raw) {
+            set_last_error(&format!("data[{i}] is not a finite number"));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         let mut chart = u_analytics::spc::IndividualMRChart::new();
         for &v in raw {
             chart.add_sample(&[v]);
@@ -2968,7 +2997,7 @@ pub unsafe extern "C" fn insight_individual_mr_chart(
                 INSIGHT_OK
             }
             _ => {
-                set_last_error("insufficient valid observations (need at least 2, all finite)");
+                set_last_error("need at least 2 observations");
                 INSIGHT_ERR_INSUFFICIENT_DATA
             }
         }
@@ -3075,11 +3104,28 @@ fn attribute_points_to_c_result(
     }
 }
 
+/// The first subgroup a proportion chart cannot use: nothing inspected, or
+/// more defectives than inspected.
+fn first_invalid_proportion(defectives: &[u64], sample_sizes: &[u64]) -> Option<usize> {
+    defectives
+        .iter()
+        .zip(sample_sizes)
+        .position(|(&d, &n)| n == 0 || d > n)
+}
+
+/// The first subgroup whose inspected units are not a positive number.
+fn first_invalid_units(units: &[f64]) -> Option<usize> {
+    units.iter().position(|&u| !(u.is_finite() && u > 0.0))
+}
+
 /// Computes a P chart (proportion nonconforming, variable sample size).
 ///
 /// `defectives` / `sample_sizes`: parallel arrays of length `n` — number of
-/// defective items and total sample size for each subgroup. Subgroups where
-/// `defectives > sample_size` or `sample_size == 0` are skipped.
+/// defective items and total sample size for each subgroup. A subgroup with
+/// `sample_size == 0`, or more defectives than `sample_size`, is rejected with
+/// `INSIGHT_ERR_INVALID_PARAM` and its index rather than skipped: the points
+/// carry no index, so a skipped subgroup would leave every later point out of
+/// line with its input.
 /// `out`: pointer to a `CAttributeChartResult`.
 ///
 /// Returns 0 on success, negative on error. Caller must free `out` with
@@ -3104,15 +3150,22 @@ pub unsafe extern "C" fn insight_p_chart(
         let defs = unsafe { slice::from_raw_parts(defectives, len) };
         let sizes = unsafe { slice::from_raw_parts(sample_sizes, len) };
 
+        if let Some(i) = first_invalid_proportion(defs, sizes) {
+            set_last_error(&format!(
+                "subgroup {i}: {} defectives out of {} (need sample_size > 0 and \
+                 defectives <= sample_size)",
+                defs[i], sizes[i]
+            ));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         let mut chart = u_analytics::spc::PChart::new();
         for i in 0..len {
             chart.add_sample(defs[i], sizes[i]);
         }
 
         if chart.p_bar().is_none() {
-            set_last_error(
-                "no valid samples (each needs sample_size > 0 and defectives <= sample_size)",
-            );
+            set_last_error("need at least 1 subgroup");
+
             return INSIGHT_ERR_INSUFFICIENT_DATA;
         }
 
@@ -3134,8 +3187,9 @@ pub unsafe extern "C" fn insight_p_chart(
 /// Computes an NP chart (count nonconforming, constant sample size).
 ///
 /// `defective_counts`: defective count per subgroup, length `n`.
-/// `sample_size`: constant sample size (> 0). Subgroups where
-/// `defective_count > sample_size` are skipped.
+/// `sample_size`: constant sample size (> 0). A subgroup with more defectives
+/// than `sample_size` is rejected with `INSIGHT_ERR_INVALID_PARAM` and its
+/// index rather than skipped.
 /// `out`: pointer to a `CAttributeChartResult`.
 ///
 /// Returns 0 on success, negative on error. Caller must free `out` with
@@ -3155,21 +3209,30 @@ pub unsafe extern "C" fn insight_np_chart(
             set_last_error("null pointer");
             return INSIGHT_ERR_NULL_PTR;
         }
-        if sample_size == 0 {
-            set_last_error("sample_size must be > 0");
-            return INSIGHT_ERR_INVALID_PARAM;
-        }
 
         let len = n as usize;
         let counts = unsafe { slice::from_raw_parts(defective_counts, len) };
 
-        let mut chart = u_analytics::spc::NPChart::new(sample_size);
+        let mut chart = match u_analytics::spc::NPChart::new(sample_size) {
+            Ok(chart) => chart,
+            Err(e) => {
+                set_last_error(&e.to_string());
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
+        };
+        if let Some(i) = counts.iter().position(|&c| c > sample_size) {
+            set_last_error(&format!(
+                "subgroup {i}: {} defectives out of {sample_size}",
+                counts[i]
+            ));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         for &c in counts {
             chart.add_sample(c);
         }
 
         if chart.control_limits().is_none() {
-            set_last_error("no valid samples (each needs defective_count <= sample_size)");
+            set_last_error("need at least 1 subgroup");
             return INSIGHT_ERR_INSUFFICIENT_DATA;
         }
 
@@ -3241,7 +3304,9 @@ pub unsafe extern "C" fn insight_c_chart(
 /// Computes a U chart (defects per unit, variable area of opportunity).
 ///
 /// `defects` / `units_inspected`: parallel arrays of length `n` — defect
-/// count and units inspected for each subgroup.
+/// count and units inspected for each subgroup. A subgroup whose
+/// `units_inspected` is not a positive number is rejected with
+/// `INSIGHT_ERR_INVALID_PARAM` and its index rather than skipped.
 /// `out`: pointer to a `CAttributeChartResult`.
 ///
 /// Returns 0 on success, negative on error. Caller must free `out` with
@@ -3266,13 +3331,20 @@ pub unsafe extern "C" fn insight_u_chart(
         let defs = unsafe { slice::from_raw_parts(defects, len) };
         let units = unsafe { slice::from_raw_parts(units_inspected, len) };
 
+        if let Some(i) = first_invalid_units(units) {
+            set_last_error(&format!(
+                "subgroup {i}: units_inspected must be a positive number, got {}",
+                units[i]
+            ));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         let mut chart = u_analytics::spc::UChart::new();
         for i in 0..len {
             chart.add_sample(defs[i], units[i]);
         }
 
         if chart.u_bar().is_none() {
-            set_last_error("no valid samples (each needs units_inspected > 0)");
+            set_last_error("need at least 1 subgroup");
             return INSIGHT_ERR_INSUFFICIENT_DATA;
         }
 
@@ -3366,7 +3438,9 @@ fn attribute_points_from<'a, T: 'a>(
 /// Computes a Laney P' chart (overdispersion-adjusted proportion nonconforming).
 ///
 /// `defectives` / `sample_sizes`: parallel arrays of length `n` (needs at
-/// least 3 subgroups).
+/// least 3 subgroups). A subgroup with `sample_size == 0`, or more defectives
+/// than `sample_size`, is rejected with `INSIGHT_ERR_INVALID_PARAM` and its
+/// index.
 /// `out`: pointer to a `CLaneyChartResult`.
 ///
 /// Returns 0 on success, negative on error. Caller must free `out` with
@@ -3390,6 +3464,14 @@ pub unsafe extern "C" fn insight_laney_p_chart(
         let len = n as usize;
         let defs = unsafe { slice::from_raw_parts(defectives, len) };
         let sizes = unsafe { slice::from_raw_parts(sample_sizes, len) };
+        if let Some(i) = first_invalid_proportion(defs, sizes) {
+            set_last_error(&format!(
+                "subgroup {i}: {} defectives out of {} (need sample_size > 0 and \
+                 defectives <= sample_size)",
+                defs[i], sizes[i]
+            ));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         let samples: Vec<(u64, u64)> = defs.iter().zip(sizes).map(|(&d, &s)| (d, s)).collect();
 
         match u_analytics::spc::laney_p_chart(&samples) {
@@ -3408,7 +3490,7 @@ pub unsafe extern "C" fn insight_laney_p_chart(
                 INSIGHT_OK
             }
             None => {
-                set_last_error("invalid input (need at least 3 subgroups, total sample size > 0)");
+                set_last_error("need at least 3 subgroups");
                 INSIGHT_ERR_INSUFFICIENT_DATA
             }
         }
@@ -3450,6 +3532,13 @@ pub unsafe extern "C" fn insight_laney_u_chart(
         let len = n as usize;
         let defs = unsafe { slice::from_raw_parts(defects, len) };
         let units = unsafe { slice::from_raw_parts(units_inspected, len) };
+        if let Some(i) = first_invalid_units(units) {
+            set_last_error(&format!(
+                "subgroup {i}: units_inspected must be a positive number, got {}",
+                units[i]
+            ));
+            return INSIGHT_ERR_INVALID_PARAM;
+        }
         let samples: Vec<(u64, f64)> = defs.iter().zip(units).map(|(&d, &u)| (d, u)).collect();
 
         match u_analytics::spc::laney_u_chart(&samples) {
@@ -3468,9 +3557,8 @@ pub unsafe extern "C" fn insight_laney_u_chart(
                 INSIGHT_OK
             }
             None => {
-                set_last_error(
-                    "invalid input (need at least 3 subgroups, all units_inspected > 0 and finite)",
-                );
+                set_last_error("need at least 3 subgroups");
+
                 INSIGHT_ERR_INSUFFICIENT_DATA
             }
         }
@@ -5648,12 +5736,72 @@ mod tests {
 
     #[test]
     fn ffi_p_chart_insufficient_data() {
-        let defectives: [u64; 1] = [5];
-        let sample_sizes: [u64; 1] = [0]; // invalid, gets skipped
+        // No subgroups at all is too little data. A subgroup that cannot be
+        // charted is a different error: see the test below.
+        let defectives: [u64; 1] = [0];
+        let sample_sizes: [u64; 1] = [0];
         let mut result = empty_attribute_result();
         let rc =
-            unsafe { insight_p_chart(defectives.as_ptr(), sample_sizes.as_ptr(), 1, &mut result) };
+            unsafe { insight_p_chart(defectives.as_ptr(), sample_sizes.as_ptr(), 0, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+    }
+
+    /// A subgroup the chart cannot use used to be skipped. The points carry no
+    /// index, so every later point then sat against the wrong input row.
+    #[test]
+    fn ffi_attribute_charts_reject_a_row_instead_of_skipping_it() {
+        let defectives: [u64; 3] = [3, 5, 2];
+        let sizes: [u64; 3] = [100, 0, 100];
+        let mut result = empty_attribute_result();
+        let rc = unsafe { insight_p_chart(defectives.as_ptr(), sizes.as_ptr(), 3, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+
+        let counts: [u64; 3] = [3, 101, 2];
+        let mut result = empty_attribute_result();
+        let rc = unsafe { insight_np_chart(counts.as_ptr(), 3, 100, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+
+        let defects: [u64; 3] = [3, 5, 2];
+        let units: [f64; 3] = [1.0, 0.0, 1.0];
+        let mut result = empty_attribute_result();
+        let rc = unsafe { insight_u_chart(defects.as_ptr(), units.as_ptr(), 3, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+
+        let defectives: [u64; 4] = [3, 5, 2, 4];
+        let sizes: [u64; 4] = [100, 0, 100, 100];
+        let mut laney = CLaneyChartResult {
+            bar: 0.0,
+            phi: 0.0,
+            points: ptr::null_mut(),
+            n_points: 0,
+        };
+        let rc =
+            unsafe { insight_laney_p_chart(defectives.as_ptr(), sizes.as_ptr(), 4, &mut laney) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
+    fn ffi_variables_charts_take_the_crate_range_and_reject_non_finite_values() {
+        // 12 is beyond the bound this crate used to restate for itself.
+        let data: Vec<f64> = (0..36).map(|i| 10.0 + 0.1 * (i % 7) as f64).collect();
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_xbar_r_chart(data.as_ptr(), 3, 12, &mut result) };
+        assert_eq!(rc, INSIGHT_OK);
+        unsafe { insight_free_variables_chart_result(&mut result) };
+
+        // 26 is beyond the crate's own tables, and the crate says so.
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_xbar_s_chart(data.as_ptr(), 1, 26, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+
+        let mut bad = data.clone();
+        bad[14] = f64::NAN;
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_xbar_r_chart(bad.as_ptr(), 3, 12, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let mut result = empty_variables_result();
+        let rc = unsafe { insight_individual_mr_chart(bad.as_ptr(), 20, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
     }
 
     #[test]
