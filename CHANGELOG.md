@@ -6,10 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
-## [Unreleased]
+## [0.17.0] - 2026-09-12
 
 ### Changed
 
+- **`u-analytics` is now required at 0.10.** Its C FFI and WASM binding share
+  one JSON contract from that version, and `boxcox_capability` and
+  `compute_overall` report long-term indices only; the two entries below are
+  this crate's side of those changes.
 - **`insight_process_capability` no longer reports short-term indices when
   `sigma_within` is `NaN`.** It used the overall sigma for both roles and
   documented the result -- "Cp == Pp and Cpk == Ppk" -- which is a long-term
@@ -20,9 +24,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   short-term indices by estimating the within sigma from a control chart
   (`insight_imr_chart` returns it) and passing it explicitly. **Breaking**
   for callers reading those fields without supplying `sigma_within`; the
-  values they were reading were `pp`/`ppk`. Takes effect with the
-  `u-analytics` minor this pin moves to, which makes the same change in the
-  crate's `compute_overall`.
+  values they were reading were `pp`/`ppk`. Comes with **`u-analytics` 0.10**,
+  which makes the same change in the crate's `compute_overall`.
 - **`CVariablesChartResult` carries `sigma_hat`** -- the within sigma the
   variation chart estimates (`R-bar / d2`, `S-bar / c4`, `MR-bar / d2`), NaN
   when it could not -- and the C# `VariablesChartResult` exposes it as
@@ -38,7 +41,7 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   `cpl`. The upstream analysis stopped reporting short-term indices on the
   Box-Cox path, where they were being computed from the overall sigma and so
   equalled `pp`/`ppk` for every input. The long-term indices are unaffected.
-  Takes effect with the `u-analytics` minor this pin moves to.
+  Comes with `u-analytics` 0.10.
 
 
 ## [0.16.0] - 2026-09-12
