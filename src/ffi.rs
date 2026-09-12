@@ -2711,6 +2711,12 @@ pub struct CVariablesChartResult {
     pub secondary_points: *mut CSpcChartPoint,
     /// Number of secondary chart points.
     pub n_secondary_points: u32,
+    /// Estimate of the within-subgroup (short-term) sigma from the variation
+    /// chart: `R-bar / d2` (X-bar-R), `S-bar / c4` (X-bar-S) or `MR-bar / d2`
+    /// (Individual-MR). Pass it to `insight_process_capability` as
+    /// `sigma_within` to obtain the short-term indices. NaN when the chart
+    /// could not estimate it.
+    pub sigma_hat: f64,
     /// 1 if no Nelson-rule violations were detected on either series, 0 otherwise.
     pub in_control: u8,
 }
@@ -2757,6 +2763,7 @@ fn build_variables_chart_result(
     primary_points: &[u_analytics::spc::ChartPoint],
     secondary_limits: u_analytics::spc::ControlLimits,
     secondary_points: &[u_analytics::spc::ChartPoint],
+    sigma_hat: Option<f64>,
     in_control: bool,
 ) -> CVariablesChartResult {
     let (primary_ptr, n_primary) = spc_points_to_c_array(primary_points);
@@ -2772,6 +2779,7 @@ fn build_variables_chart_result(
         secondary_lcl: secondary_limits.lcl,
         secondary_points: secondary_ptr,
         n_secondary_points: n_secondary,
+        sigma_hat: sigma_hat.unwrap_or(f64::NAN),
         in_control: u8::from(in_control),
     }
 }
@@ -2789,7 +2797,8 @@ fn first_non_finite(values: &[f64]) -> Option<usize> {
 /// A non-finite value is rejected with its index rather than skipped, so every
 /// point stays in line with the subgroup it came from.
 /// `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
-/// secondary series is R.
+/// secondary series is R. Its `sigma_hat` (`R-bar / d2`) is the within
+/// sigma `insight_process_capability` needs for the short-term indices.
 ///
 /// Returns 0 on success, negative on error. Caller must free `out` with
 /// `insight_free_variables_chart_result`.
@@ -2841,6 +2850,7 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
                         chart.points(),
                         r_limits,
                         chart.r_points(),
+                        chart.sigma_hat(),
                         chart.is_in_control(),
                     );
                 }
@@ -2888,7 +2898,8 @@ fn add_rows(
 /// A non-finite value is rejected with its index rather than skipped, so every
 /// point stays in line with the subgroup it came from.
 /// `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
-/// secondary series is S.
+/// secondary series is S. Its `sigma_hat` (`S-bar / c4`) is the within
+/// sigma `insight_process_capability` needs for the short-term indices.
 ///
 /// Returns 0 on success, negative on error. Caller must free `out` with
 /// `insight_free_variables_chart_result`.
@@ -2940,6 +2951,7 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
                         chart.points(),
                         s_limits,
                         chart.s_points(),
+                        chart.sigma_hat(),
                         chart.is_in_control(),
                     );
                 }
@@ -3008,6 +3020,7 @@ pub unsafe extern "C" fn insight_individual_mr_chart(
                         chart.points(),
                         mr_limits,
                         chart.mr_points(),
+                        chart.sigma_hat(),
                         chart.is_in_control(),
                     );
                 }
@@ -3767,7 +3780,9 @@ pub struct CCapabilityIndices {
     pub cpm: f64,
     /// Sample mean of the data.
     pub mean: f64,
-    /// Short-term (within-group) standard deviation.
+    /// Short-term (within-group) standard deviation -- the `sigma_within` the
+    /// caller supplied. NaN when none was, together with `cp`, `cpk`, `cpu`
+    /// and `cpl`.
     pub std_dev_within: f64,
     /// Long-term (overall) standard deviation.
     pub std_dev_overall: f64,
@@ -3786,7 +3801,7 @@ impl From<u_analytics::capability::CapabilityIndices> for CCapabilityIndices {
             ppl: idx.ppl.unwrap_or(f64::NAN),
             cpm: idx.cpm.unwrap_or(f64::NAN),
             mean: idx.mean,
-            std_dev_within: idx.std_dev_within,
+            std_dev_within: idx.std_dev_within.unwrap_or(f64::NAN),
             std_dev_overall: idx.std_dev_overall,
         }
     }
@@ -3800,9 +3815,11 @@ impl From<u_analytics::capability::CapabilityIndices> for CCapabilityIndices {
 /// `target`: target value for Cpm — pass `NaN` when there is none, and `cpm`
 /// comes back NaN. Pass `(usl + lsl) / 2` if the midpoint is the target.
 /// `sigma_within`: short-term standard deviation (e.g. from a control
-/// chart's R-bar/d2 or S-bar/c4) — pass `NaN` to use the overall sample
-/// standard deviation for both short- and long-term indices (in which case
-/// Cp == Pp and Cpk == Ppk).
+/// chart's R-bar/d2, S-bar/c4 or MR-bar/d2). Pass `NaN` when there is none
+/// — a flat vector with no subgroup structure — and only the long-term
+/// indices are reported: `cp`, `cpk`, `cpu`, `cpl` and `std_dev_within` come
+/// back NaN. They are not filled from the overall sigma, which would make
+/// `cp` equal `pp` for every input.
 /// `out`: pointer to a `CCapabilityIndices`.
 ///
 /// Returns 0 on success, negative on error.
@@ -5613,6 +5630,7 @@ mod tests {
             secondary_lcl: 0.0,
             secondary_points: ptr::null_mut(),
             n_secondary_points: 0,
+            sigma_hat: 0.0,
             in_control: 0,
         }
     }
@@ -6112,7 +6130,53 @@ mod tests {
     }
 
     #[test]
-    fn ffi_process_capability_overall_sigma() {
+    fn imr_sigma_hat_feeds_process_capability_the_short_term_indices() {
+        // The route to Cp/Cpk for individual data: the I-MR chart estimates
+        // the within sigma (MR-bar / d2), and the capability entry point
+        // takes it explicitly. Without this field the caller would have to
+        // rebuild the estimate from the MR center line by hand.
+        let data: Vec<f64> = vec![
+            208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0,
+        ];
+        let mut chart = empty_variables_result();
+        let rc =
+            unsafe { insight_individual_mr_chart(data.as_ptr(), data.len() as u32, &mut chart) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!(chart.sigma_hat.is_finite() && chart.sigma_hat > 0.0);
+        let expected = {
+            use u_analytics::spc::ControlChart;
+            let mut c = u_analytics::spc::IndividualMRChart::new();
+            for &v in &data {
+                c.add_sample(&[v]).unwrap();
+            }
+            c.sigma_hat().unwrap()
+        };
+        assert!((chart.sigma_hat - expected).abs() < 1e-12);
+        unsafe { insight_free_variables_chart_result(&mut chart) };
+
+        let mut result = empty_capability_result();
+        let rc = unsafe {
+            insight_process_capability(
+                data.as_ptr(),
+                data.len() as u32,
+                220.0,
+                200.0,
+                f64::NAN,
+                chart.sigma_hat,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!((result.std_dev_within - expected).abs() < 1e-12);
+        assert!((result.cp - 20.0 / (6.0 * expected)).abs() < 1e-9);
+        assert!(result.cp != result.pp);
+    }
+
+    #[test]
+    fn ffi_process_capability_without_sigma_within_reports_long_term_only() {
+        // This test used to assert `cp == pp` here -- pinning the overall
+        // sigma being reported under the short-term names. Without a within
+        // sigma there is no short-term index to report.
         let data: Vec<f64> = vec![
             208.0, 209.0, 210.0, 211.0, 212.0, 208.5, 209.5, 210.5, 211.5, 210.0,
         ];
@@ -6125,12 +6189,19 @@ mod tests {
                 220.0,
                 200.0,
                 f64::NAN,
-                f64::NAN, // NaN => use overall sigma for both
+                f64::NAN, // no within sigma
                 &mut result,
             )
         };
         assert_eq!(rc, INSIGHT_OK);
-        assert!((result.cp - result.pp).abs() < 1e-15);
+        assert!(result.cp.is_nan(), "no within sigma, no Cp");
+        assert!(result.cpk.is_nan());
+        assert!(result.cpu.is_nan());
+        assert!(result.cpl.is_nan());
+        assert!(result.std_dev_within.is_nan());
+        assert!(result.pp.is_finite() && result.pp > 0.0);
+        assert!(result.ppk.is_finite() && result.ppk > 0.0);
+        assert!(result.std_dev_overall.is_finite() && result.std_dev_overall > 0.0);
     }
 
     #[test]

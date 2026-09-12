@@ -253,6 +253,7 @@ internal static class NativeStructs
         public double SecondaryLcl;
         public IntPtr SecondaryPoints;
         public uint NSecondaryPoints;
+        public double SigmaHat;
         public byte InControl;
     }
 

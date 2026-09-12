@@ -696,6 +696,14 @@ typedef struct CVariablesChartResult {
    */
   uint32_t n_secondary_points;
   /**
+   * Estimate of the within-subgroup (short-term) sigma from the variation
+   * chart: `R-bar / d2` (X-bar-R), `S-bar / c4` (X-bar-S) or `MR-bar / d2`
+   * (Individual-MR). Pass it to `insight_process_capability` as
+   * `sigma_within` to obtain the short-term indices. NaN when the chart
+   * could not estimate it.
+   */
+  double sigma_hat;
+  /**
    * 1 if no Nelson-rule violations were detected on either series, 0 otherwise.
    */
   uint8_t in_control;
@@ -838,7 +846,9 @@ typedef struct CCapabilityIndices {
    */
   double mean;
   /**
-   * Short-term (within-group) standard deviation.
+   * Short-term (within-group) standard deviation -- the `sigma_within` the
+   * caller supplied. NaN when none was, together with `cp`, `cpk`, `cpu`
+   * and `cpl`.
    */
   double std_dev_within;
   /**
@@ -1532,7 +1542,8 @@ INSIGHT_API void insight_free_kde_result(struct CKdeResult *result);
  * A non-finite value is rejected with its index rather than skipped, so every
  * point stays in line with the subgroup it came from.
  * `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
- * secondary series is R.
+ * secondary series is R. Its `sigma_hat` (`R-bar / d2`) is the within
+ * sigma `insight_process_capability` needs for the short-term indices.
  *
  * Returns 0 on success, negative on error. Caller must free `out` with
  * `insight_free_variables_chart_result`.
@@ -1555,7 +1566,8 @@ int32_t insight_xbar_r_chart(const double *data,
  * A non-finite value is rejected with its index rather than skipped, so every
  * point stays in line with the subgroup it came from.
  * `out`: pointer to a `CVariablesChartResult` — primary series is X-bar,
- * secondary series is S.
+ * secondary series is S. Its `sigma_hat` (`S-bar / c4`) is the within
+ * sigma `insight_process_capability` needs for the short-term indices.
  *
  * Returns 0 on success, negative on error. Caller must free `out` with
  * `insight_free_variables_chart_result`.
@@ -1796,9 +1808,11 @@ INSIGHT_API void insight_free_rare_event_chart_result(struct CRareEventChartResu
  * `target`: target value for Cpm — pass `NaN` when there is none, and `cpm`
  * comes back NaN. Pass `(usl + lsl) / 2` if the midpoint is the target.
  * `sigma_within`: short-term standard deviation (e.g. from a control
- * chart's R-bar/d2 or S-bar/c4) — pass `NaN` to use the overall sample
- * standard deviation for both short- and long-term indices (in which case
- * Cp == Pp and Cpk == Ppk).
+ * chart's R-bar/d2, S-bar/c4 or MR-bar/d2). Pass `NaN` when there is none
+ * — a flat vector with no subgroup structure — and only the long-term
+ * indices are reported: `cp`, `cpk`, `cpu`, `cpl` and `std_dev_within` come
+ * back NaN. They are not filled from the overall sigma, which would make
+ * `cp` equal `pp` for every input.
  * `out`: pointer to a `CCapabilityIndices`.
  *
  * Returns 0 on success, negative on error.

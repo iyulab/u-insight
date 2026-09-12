@@ -1051,6 +1051,7 @@ public sealed class InsightClient : IDisposable
                 Lcl = native.SecondaryLcl,
             },
             SecondaryPoints = CopySpcPoints(native.SecondaryPoints, native.NSecondaryPoints),
+            SigmaHat = NanToNull(native.SigmaHat),
             InControl = native.InControl != 0,
         };
     }
@@ -1362,9 +1363,12 @@ public sealed class InsightClient : IDisposable
     /// <param name="lsl">Lower specification limit.</param>
     /// <param name="target">Target value for Cpm. Without it <c>Cpm</c> is <c>null</c>; pass the midpoint of <paramref name="usl"/>/<paramref name="lsl"/> explicitly if that is the target.</param>
     /// <param name="sigmaWithin">
-    /// Short-term standard deviation (e.g. from a control chart's R-bar/d2 or
-    /// S-bar/c4). When omitted, the overall sample standard deviation is used
-    /// for both short- and long-term indices (Cp == Pp, Cpk == Ppk).
+    /// Short-term standard deviation (e.g. from a control chart's R-bar/d2,
+    /// S-bar/c4 or MR-bar/d2). When omitted -- a flat vector with no subgroup
+    /// structure -- only the long-term indices are reported: <c>Cp</c>,
+    /// <c>Cpk</c>, <c>Cpu</c>, <c>Cpl</c> and <c>StdDevWithin</c> are
+    /// <c>null</c>. They are not filled from the overall sigma, which would
+    /// make <c>Cp</c> equal <c>Pp</c> for every input.
     /// </param>
     public CapabilityIndices ProcessCapability(
         double[] data, double? usl = null, double? lsl = null,
@@ -1461,7 +1465,7 @@ public sealed class InsightClient : IDisposable
             Ppl = NanToNull(native.Ppl),
             Cpm = NanToNull(native.Cpm),
             Mean = native.Mean,
-            StdDevWithin = native.StdDevWithin,
+            StdDevWithin = NanToNull(native.StdDevWithin),
             StdDevOverall = native.StdDevOverall,
         };
     }
@@ -2063,6 +2067,13 @@ public class VariablesChartResult
     /// for Individual-MR charts (the first moving range is undefined).
     /// </summary>
     public SpcChartPoint[] SecondaryPoints { get; init; } = [];
+    /// <summary>
+    /// Within-subgroup (short-term) sigma estimated from the variation chart
+    /// (R-bar/d2, S-bar/c4 or MR-bar/d2). Pass it to
+    /// <see cref="InsightClient.ProcessCapability"/> as <c>sigmaWithin</c> for the
+    /// short-term indices. <c>null</c> when the chart could not estimate it.
+    /// </summary>
+    public double? SigmaHat { get; init; }
     /// <summary>True if no Nelson-rule violations were detected on either series.</summary>
     public bool InControl { get; init; }
 }
@@ -2138,8 +2149,8 @@ public class CapabilityIndices
     public double? Cpm { get; init; }
     /// <summary>Sample mean of the data.</summary>
     public double Mean { get; init; }
-    /// <summary>Short-term (within-group) standard deviation.</summary>
-    public double StdDevWithin { get; init; }
+    /// <summary>Short-term (within-group) standard deviation — the <c>sigmaWithin</c> supplied; <c>null</c> when none was.</summary>
+    public double? StdDevWithin { get; init; }
     /// <summary>Long-term (overall) standard deviation.</summary>
     public double StdDevOverall { get; init; }
 }

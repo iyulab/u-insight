@@ -10,6 +10,30 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Changed
 
+- **`insight_process_capability` no longer reports short-term indices when
+  `sigma_within` is `NaN`.** It used the overall sigma for both roles and
+  documented the result -- "Cp == Pp and Cpk == Ppk" -- which is a long-term
+  number under a short-term name. Without a within sigma `cp`, `cpk`, `cpu`,
+  `cpl` and `std_dev_within` are now `NaN` (the C# `CapabilityIndices` maps
+  them to `null`; `StdDevWithin` becomes `double?`), and only the long-term
+  indices are reported. Callers with individual observations get the
+  short-term indices by estimating the within sigma from a control chart
+  (`insight_imr_chart` returns it) and passing it explicitly. **Breaking**
+  for callers reading those fields without supplying `sigma_within`; the
+  values they were reading were `pp`/`ppk`. Takes effect with the
+  `u-analytics` minor this pin moves to, which makes the same change in the
+  crate's `compute_overall`.
+- **`CVariablesChartResult` carries `sigma_hat`** -- the within sigma the
+  variation chart estimates (`R-bar / d2`, `S-bar / c4`, `MR-bar / d2`), NaN
+  when it could not -- and the C# `VariablesChartResult` exposes it as
+  `SigmaHat`. This is what makes the capability change above whole: the
+  short-term indices need a within sigma, and the charts already had it but
+  did not hand it out, so a caller would have had to rebuild the estimate
+  from the MR center line by hand. A test pins that feeding the I-MR chart's
+  `sigma_hat` into `insight_process_capability` yields `cp` from that sigma.
+  **Breaking** for C callers laying out the struct themselves (one field
+  added before `in_control`); the C# binding moves in lockstep.
+
 - `insight_boxcox_capability` now returns `NaN` for `cp`, `cpk`, `cpu` and
   `cpl`. The upstream analysis stopped reporting short-term indices on the
   Box-Cox path, where they were being computed from the overall sigma and so
