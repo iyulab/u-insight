@@ -8,6 +8,15 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- `insight_boxcox_capability` now returns `NaN` for `cp`, `cpk`, `cpu` and
+  `cpl`. The upstream analysis stopped reporting short-term indices on the
+  Box-Cox path, where they were being computed from the overall sigma and so
+  equalled `pp`/`ppk` for every input. The long-term indices are unaffected.
+  Takes effect with the `u-analytics` minor this pin moves to.
+
+
 ## [0.16.0] - 2026-09-12
 
 ### Changed

@@ -857,6 +857,12 @@ typedef struct CBoxCoxCapabilityResult {
   double lambda;
   /**
    * Capability indices computed on the Box-Cox-transformed scale.
+   *
+   * Only the long-term indices (`pp`, `ppk`, `ppu`, `ppl`) carry a value.
+   * `cp`, `cpk`, `cpu` and `cpl` are always `NaN` here: they are defined
+   * against a within-subgroup sigma, and a flat observation vector carries
+   * no subgroup structure to estimate one from. Reporting them from the
+   * overall sigma instead would make `cp` equal `pp` for every input.
    */
   struct CCapabilityIndices indices;
 } CBoxCoxCapabilityResult;

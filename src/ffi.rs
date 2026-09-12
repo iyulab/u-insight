@@ -3880,6 +3880,12 @@ pub struct CBoxCoxCapabilityResult {
     /// Estimated optimal Box-Cox transformation parameter lambda.
     pub lambda: f64,
     /// Capability indices computed on the Box-Cox-transformed scale.
+    ///
+    /// Only the long-term indices (`pp`, `ppk`, `ppu`, `ppl`) carry a value.
+    /// `cp`, `cpk`, `cpu` and `cpl` are always `NaN` here: they are defined
+    /// against a within-subgroup sigma, and a flat observation vector carries
+    /// no subgroup structure to estimate one from. Reporting them from the
+    /// overall sigma instead would make `cp` equal `pp` for every input.
     pub indices: CCapabilityIndices,
 }
 
@@ -6168,6 +6174,10 @@ mod tests {
         assert_eq!(rc, INSIGHT_OK);
         assert!(result.lambda.is_finite());
         assert!(!result.indices.ppk.is_nan());
+        // Short-term indices are absent by construction on this path, and
+        // absence is NaN across this FFI surface.
+        assert!(result.indices.cp.is_nan());
+        assert!(result.indices.cpk.is_nan());
     }
 
     #[test]
