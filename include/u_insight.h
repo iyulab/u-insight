@@ -952,6 +952,153 @@ typedef struct CWeibullMrrResult {
 } CWeibullMrrResult;
 
 /**
+ * One validated period candidate.
+ */
+typedef struct CPeriodCandidate {
+  /**
+   * Integer period, in observations.
+   */
+  uint32_t period;
+  /**
+   * Autocorrelation at that lag (the strength of the periodicity).
+   */
+  double acf;
+  /**
+   * Periodogram bin (1-based, of the padded transform) that produced it.
+   */
+  uint32_t bin;
+  /**
+   * Periodogram power of that bin.
+   */
+  double power;
+  /**
+   * That bin's share of the total periodogram power.
+   */
+  double power_share;
+} CPeriodCandidate;
+
+/**
+ * C-compatible result of `insight_estimate_period`.
+ */
+typedef struct CPeriodEstimate {
+  /**
+   * The dominant period, or 0 when no periodicity passed both stages
+   * (a constant, a pure trend, white noise) — explicit, not an error.
+   */
+  uint32_t period;
+  /**
+   * Number of observations.
+   */
+  uint32_t n;
+  /**
+   * The 95% white-noise bound on the ACF, `1.96 / sqrt(n)`.
+   */
+  double acf_threshold;
+  /**
+   * Periodogram power a bin had to exceed to become a candidate.
+   */
+  double power_threshold;
+  /**
+   * Every validated candidate, strongest first. Caller must free with
+   * `insight_free_period_estimate`.
+   */
+  struct CPeriodCandidate *candidates;
+  /**
+   * Number of candidates.
+   */
+  uint32_t n_candidates;
+} CPeriodEstimate;
+
+/**
+ * Options for `insight_spectral_residual`. Pass a null pointer for the
+ * defaults of Ren et al. (2019): q = 3, z = 40, threshold 3, z-score gate
+ * 1.5, 70% band, no batching.
+ */
+typedef struct CSpectralResidualOptions {
+  /**
+   * Moving-average width on the log amplitude spectrum (>= 1).
+   */
+  uint32_t averaging_window;
+  /**
+   * Preceding saliencies a point is scored against (>= 1).
+   */
+  uint32_t judgement_window;
+  /**
+   * Score above which a point is an anomaly (> 0).
+   */
+  double threshold;
+  /**
+   * Minimum z-score of the point against the window before it (>= 0; 0 disables).
+   */
+  double min_zscore;
+  /**
+   * Coverage in percent of the band around the expected value (0 < s < 100).
+   */
+  double sensitivity;
+  /**
+   * Score in consecutive batches of this size (>= 12); 0 = one batch.
+   */
+  uint32_t batch_size;
+} CSpectralResidualOptions;
+
+/**
+ * One scored point of `insight_spectral_residual`.
+ */
+typedef struct CSrPoint {
+  /**
+   * Position in the input series.
+   */
+  uint32_t index;
+  /**
+   * The observed value.
+   */
+  double value;
+  /**
+   * Spectral residual saliency (>= 0).
+   */
+  double saliency;
+  /**
+   * Saliency relative to the preceding judgement window (>= 0).
+   */
+  double score;
+  /**
+   * Low-frequency reconstruction of the series with anomalies removed.
+   */
+  double expected;
+  /**
+   * `expected - margin`.
+   */
+  double lower;
+  /**
+   * `expected + margin`.
+   */
+  double upper;
+  /**
+   * 1 when the point is an anomaly.
+   */
+  bool is_anomaly;
+} CSrPoint;
+
+/**
+ * C-compatible result of `insight_spectral_residual`.
+ */
+typedef struct CSpectralResidualResult {
+  /**
+   * One point per observation, in order. Caller must free with
+   * `insight_free_spectral_residual_result`.
+   */
+  struct CSrPoint *points;
+  /**
+   * Number of points (= n).
+   */
+  uint32_t n_points;
+  /**
+   * Number of points flagged as anomalies.
+   */
+  uint32_t n_anomalies;
+} CSpectralResidualResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1953,5 +2100,60 @@ INSIGHT_API double insight_weibull_time_to_reliability(double shape, double scal
  * outside `(0, 1)`.
  */
 INSIGHT_API double insight_weibull_b_life(double shape, double scale, double fraction_failed);
+
+/**
+ * Estimates the dominant period of a univariate series (AutoPeriod:
+ * Vlachos, Yu & Castelli 2005 — permutation-thresholded periodogram peaks
+ * refined on the autocorrelation function). Deterministic for a series.
+ *
+ * `data`: `n` observations (at least 8, all finite). `out`: pointer to a
+ * `CPeriodEstimate`. Returns 0 on success, negative on error. Caller must
+ * free `out` with `insight_free_period_estimate`.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_estimate_period(const double *data,
+                                uint32_t n,
+                                struct CPeriodEstimate *out);
+
+/**
+ * Frees the candidates of a `CPeriodEstimate` allocated by
+ * `insight_estimate_period`.
+ *
+ * # Safety
+ * The result must have been allocated by that function and not yet freed.
+ */
+INSIGHT_API void insight_free_period_estimate(struct CPeriodEstimate *result);
+
+/**
+ * Scores every point of a series for anomalies by spectral residual
+ * saliency (Ren et al. 2019): spikes, steps and dropouts, without a trained
+ * model and without assuming a period.
+ *
+ * `data`: `n` observations (at least 12, all finite). `options`: null for
+ * the defaults. `out`: pointer to a `CSpectralResidualResult`. Returns 0 on
+ * success, negative on error. Caller must free `out` with
+ * `insight_free_spectral_residual_result`.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `options` must be null or valid. `out`
+ * must be valid.
+ */
+INSIGHT_API
+int32_t insight_spectral_residual(const double *data,
+                                  uint32_t n,
+                                  const struct CSpectralResidualOptions *options,
+                                  struct CSpectralResidualResult *out);
+
+/**
+ * Frees the points of a `CSpectralResidualResult` allocated by
+ * `insight_spectral_residual`.
+ *
+ * # Safety
+ * The result must have been allocated by that function and not yet freed.
+ */
+INSIGHT_API void insight_free_spectral_residual_result(struct CSpectralResidualResult *result);
 
 #endif  /* U_INSIGHT_H */

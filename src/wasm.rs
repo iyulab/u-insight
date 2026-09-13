@@ -1406,6 +1406,171 @@ pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
 }
 
+// ── Time series ──────────────────────────────────────────────────────
+
+/// Estimate the dominant period of a univariate series (AutoPeriod —
+/// Vlachos, Yu & Castelli 2005: permutation-thresholded periodogram peaks
+/// refined on the autocorrelation function; deterministic for a series).
+///
+/// # Input
+/// `{ data: number[] }` — at least 8 finite values.
+///
+/// # Output
+/// `{ period: number | null, candidates: [{ period, acf, bin, power, power_share }],
+///    n, acf_threshold, power_threshold }`
+///
+/// `period` is `null` — explicitly, not an error — when no periodicity passes
+/// both stages (a constant, a pure trend, white noise). Only periods from 2 to
+/// `n / 2` are admissible.
+#[wasm_bindgen]
+pub fn estimate_period(data: JsValue) -> Result<JsValue, JsValue> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Input {
+        data: Vec<f64>,
+    }
+    #[derive(Serialize)]
+    struct CandidateDto {
+        period: usize,
+        acf: f64,
+        bin: usize,
+        power: f64,
+        power_share: f64,
+    }
+    #[derive(Serialize)]
+    struct Dto {
+        period: Option<usize>,
+        candidates: Vec<CandidateDto>,
+        n: usize,
+        acf_threshold: f64,
+        power_threshold: f64,
+    }
+    let req: Input = from_js(data, "data")?;
+    if let Some(i) = req.data.iter().position(|x| !x.is_finite()) {
+        return Err(js_err(format!("data[{i}] is not a finite number")));
+    }
+    let r = u_analytics::seasonality::estimate_period(&req.data)
+        .ok_or_else(|| js_err("data must have at least 8 observations"))?;
+    let dto = Dto {
+        period: r.period,
+        candidates: r
+            .candidates
+            .into_iter()
+            .map(|c| CandidateDto {
+                period: c.period,
+                acf: c.acf,
+                bin: c.bin,
+                power: c.power,
+                power_share: c.power_share,
+            })
+            .collect(),
+        n: r.n,
+        acf_threshold: r.acf_threshold,
+        power_threshold: r.power_threshold,
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
+/// Score every point of a series for anomalies by spectral residual saliency
+/// (Ren et al. 2019) — spikes, steps and dropouts, without a trained model
+/// and without assuming a period.
+///
+/// # Input
+/// `{ data: number[], averaging_window?, judgement_window?, threshold?,
+///    min_zscore?, sensitivity?, batch_size? }` — at least 12 finite values;
+/// the options default to the paper's (3, 40, 3, 1.5, 70, none).
+///
+/// # Output
+/// `{ points: [{ index, value, saliency, score, expected, lower, upper, is_anomaly }],
+///    anomalies: number[] }`
+#[wasm_bindgen]
+pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Input {
+        data: Vec<f64>,
+        #[serde(default)]
+        averaging_window: Option<usize>,
+        #[serde(default)]
+        judgement_window: Option<usize>,
+        #[serde(default)]
+        threshold: Option<f64>,
+        #[serde(default)]
+        min_zscore: Option<f64>,
+        #[serde(default)]
+        sensitivity: Option<f64>,
+        #[serde(default)]
+        batch_size: Option<usize>,
+    }
+    #[derive(Serialize)]
+    struct PointDto {
+        index: usize,
+        value: f64,
+        saliency: f64,
+        score: f64,
+        expected: f64,
+        lower: f64,
+        upper: f64,
+        is_anomaly: bool,
+    }
+    #[derive(Serialize)]
+    struct Dto {
+        points: Vec<PointDto>,
+        anomalies: Vec<usize>,
+    }
+    let req: Input = from_js(data, "data")?;
+    if let Some(i) = req.data.iter().position(|x| !x.is_finite()) {
+        return Err(js_err(format!("data[{i}] is not a finite number")));
+    }
+    let mut sr = u_analytics::detection::SpectralResidual::new();
+    if let Some(q) = req.averaging_window {
+        sr = sr.with_averaging_window(q);
+    }
+    if let Some(z) = req.judgement_window {
+        sr = sr.with_judgement_window(z);
+    }
+    if let Some(t) = req.threshold {
+        sr = sr.with_threshold(t);
+    }
+    if let Some(z) = req.min_zscore {
+        sr = sr.with_min_zscore(z);
+    }
+    if let Some(s) = req.sensitivity {
+        sr = sr.with_sensitivity(s);
+    }
+    if req.batch_size.is_some() {
+        sr = sr.with_batch_size(req.batch_size);
+    }
+    let points = sr.analyze(&req.data).ok_or_else(|| {
+        js_err(
+            "invalid configuration or data (need at least 12 finite values; averaging_window >= 1, \
+             judgement_window >= 1, threshold > 0, min_zscore >= 0, 0 < sensitivity < 100, \
+             batch_size >= 12)",
+        )
+    })?;
+    let dto = Dto {
+        anomalies: points
+            .iter()
+            .filter(|p| p.is_anomaly)
+            .map(|p| p.index)
+            .collect(),
+        points: points
+            .into_iter()
+            .map(|p| PointDto {
+                index: p.index,
+                value: p.value,
+                saliency: p.saliency,
+                score: p.score,
+                expected: p.expected,
+                lower: p.lower,
+                upper: p.upper,
+                is_anomaly: p.is_anomaly,
+            })
+            .collect(),
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -7,6 +7,17 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
+## What's New in 0.18.0
+
+- **Univariate time-series primitives**, pure Rust on every transport
+  (`u-analytics` 0.11 / `u-numflow` 0.5): `insight_estimate_period` — the
+  dominant period of a series (AutoPeriod: permutation-thresholded periodogram
+  peaks refined on the autocorrelation function, deterministic) — and
+  `insight_spectral_residual` — one-shot anomaly scoring by spectral residual
+  saliency (Ren et al. 2019) with an expected value and a coverage band per
+  point. C# `EstimatePeriod` / `SpectralResidual(data, options?)`; WASM
+  `estimate_period` / `spectral_residual`.
+
 ## What's New in 0.14.0
 
 - **26 new FFI functions** exposing `u-analytics` domains that were already a
@@ -194,6 +205,15 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 |----------|-------------|
 | `insight_pelt` | PELT changepoint detection (univariate) |
 | `insight_pelt_multi` | PELT changepoint detection (multivariate) |
+
+### Time Series
+
+| Function | Description |
+|----------|-------------|
+| `insight_estimate_period` | Dominant period of a series (AutoPeriod); `period` 0 = none, candidates listed |
+| `insight_free_period_estimate` | Frees the candidates of a `CPeriodEstimate` |
+| `insight_spectral_residual` | Spectral residual anomaly scoring (Ren et al. 2019); null options = paper defaults |
+| `insight_free_spectral_residual_result` | Frees the points of a `CSpectralResidualResult` |
 
 ### Trend & Density Estimation
 
@@ -487,6 +507,53 @@ Feature importance via permutation, ANOVA, or mutual information.
 ```json
 { "method": "permutation", "features": [{ "name": "f1", "index": 0, "score": 0.8, "std_dev": 0.1 }], "baseline_score": 0.5 }
 ```
+
+#### `estimate_period(data) -> PeriodEstimate`
+
+Dominant period of a univariate series — AutoPeriod (Vlachos, Yu & Castelli
+2005): peaks of the detrended, zero-padded periodogram above a permutation
+threshold (100 seeded shuffles, so the estimate is deterministic), each refined
+on the autocorrelation function to the integer lag that is a local maximum
+above the `1.96/√n` bound. At least 8 finite values.
+
+**Input:** `{ "data": [0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1] }`
+
+**Output:**
+```json
+{ "period": 7, "candidates": [{ "period": 7, "acf": 0.71, "bin": 18, "power": 21.3, "power_share": 0.62 }],
+  "n": 16, "acf_threshold": 0.49, "power_threshold": 6.8 }
+```
+
+`period` is `null` — explicitly, not an error — when no periodicity passes both
+stages (a constant, a pure trend, white noise). Only periods from 2 to `n/2`
+are admissible.
+
+#### `spectral_residual(data) -> SpectralResidualResult`
+
+Score every point for anomalies by spectral residual saliency (Ren et al.
+2019) — spikes, steps and dropouts, without a trained model and without
+assuming a period. At least 12 finite values; the options default to the
+paper's.
+
+**Input:**
+```json
+{ "data": [1, 1.1, 0.9, 1, 6, 1, 1.1, 0.9, 1, 1, 1.1, 0.9],
+  "averaging_window": 3, "judgement_window": 40, "threshold": 3.0,
+  "min_zscore": 1.5, "sensitivity": 70, "batch_size": null }
+```
+
+**Output:**
+```json
+{ "points": [{ "index": 4, "value": 6, "saliency": 2.1, "score": 5.3,
+               "expected": 1.0, "lower": 0.9, "upper": 1.1, "is_anomaly": true }],
+  "anomalies": [4] }
+```
+
+`expected` is the low-frequency reconstruction of the series with its anomalies
+replaced by their neighbours and `lower`/`upper` the band of `sensitivity`
+percent coverage around it — chart information; the anomaly decision is the
+`score` against `threshold`, gated by `min_zscore` against the level of the
+window before the point.
 
 ## npm (WebAssembly)
 

@@ -823,6 +823,135 @@ public sealed class InsightClient : IDisposable
     }
 
     /// <summary>
+    /// Estimate the dominant period of a univariate series (AutoPeriod —
+    /// Vlachos, Yu &amp; Castelli 2005: permutation-thresholded periodogram
+    /// peaks refined on the autocorrelation function). Deterministic for a
+    /// series. <see cref="PeriodEstimate.Period"/> is <c>null</c> — not an
+    /// error — when no periodicity passes both stages.
+    /// </summary>
+    /// <param name="data">Univariate series, at least 8 finite values.</param>
+    public PeriodEstimate EstimatePeriod(double[] data)
+    {
+        var native = new NativeStructs.CPeriodEstimate();
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_estimate_period(ptr, (uint)data.Length, ref native));
+            }
+        }
+
+        try
+        {
+            var candidates = new PeriodCandidate[native.NCandidates];
+            unsafe
+            {
+                if (native.NCandidates > 0 && native.Candidates != IntPtr.Zero)
+                {
+                    var raw = (NativeStructs.CPeriodCandidate*)native.Candidates;
+                    for (var i = 0; i < native.NCandidates; i++)
+                    {
+                        candidates[i] = new PeriodCandidate
+                        {
+                            Period = raw[i].Period,
+                            Acf = raw[i].Acf,
+                            Bin = raw[i].Bin,
+                            Power = raw[i].Power,
+                            PowerShare = raw[i].PowerShare,
+                        };
+                    }
+                }
+            }
+            return new PeriodEstimate
+            {
+                Period = native.Period == 0 ? null : native.Period,
+                Candidates = candidates,
+                N = native.N,
+                AcfThreshold = native.AcfThreshold,
+                PowerThreshold = native.PowerThreshold,
+            };
+        }
+        finally
+        {
+            Native.insight_free_period_estimate(ref native);
+        }
+    }
+
+    /// <summary>
+    /// Score every point of a series for anomalies by spectral residual
+    /// saliency (Ren et al. 2019) — spikes, steps and dropouts, without a
+    /// trained model and without assuming a period. Options left
+    /// <c>null</c> take the paper's defaults (q = 3, z = 40, τ = 3, z-score
+    /// gate 1.5, 70% band, no batching).
+    /// </summary>
+    /// <param name="data">Univariate series, at least 12 finite values.</param>
+    /// <param name="options">Scoring options, or <c>null</c> for the defaults.</param>
+    public SpectralResidualResult SpectralResidual(double[] data, SpectralResidualOptions? options = null)
+    {
+        var native = new NativeStructs.CSpectralResidualResult();
+        unsafe
+        {
+            fixed (double* ptr = data)
+            {
+                if (options is null)
+                {
+                    Native.ThrowIfFailed(
+                        Native.insight_spectral_residual(ptr, (uint)data.Length, null, ref native));
+                }
+                else
+                {
+                    var o = new NativeStructs.CSpectralResidualOptions
+                    {
+                        AveragingWindow = options.AveragingWindow,
+                        JudgementWindow = options.JudgementWindow,
+                        Threshold = options.Threshold,
+                        MinZscore = options.MinZscore,
+                        Sensitivity = options.Sensitivity,
+                        BatchSize = options.BatchSize ?? 0,
+                    };
+                    Native.ThrowIfFailed(
+                        Native.insight_spectral_residual(ptr, (uint)data.Length, &o, ref native));
+                }
+            }
+        }
+
+        try
+        {
+            var points = new SrPoint[native.NPoints];
+            unsafe
+            {
+                if (native.NPoints > 0 && native.Points != IntPtr.Zero)
+                {
+                    var raw = (NativeStructs.CSrPoint*)native.Points;
+                    for (var i = 0; i < native.NPoints; i++)
+                    {
+                        points[i] = new SrPoint
+                        {
+                            Index = raw[i].Index,
+                            Value = raw[i].Value,
+                            Saliency = raw[i].Saliency,
+                            Score = raw[i].Score,
+                            Expected = raw[i].Expected,
+                            Lower = raw[i].Lower,
+                            Upper = raw[i].Upper,
+                            IsAnomaly = raw[i].IsAnomaly != 0,
+                        };
+                    }
+                }
+            }
+            return new SpectralResidualResult
+            {
+                Points = points,
+                Anomalies = points.Where(p => p.IsAnomaly).Select(p => p.Index).ToArray(),
+            };
+        }
+        finally
+        {
+            Native.insight_free_spectral_residual_result(ref native);
+        }
+    }
+
+    /// <summary>
     /// Detect changepoints in multivariate (multi-channel) time-series data using PELT.
     /// </summary>
     /// <param name="data">
@@ -1954,6 +2083,83 @@ public class PeltResult
     public uint[] Changepoints { get; init; } = [];
     /// <summary>Number of segments (changepoints + 1).</summary>
     public uint NSegments { get; init; }
+}
+
+/// <summary>One validated period candidate of <see cref="InsightClient.EstimatePeriod"/>.</summary>
+public class PeriodCandidate
+{
+    /// <summary>Integer period, in observations.</summary>
+    public uint Period { get; init; }
+    /// <summary>Autocorrelation at that lag — the strength of the periodicity.</summary>
+    public double Acf { get; init; }
+    /// <summary>Periodogram bin (1-based, of the padded transform) that produced it.</summary>
+    public uint Bin { get; init; }
+    /// <summary>Periodogram power of that bin.</summary>
+    public double Power { get; init; }
+    /// <summary>That bin's share of the total periodogram power.</summary>
+    public double PowerShare { get; init; }
+}
+
+/// <summary>Result of <see cref="InsightClient.EstimatePeriod"/>.</summary>
+public class PeriodEstimate
+{
+    /// <summary>The dominant period, or <c>null</c> when no periodicity passed both stages.</summary>
+    public uint? Period { get; init; }
+    /// <summary>Every validated candidate, strongest first.</summary>
+    public PeriodCandidate[] Candidates { get; init; } = [];
+    /// <summary>Number of observations.</summary>
+    public uint N { get; init; }
+    /// <summary>The 95% white-noise bound on the ACF, 1.96 / sqrt(n).</summary>
+    public double AcfThreshold { get; init; }
+    /// <summary>Periodogram power a bin had to exceed to become a candidate.</summary>
+    public double PowerThreshold { get; init; }
+}
+
+/// <summary>Options of <see cref="InsightClient.SpectralResidual"/>; the defaults are Ren et al. (2019).</summary>
+public class SpectralResidualOptions
+{
+    /// <summary>Moving-average width on the log amplitude spectrum (q, >= 1).</summary>
+    public uint AveragingWindow { get; init; } = 3;
+    /// <summary>Preceding saliencies a point is scored against (z, >= 1).</summary>
+    public uint JudgementWindow { get; init; } = 40;
+    /// <summary>Score above which a point is an anomaly (τ, > 0).</summary>
+    public double Threshold { get; init; } = 3.0;
+    /// <summary>Minimum z-score of the point against the window before it (>= 0; 0 disables).</summary>
+    public double MinZscore { get; init; } = 1.5;
+    /// <summary>Coverage in percent of the band around the expected value (0 &lt; s &lt; 100).</summary>
+    public double Sensitivity { get; init; } = 70.0;
+    /// <summary>Score in consecutive batches of this size (>= 12), or <c>null</c> for one batch.</summary>
+    public uint? BatchSize { get; init; }
+}
+
+/// <summary>One scored point of <see cref="InsightClient.SpectralResidual"/>.</summary>
+public class SrPoint
+{
+    /// <summary>Position in the input series.</summary>
+    public uint Index { get; init; }
+    /// <summary>The observed value.</summary>
+    public double Value { get; init; }
+    /// <summary>Spectral residual saliency (>= 0).</summary>
+    public double Saliency { get; init; }
+    /// <summary>Saliency relative to the preceding judgement window (>= 0).</summary>
+    public double Score { get; init; }
+    /// <summary>Low-frequency reconstruction of the series with anomalies removed.</summary>
+    public double Expected { get; init; }
+    /// <summary>Expected minus the band margin.</summary>
+    public double Lower { get; init; }
+    /// <summary>Expected plus the band margin.</summary>
+    public double Upper { get; init; }
+    /// <summary>Whether the point is an anomaly.</summary>
+    public bool IsAnomaly { get; init; }
+}
+
+/// <summary>Result of <see cref="InsightClient.SpectralResidual"/>.</summary>
+public class SpectralResidualResult
+{
+    /// <summary>One point per observation, in order.</summary>
+    public SrPoint[] Points { get; init; } = [];
+    /// <summary>Indices of the points flagged as anomalies.</summary>
+    public uint[] Anomalies { get; init; } = [];
 }
 
 /// <summary>Mann-Kendall trend test result.</summary>

@@ -254,6 +254,25 @@ internal static partial class NativeLibrary
         ref NativeStructs.CPeltResult result);
 
     [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_estimate_period(
+        double* data, uint n,
+        ref NativeStructs.CPeriodEstimate result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_period_estimate(
+        ref NativeStructs.CPeriodEstimate result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_spectral_residual(
+        double* data, uint n,
+        NativeStructs.CSpectralResidualOptions* options,
+        ref NativeStructs.CSpectralResidualResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_spectral_residual_result(
+        ref NativeStructs.CSpectralResidualResult result);
+
+    [LibraryImport(LibraryName)]
     public static unsafe partial int insight_mann_kendall(
         double* data, uint n,
         ref NativeStructs.CMannKendallResult result);

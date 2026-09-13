@@ -4257,6 +4257,292 @@ pub extern "C" fn insight_weibull_b_life(shape: f64, scale: f64, fraction_failed
     }
 }
 
+// ── Time series: period estimation and spectral residual ───────────────
+
+/// One validated period candidate.
+#[repr(C)]
+pub struct CPeriodCandidate {
+    /// Integer period, in observations.
+    pub period: u32,
+    /// Autocorrelation at that lag (the strength of the periodicity).
+    pub acf: f64,
+    /// Periodogram bin (1-based, of the padded transform) that produced it.
+    pub bin: u32,
+    /// Periodogram power of that bin.
+    pub power: f64,
+    /// That bin's share of the total periodogram power.
+    pub power_share: f64,
+}
+
+/// C-compatible result of `insight_estimate_period`.
+#[repr(C)]
+pub struct CPeriodEstimate {
+    /// The dominant period, or 0 when no periodicity passed both stages
+    /// (a constant, a pure trend, white noise) — explicit, not an error.
+    pub period: u32,
+    /// Number of observations.
+    pub n: u32,
+    /// The 95% white-noise bound on the ACF, `1.96 / sqrt(n)`.
+    pub acf_threshold: f64,
+    /// Periodogram power a bin had to exceed to become a candidate.
+    pub power_threshold: f64,
+    /// Every validated candidate, strongest first. Caller must free with
+    /// `insight_free_period_estimate`.
+    pub candidates: *mut CPeriodCandidate,
+    /// Number of candidates.
+    pub n_candidates: u32,
+}
+
+/// Estimates the dominant period of a univariate series (AutoPeriod:
+/// Vlachos, Yu & Castelli 2005 — permutation-thresholded periodogram peaks
+/// refined on the autocorrelation function). Deterministic for a series.
+///
+/// `data`: `n` observations (at least 8, all finite). `out`: pointer to a
+/// `CPeriodEstimate`. Returns 0 on success, negative on error. Caller must
+/// free `out` with `insight_free_period_estimate`.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_estimate_period(
+    data: *const f64,
+    n: u32,
+    out: *mut CPeriodEstimate,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+        let raw = unsafe { slice::from_raw_parts(data, n as usize) };
+        match u_analytics::seasonality::estimate_period(raw) {
+            Some(r) => {
+                let mut candidates: Vec<CPeriodCandidate> = r
+                    .candidates
+                    .iter()
+                    .map(|c| CPeriodCandidate {
+                        period: c.period as u32,
+                        acf: c.acf,
+                        bin: c.bin as u32,
+                        power: c.power,
+                        power_share: c.power_share,
+                    })
+                    .collect();
+                let n_candidates = candidates.len() as u32;
+                let candidates_ptr = if candidates.is_empty() {
+                    ptr::null_mut()
+                } else {
+                    let p = candidates.as_mut_ptr();
+                    std::mem::forget(candidates);
+                    p
+                };
+                unsafe {
+                    (*out) = CPeriodEstimate {
+                        period: r.period.unwrap_or(0) as u32,
+                        n: r.n as u32,
+                        acf_threshold: r.acf_threshold,
+                        power_threshold: r.power_threshold,
+                        candidates: candidates_ptr,
+                        n_candidates,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error("invalid input (need at least 8 finite observations)");
+                INSIGHT_ERR_INSUFFICIENT_DATA
+            }
+        }
+    });
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_estimate_period");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees the candidates of a `CPeriodEstimate` allocated by
+/// `insight_estimate_period`.
+///
+/// # Safety
+/// The result must have been allocated by that function and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_period_estimate(result: *mut CPeriodEstimate) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &*result };
+    if !r.candidates.is_null() && r.n_candidates > 0 {
+        let _ = unsafe {
+            Vec::from_raw_parts(
+                r.candidates,
+                r.n_candidates as usize,
+                r.n_candidates as usize,
+            )
+        };
+    }
+}
+
+/// Options for `insight_spectral_residual`. Pass a null pointer for the
+/// defaults of Ren et al. (2019): q = 3, z = 40, threshold 3, z-score gate
+/// 1.5, 70% band, no batching.
+#[repr(C)]
+pub struct CSpectralResidualOptions {
+    /// Moving-average width on the log amplitude spectrum (>= 1).
+    pub averaging_window: u32,
+    /// Preceding saliencies a point is scored against (>= 1).
+    pub judgement_window: u32,
+    /// Score above which a point is an anomaly (> 0).
+    pub threshold: f64,
+    /// Minimum z-score of the point against the window before it (>= 0; 0 disables).
+    pub min_zscore: f64,
+    /// Coverage in percent of the band around the expected value (0 < s < 100).
+    pub sensitivity: f64,
+    /// Score in consecutive batches of this size (>= 12); 0 = one batch.
+    pub batch_size: u32,
+}
+
+/// One scored point of `insight_spectral_residual`.
+#[repr(C)]
+pub struct CSrPoint {
+    /// Position in the input series.
+    pub index: u32,
+    /// The observed value.
+    pub value: f64,
+    /// Spectral residual saliency (>= 0).
+    pub saliency: f64,
+    /// Saliency relative to the preceding judgement window (>= 0).
+    pub score: f64,
+    /// Low-frequency reconstruction of the series with anomalies removed.
+    pub expected: f64,
+    /// `expected - margin`.
+    pub lower: f64,
+    /// `expected + margin`.
+    pub upper: f64,
+    /// 1 when the point is an anomaly.
+    pub is_anomaly: bool,
+}
+
+/// C-compatible result of `insight_spectral_residual`.
+#[repr(C)]
+pub struct CSpectralResidualResult {
+    /// One point per observation, in order. Caller must free with
+    /// `insight_free_spectral_residual_result`.
+    pub points: *mut CSrPoint,
+    /// Number of points (= n).
+    pub n_points: u32,
+    /// Number of points flagged as anomalies.
+    pub n_anomalies: u32,
+}
+
+/// Scores every point of a series for anomalies by spectral residual
+/// saliency (Ren et al. 2019): spikes, steps and dropouts, without a trained
+/// model and without assuming a period.
+///
+/// `data`: `n` observations (at least 12, all finite). `options`: null for
+/// the defaults. `out`: pointer to a `CSpectralResidualResult`. Returns 0 on
+/// success, negative on error. Caller must free `out` with
+/// `insight_free_spectral_residual_result`.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `options` must be null or valid. `out`
+/// must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_spectral_residual(
+    data: *const f64,
+    n: u32,
+    options: *const CSpectralResidualOptions,
+    out: *mut CSpectralResidualResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        if data.is_null() || out.is_null() {
+            set_last_error("null pointer");
+            return INSIGHT_ERR_NULL_PTR;
+        }
+        let raw = unsafe { slice::from_raw_parts(data, n as usize) };
+        let mut sr = u_analytics::detection::SpectralResidual::new();
+        if !options.is_null() {
+            let o = unsafe { &*options };
+            sr = sr
+                .with_averaging_window(o.averaging_window as usize)
+                .with_judgement_window(o.judgement_window as usize)
+                .with_threshold(o.threshold)
+                .with_min_zscore(o.min_zscore)
+                .with_sensitivity(o.sensitivity)
+                .with_batch_size((o.batch_size > 0).then_some(o.batch_size as usize));
+        }
+        match sr.analyze(raw) {
+            Some(points) => {
+                let n_anomalies = points.iter().filter(|p| p.is_anomaly).count() as u32;
+                let mut c_points: Vec<CSrPoint> = points
+                    .iter()
+                    .map(|p| CSrPoint {
+                        index: p.index as u32,
+                        value: p.value,
+                        saliency: p.saliency,
+                        score: p.score,
+                        expected: p.expected,
+                        lower: p.lower,
+                        upper: p.upper,
+                        is_anomaly: p.is_anomaly,
+                    })
+                    .collect();
+                let n_points = c_points.len() as u32;
+                let points_ptr = if c_points.is_empty() {
+                    ptr::null_mut()
+                } else {
+                    let p = c_points.as_mut_ptr();
+                    std::mem::forget(c_points);
+                    p
+                };
+                unsafe {
+                    (*out) = CSpectralResidualResult {
+                        points: points_ptr,
+                        n_points,
+                        n_anomalies,
+                    };
+                }
+                INSIGHT_OK
+            }
+            None => {
+                set_last_error(
+                    "invalid input or options (need at least 12 finite observations; \
+                     averaging_window >= 1, judgement_window >= 1, threshold > 0, \
+                     min_zscore >= 0, 0 < sensitivity < 100, batch_size 0 or >= 12)",
+                );
+                INSIGHT_ERR_INVALID_PARAM
+            }
+        }
+    });
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_last_error("panic in insight_spectral_residual");
+            INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Frees the points of a `CSpectralResidualResult` allocated by
+/// `insight_spectral_residual`.
+///
+/// # Safety
+/// The result must have been allocated by that function and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_spectral_residual_result(
+    result: *mut CSpectralResidualResult,
+) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &*result };
+    if !r.points.is_null() && r.n_points > 0 {
+        let _ = unsafe { Vec::from_raw_parts(r.points, r.n_points as usize, r.n_points as usize) };
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -5329,6 +5615,85 @@ mod tests {
     }
 
     // ── PELT tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn ffi_estimate_period_sawtooth_and_line() {
+        let saw: Vec<f64> = (0..40).map(|i| (i % 7) as f64).collect();
+        let mut out = CPeriodEstimate {
+            period: 0,
+            n: 0,
+            acf_threshold: 0.0,
+            power_threshold: 0.0,
+            candidates: ptr::null_mut(),
+            n_candidates: 0,
+        };
+        let rc = unsafe { insight_estimate_period(saw.as_ptr(), 40, &mut out) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(out.period, 7);
+        assert_eq!(out.n, 40);
+        assert!(out.n_candidates >= 1 && !out.candidates.is_null());
+        let first = unsafe { &*out.candidates };
+        assert_eq!(first.period, 7);
+        assert!(first.power > out.power_threshold);
+        unsafe { insight_free_period_estimate(&mut out) };
+
+        let line: Vec<f64> = (0..40).map(|i| i as f64).collect();
+        let rc = unsafe { insight_estimate_period(line.as_ptr(), 40, &mut out) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(out.period, 0, "a line has no period");
+        assert_eq!(out.n_candidates, 0);
+        unsafe { insight_free_period_estimate(&mut out) };
+
+        let rc = unsafe { insight_estimate_period(line.as_ptr(), 5, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+        let rc = unsafe { insight_estimate_period(ptr::null(), 40, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_spectral_residual_flags_the_spike() {
+        let mut data = vec![1.0_f64; 40];
+        data[25] = 9.0;
+        let mut out = CSpectralResidualResult {
+            points: ptr::null_mut(),
+            n_points: 0,
+            n_anomalies: 0,
+        };
+        let rc = unsafe { insight_spectral_residual(data.as_ptr(), 40, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(out.n_points, 40);
+        assert_eq!(out.n_anomalies, 1);
+        let points = unsafe { slice::from_raw_parts(out.points, 40) };
+        assert!(points[25].is_anomaly);
+        assert_eq!(points[25].index, 25);
+        assert!(points[25].value > points[25].upper);
+        assert!(points
+            .iter()
+            .all(|p| p.lower <= p.expected && p.expected <= p.upper));
+        unsafe { insight_free_spectral_residual_result(&mut out) };
+
+        let options = CSpectralResidualOptions {
+            averaging_window: 3,
+            judgement_window: 20,
+            threshold: 3.0,
+            min_zscore: 1.5,
+            sensitivity: 95.0,
+            batch_size: 0,
+        };
+        let rc = unsafe { insight_spectral_residual(data.as_ptr(), 40, &options, &mut out) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(out.n_anomalies, 1);
+        unsafe { insight_free_spectral_residual_result(&mut out) };
+
+        let bad = CSpectralResidualOptions {
+            threshold: 0.0,
+            ..options
+        };
+        let rc = unsafe { insight_spectral_residual(data.as_ptr(), 40, &bad, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let rc = unsafe { insight_spectral_residual(data.as_ptr(), 5, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
 
     #[test]
     fn ffi_pelt_single_changepoint() {

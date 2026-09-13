@@ -214,6 +214,59 @@ internal static class NativeStructs
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct CPeriodCandidate
+    {
+        public uint Period;
+        public double Acf;
+        public uint Bin;
+        public double Power;
+        public double PowerShare;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CPeriodEstimate
+    {
+        public uint Period;
+        public uint N;
+        public double AcfThreshold;
+        public double PowerThreshold;
+        public IntPtr Candidates;
+        public uint NCandidates;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CSpectralResidualOptions
+    {
+        public uint AveragingWindow;
+        public uint JudgementWindow;
+        public double Threshold;
+        public double MinZscore;
+        public double Sensitivity;
+        public uint BatchSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CSrPoint
+    {
+        public uint Index;
+        public double Value;
+        public double Saliency;
+        public double Score;
+        public double Expected;
+        public double Lower;
+        public double Upper;
+        public byte IsAnomaly;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CSpectralResidualResult
+    {
+        public IntPtr Points;
+        public uint NPoints;
+        public uint NAnomalies;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct CMannKendallResult
     {
         public long SStatistic;

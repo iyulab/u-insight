@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [0.18.0] - 2026-09-13
+
+### Added
+
+- **Time-series primitives on every transport.** `insight_estimate_period`
+  (with `insight_free_period_estimate`) returns the dominant period of a
+  univariate series by AutoPeriod — permutation-thresholded periodogram
+  peaks refined on the autocorrelation function, deterministic for a series
+  — as a `CPeriodEstimate` whose `period` is 0 when nothing is periodic and
+  whose candidates list every validated period. `insight_spectral_residual`
+  (with `insight_free_spectral_residual_result`, and a null-able
+  `CSpectralResidualOptions` for the defaults of Ren et al. 2019) scores every
+  point by spectral residual saliency, with an expected value and a coverage
+  band per point. C# `EstimatePeriod` and `SpectralResidual(data, options?)`
+  with `PeriodEstimate`, `SpectralResidualOptions`, `SrPoint` and
+  `SpectralResidualResult`; WASM `estimate_period` and `spectral_residual`
+  with the same JSON shapes as `@iyulab/u-analytics`. Both are pure Rust: no
+  native math library is required on any platform.
+
+### Changed
+
+- **`u-analytics` is now required at 0.11 and `u-numflow` at 0.5** — the
+  versions that carry `seasonality`, `detection::SpectralResidual` and
+  `fourier`.
+
 ## [0.17.0] - 2026-09-12
 
 ### Changed
