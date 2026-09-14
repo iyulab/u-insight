@@ -3496,7 +3496,7 @@ pub unsafe extern "C" fn insight_laney_p_chart(
         let sizes = unsafe { slice::from_raw_parts(sample_sizes, len) };
         let samples: Vec<(u64, u64)> = defs.iter().zip(sizes).map(|(&d, &s)| (d, s)).collect();
 
-        match u_analytics::spc::laney_p_chart(&samples) {
+        match u_analytics::spc::laney_p_chart(&samples, None) {
             Ok(chart) => {
                 let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
                     (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
@@ -3574,7 +3574,7 @@ pub unsafe extern "C" fn insight_laney_u_chart(
         let units = unsafe { slice::from_raw_parts(units_inspected, len) };
         let samples: Vec<(u64, f64)> = defs.iter().zip(units).map(|(&d, &u)| (d, u)).collect();
 
-        match u_analytics::spc::laney_u_chart(&samples) {
+        match u_analytics::spc::laney_u_chart(&samples, None) {
             Ok(chart) => {
                 let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
                     (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
