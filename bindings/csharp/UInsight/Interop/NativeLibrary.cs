@@ -365,7 +365,7 @@ internal static partial class NativeLibrary
 
     [LibraryImport(LibraryName)]
     public static unsafe partial int insight_boxcox_capability(
-        double* data, uint n, double usl, double lsl,
+        double* data, uint n, double usl, double lsl, double lambdaMin, double lambdaMax,
         ref NativeStructs.CBoxCoxCapabilityResult result);
 
     [LibraryImport(LibraryName)]

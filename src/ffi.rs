@@ -3903,14 +3903,44 @@ pub struct CBoxCoxCapabilityResult {
     /// against a within-subgroup sigma, and a flat observation vector carries
     /// no subgroup structure to estimate one from. Reporting them from the
     /// overall sigma instead would make `cp` equal `pp` for every input.
+    ///
+    /// Every field is `NaN` when neither specification limit was given.
     pub indices: CCapabilityIndices,
+    /// 1 when the likelihood maximum lies on an end of the lambda search range
+    /// (the likelihood was still rising there, so `lambda` is that limit rather
+    /// than an interior estimate), 0 otherwise.
+    pub lambda_at_bound: u8,
+}
+
+impl CCapabilityIndices {
+    /// Every index and statistic absent (`NaN`).
+    fn absent() -> Self {
+        CCapabilityIndices {
+            cp: f64::NAN,
+            cpk: f64::NAN,
+            cpu: f64::NAN,
+            cpl: f64::NAN,
+            pp: f64::NAN,
+            ppk: f64::NAN,
+            ppu: f64::NAN,
+            ppl: f64::NAN,
+            cpm: f64::NAN,
+            mean: f64::NAN,
+            std_dev_within: f64::NAN,
+            std_dev_overall: f64::NAN,
+        }
+    }
 }
 
 /// Computes process capability for non-normal data via Box-Cox transformation.
 ///
 /// `data`: process observations, length `n` — must all be strictly positive.
-/// `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
-/// one must be a real, positive number).
+/// `usl` / `lsl`: specification limits — pass `NaN` for "not set". Each set
+/// limit must be positive. With neither, only `lambda` and `lambda_at_bound`
+/// are estimated and every index is `NaN`.
+/// `lambda_min` / `lambda_max`: the lambda search range — pass `NaN` for both
+/// to use the default `[-5, 5]`; otherwise both must be finite with
+/// `lambda_min < lambda_max`.
 /// `out`: pointer to a `CBoxCoxCapabilityResult`.
 ///
 /// Returns 0 on success, negative on error.
@@ -3923,6 +3953,8 @@ pub unsafe extern "C" fn insight_boxcox_capability(
     n: u32,
     usl: f64,
     lsl: f64,
+    lambda_min: f64,
+    lambda_max: f64,
     out: *mut CBoxCoxCapabilityResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
@@ -3933,16 +3965,24 @@ pub unsafe extern "C" fn insight_boxcox_capability(
 
         let usl_opt = if usl.is_nan() { None } else { Some(usl) };
         let lsl_opt = if lsl.is_nan() { None } else { Some(lsl) };
+        let range = if lambda_min.is_nan() && lambda_max.is_nan() {
+            u_analytics::capability::DEFAULT_LAMBDA_RANGE
+        } else {
+            (lambda_min, lambda_max)
+        };
 
         let len = n as usize;
         let raw = unsafe { slice::from_raw_parts(data, len) };
 
-        match u_analytics::capability::boxcox_capability(raw, usl_opt, lsl_opt) {
+        match u_analytics::capability::boxcox_capability(raw, usl_opt, lsl_opt, range) {
             Ok(r) => {
                 unsafe {
                     (*out) = CBoxCoxCapabilityResult {
                         lambda: r.lambda,
-                        indices: r.indices.into(),
+                        indices: r
+                            .indices
+                            .map_or_else(CCapabilityIndices::absent, Into::into),
+                        lambda_at_bound: u8::from(r.lambda_at_bound),
                     };
                 }
                 INSIGHT_OK
@@ -3951,8 +3991,8 @@ pub unsafe extern "C" fn insight_boxcox_capability(
                 use u_analytics::capability::NonNormalCapabilityError as E;
                 let code = match e {
                     E::InsufficientData => INSIGHT_ERR_INSUFFICIENT_DATA,
-                    E::NoSpecLimits | E::SpecTransformError => INSIGHT_ERR_INVALID_PARAM,
-                    E::NonPositiveData => INSIGHT_ERR_INVALID_INPUT,
+                    E::SpecTransformError | E::InvalidLambdaRange => INSIGHT_ERR_INVALID_PARAM,
+                    E::NonPositiveData | E::NonFiniteData => INSIGHT_ERR_INVALID_INPUT,
                     E::CapabilityError => INSIGHT_ERR_DEGENERATE_DATA,
                 };
                 set_last_error(&e.to_string());
@@ -6596,19 +6636,33 @@ mod tests {
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
+    fn empty_boxcox_result() -> CBoxCoxCapabilityResult {
+        CBoxCoxCapabilityResult {
+            lambda: 0.0,
+            indices: empty_capability_result(),
+            lambda_at_bound: 9,
+        }
+    }
+
     #[test]
     fn ffi_boxcox_capability_basic() {
         let data: Vec<f64> = (1..=20).map(|i| (i as f64 * 0.3_f64).exp()).collect();
-        let mut result = CBoxCoxCapabilityResult {
-            lambda: 0.0,
-            indices: empty_capability_result(),
-        };
+        let mut result = empty_boxcox_result();
 
         let rc = unsafe {
-            insight_boxcox_capability(data.as_ptr(), data.len() as u32, 100.0, 1.0, &mut result)
+            insight_boxcox_capability(
+                data.as_ptr(),
+                data.len() as u32,
+                100.0,
+                1.0,
+                f64::NAN,
+                f64::NAN,
+                &mut result,
+            )
         };
         assert_eq!(rc, INSIGHT_OK);
         assert!(result.lambda.is_finite());
+        assert_eq!(result.lambda_at_bound, 0);
         assert!(!result.indices.ppk.is_nan());
         // Short-term indices are absent by construction on this path, and
         // absence is NaN across this FFI surface.
@@ -6617,23 +6671,72 @@ mod tests {
     }
 
     #[test]
+    fn ffi_boxcox_capability_narrow_range_and_no_limits() {
+        // Normal quantiles through the inverse Box-Cox at lambda = 4.
+        let n = 100;
+        let data: Vec<f64> = (1..=n)
+            .map(|i| {
+                let p = (i as f64 - 0.5) / n as f64;
+                let z = 10.0 + 2.0 * u_numflow::special::inverse_normal_cdf(p);
+                (4.0 * z + 1.0).powf(0.25)
+            })
+            .collect();
+        let mut result = empty_boxcox_result();
+        let rc = unsafe {
+            insight_boxcox_capability(
+                data.as_ptr(),
+                n as u32,
+                f64::NAN,
+                f64::NAN,
+                -2.0,
+                2.0,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(result.lambda, 2.0);
+        assert_eq!(result.lambda_at_bound, 1);
+        assert!(result.indices.ppk.is_nan() && result.indices.mean.is_nan());
+
+        // A half-given range is not the default — it is refused.
+        let rc = unsafe {
+            insight_boxcox_capability(
+                data.as_ptr(),
+                n as u32,
+                40.0,
+                f64::NAN,
+                -2.0,
+                f64::NAN,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+    }
+
+    #[test]
     fn ffi_boxcox_capability_insufficient_data() {
         let data = [1.0_f64, 2.0];
-        let mut result = CBoxCoxCapabilityResult {
-            lambda: 0.0,
-            indices: empty_capability_result(),
+        let mut result = empty_boxcox_result();
+        let rc = unsafe {
+            insight_boxcox_capability(
+                data.as_ptr(),
+                2,
+                100.0,
+                1.0,
+                f64::NAN,
+                f64::NAN,
+                &mut result,
+            )
         };
-        let rc = unsafe { insight_boxcox_capability(data.as_ptr(), 2, 100.0, 1.0, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
     }
 
     #[test]
     fn ffi_boxcox_capability_null_pointer() {
-        let mut result = CBoxCoxCapabilityResult {
-            lambda: 0.0,
-            indices: empty_capability_result(),
+        let mut result = empty_boxcox_result();
+        let rc = unsafe {
+            insight_boxcox_capability(ptr::null(), 10, 100.0, 1.0, f64::NAN, f64::NAN, &mut result)
         };
-        let rc = unsafe { insight_boxcox_capability(ptr::null(), 10, 100.0, 1.0, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 

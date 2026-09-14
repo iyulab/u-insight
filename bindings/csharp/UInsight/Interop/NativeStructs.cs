@@ -366,6 +366,7 @@ internal static class NativeStructs
     {
         public double Lambda;
         public CCapabilityIndices Indices;
+        public byte LambdaAtBound;
     }
 
     [StructLayout(LayoutKind.Sequential)]

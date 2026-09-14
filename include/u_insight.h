@@ -873,8 +873,16 @@ typedef struct CBoxCoxCapabilityResult {
    * against a within-subgroup sigma, and a flat observation vector carries
    * no subgroup structure to estimate one from. Reporting them from the
    * overall sigma instead would make `cp` equal `pp` for every input.
+   *
+   * Every field is `NaN` when neither specification limit was given.
    */
   struct CCapabilityIndices indices;
+  /**
+   * 1 when the likelihood maximum lies on an end of the lambda search range
+   * (the likelihood was still rising there, so `lambda` is that limit rather
+   * than an interior estimate), 0 otherwise.
+   */
+  uint8_t lambda_at_bound;
 } CBoxCoxCapabilityResult;
 
 /**
@@ -1980,8 +1988,12 @@ int32_t insight_process_capability(const double *data,
  * Computes process capability for non-normal data via Box-Cox transformation.
  *
  * `data`: process observations, length `n` — must all be strictly positive.
- * `usl` / `lsl`: specification limits — pass `NaN` for "not set" (at least
- * one must be a real, positive number).
+ * `usl` / `lsl`: specification limits — pass `NaN` for "not set". Each set
+ * limit must be positive. With neither, only `lambda` and `lambda_at_bound`
+ * are estimated and every index is `NaN`.
+ * `lambda_min` / `lambda_max`: the lambda search range — pass `NaN` for both
+ * to use the default `[-5, 5]`; otherwise both must be finite with
+ * `lambda_min < lambda_max`.
  * `out`: pointer to a `CBoxCoxCapabilityResult`.
  *
  * Returns 0 on success, negative on error.
@@ -1994,6 +2006,8 @@ int32_t insight_boxcox_capability(const double *data,
                                   uint32_t n,
                                   double usl,
                                   double lsl,
+                                  double lambda_min,
+                                  double lambda_max,
                                   struct CBoxCoxCapabilityResult *out);
 
 /**

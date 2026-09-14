@@ -1523,8 +1523,11 @@ public sealed class InsightClient : IDisposable
     /// </summary>
     /// <param name="data">Process observations (must all be strictly positive, needs at least 4 points).</param>
     /// <param name="usl">Upper specification limit (must be positive if set).</param>
-    /// <param name="lsl">Lower specification limit (must be positive if set).</param>
-    public BoxCoxCapabilityResult BoxCoxCapability(double[] data, double? usl = null, double? lsl = null)
+    /// <param name="lsl">Lower specification limit (must be positive if set). With neither limit,
+    /// only lambda is estimated and <see cref="BoxCoxCapabilityResult.Indices"/> is <c>null</c>.</param>
+    /// <param name="lambdaRange">Lambda search range; <c>null</c> uses the default [-5, 5].</param>
+    public BoxCoxCapabilityResult BoxCoxCapability(
+        double[] data, double? usl = null, double? lsl = null, (double Min, double Max)? lambdaRange = null)
     {
         var native = new NativeStructs.CBoxCoxCapabilityResult();
         unsafe
@@ -1532,13 +1535,16 @@ public sealed class InsightClient : IDisposable
             fixed (double* ptr = data)
             {
                 Native.ThrowIfFailed(Native.insight_boxcox_capability(
-                    ptr, (uint)data.Length, usl ?? double.NaN, lsl ?? double.NaN, ref native));
+                    ptr, (uint)data.Length, usl ?? double.NaN, lsl ?? double.NaN,
+                    lambdaRange?.Min ?? double.NaN, lambdaRange?.Max ?? double.NaN,
+                    ref native));
             }
         }
         return new BoxCoxCapabilityResult
         {
             Lambda = native.Lambda,
-            Indices = BuildCapabilityIndices(native.Indices),
+            LambdaAtBound = native.LambdaAtBound != 0,
+            Indices = usl is null && lsl is null ? null : BuildCapabilityIndices(native.Indices),
         };
     }
 
@@ -2366,8 +2372,17 @@ public class BoxCoxCapabilityResult
 {
     /// <summary>Estimated optimal Box-Cox transformation parameter lambda.</summary>
     public double Lambda { get; init; }
-    /// <summary>Capability indices computed on the Box-Cox-transformed scale.</summary>
-    public CapabilityIndices Indices { get; init; } = new();
+    /// <summary>
+    /// <c>true</c> when the likelihood maximum lies on an end of the lambda search range: the
+    /// likelihood was still rising there, so <see cref="Lambda"/> is that limit rather than an
+    /// interior estimate. Widen the range to find the unconstrained optimum.
+    /// </summary>
+    public bool LambdaAtBound { get; init; }
+    /// <summary>
+    /// Capability indices computed on the Box-Cox-transformed scale; <c>null</c> when no
+    /// specification limit was given.
+    /// </summary>
+    public CapabilityIndices? Indices { get; init; }
 }
 
 /// <summary>Result of percentile-based (ISO 22514-2) process capability analysis.</summary>

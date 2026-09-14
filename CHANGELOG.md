@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed (breaking)
+
+- **`insight_boxcox_capability` takes the λ search range and reports when the
+  search hit it.** Two parameters, `lambda_min` / `lambda_max`, follow `lsl`
+  (`NaN` for both → the default `[-5, 5]`); `CBoxCoxCapabilityResult` gains a
+  trailing `uint8_t lambda_at_bound`. Previously λ was searched over `[-2, 2]`
+  only, and a maximum beyond it came back as `±1.9999996` with nothing to tell
+  it from an interior estimate.
+- Specification limits are optional: with neither, λ is estimated and every
+  index is `NaN`.
+- C#: `InsightClient.BoxCoxCapability(data, usl, lsl, lambdaRange)` —
+  `BoxCoxCapabilityResult.LambdaAtBound`, and `Indices` is `null` without limits.
+
+### Changed
+
+- Normal tail probabilities throughout (Anderson-Darling, rank-test p-values,
+  sigma level ↔ PPM) follow the tail-precise normal functions of the analytics
+  layer; returned values change in their trailing digits.
+
 ## [0.18.0] - 2026-09-13
 
 ### Added
