@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
-## [Unreleased]
+## [0.19.0] - 2026-09-15
+
+Requires `u-analytics` 0.12 and `u-numflow` 0.6. `UInsight` NuGet **0.19.0** (lockstep).
 
 ### Changed (breaking)
 

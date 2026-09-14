@@ -7,6 +7,15 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
+## What's New in 0.19.0
+
+- **Box-Cox capability reports when its λ search hit a range limit**
+  (`lambda_at_bound`), searches `[-5, 5]` by default or a range you pass, and
+  runs without specification limits (λ only). C#
+  `BoxCoxCapability(data, usl, lsl, lambdaRange)`.
+- Normal tail probabilities (Anderson-Darling, rank-test p-values, sigma ↔ PPM)
+  are tail-precise (`u-numflow` 0.6).
+
 ## What's New in 0.18.0
 
 - **Univariate time-series primitives**, pure Rust on every transport
