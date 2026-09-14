@@ -3494,18 +3494,10 @@ pub unsafe extern "C" fn insight_laney_p_chart(
         let len = n as usize;
         let defs = unsafe { slice::from_raw_parts(defectives, len) };
         let sizes = unsafe { slice::from_raw_parts(sample_sizes, len) };
-        if let Some(i) = first_invalid_proportion(defs, sizes) {
-            set_last_error(&format!(
-                "subgroup {i}: {} defectives out of {} (need sample_size > 0 and \
-                 defectives <= sample_size)",
-                defs[i], sizes[i]
-            ));
-            return INSIGHT_ERR_INVALID_PARAM;
-        }
         let samples: Vec<(u64, u64)> = defs.iter().zip(sizes).map(|(&d, &s)| (d, s)).collect();
 
         match u_analytics::spc::laney_p_chart(&samples) {
-            Some(chart) => {
+            Ok(chart) => {
                 let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
                     (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
                 });
@@ -3519,10 +3511,7 @@ pub unsafe extern "C" fn insight_laney_p_chart(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("need at least 3 subgroups");
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            Err(e) => laney_input_error(&e),
         }
     });
 
@@ -3531,6 +3520,27 @@ pub unsafe extern "C" fn insight_laney_p_chart(
         Err(_) => {
             set_last_error("panic in insight_laney_p_chart");
             INSIGHT_ERR_PANIC
+        }
+    }
+}
+
+/// Reports a Laney chart's refusal: a subgroup it cannot chart (with its
+/// position) as `INSIGHT_ERR_INVALID_PARAM`, too few subgroups as
+/// `INSIGHT_ERR_INSUFFICIENT_DATA`.
+fn laney_input_error(e: &u_analytics::spc::ChartInputError) -> i32 {
+    use u_analytics::spc::ChartInputError as E;
+    match e {
+        E::Sample { index, error } => {
+            set_last_error(&format!("subgroup {index}: {error}"));
+            INSIGHT_ERR_INVALID_PARAM
+        }
+        E::TooFewSamples { min, .. } => {
+            set_last_error(&format!("need at least {min} subgroups"));
+            INSIGHT_ERR_INSUFFICIENT_DATA
+        }
+        other => {
+            set_last_error(&other.to_string());
+            INSIGHT_ERR_INVALID_PARAM
         }
     }
 }
@@ -3562,17 +3572,10 @@ pub unsafe extern "C" fn insight_laney_u_chart(
         let len = n as usize;
         let defs = unsafe { slice::from_raw_parts(defects, len) };
         let units = unsafe { slice::from_raw_parts(units_inspected, len) };
-        if let Some(i) = first_invalid_units(units) {
-            set_last_error(&format!(
-                "subgroup {i}: units_inspected must be a positive number, got {}",
-                units[i]
-            ));
-            return INSIGHT_ERR_INVALID_PARAM;
-        }
         let samples: Vec<(u64, f64)> = defs.iter().zip(units).map(|(&d, &u)| (d, u)).collect();
 
         match u_analytics::spc::laney_u_chart(&samples) {
-            Some(chart) => {
+            Ok(chart) => {
                 let (points_ptr, n_points) = attribute_points_from(&chart.points, |p| {
                     (p.value, p.ucl, p.cl, p.lcl, p.out_of_control)
                 });
@@ -3586,11 +3589,7 @@ pub unsafe extern "C" fn insight_laney_u_chart(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("need at least 3 subgroups");
-
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            Err(e) => laney_input_error(&e),
         }
     });
 
