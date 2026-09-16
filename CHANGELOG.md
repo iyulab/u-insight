@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [0.20.1] - 2026-09-16
+
+No change to this library. 0.20.0 was accepted by nuget.org but never became
+installable: the feed reports the version as already present, while every read
+path -- the flat container, the search index, the registration index and the
+package page -- says it is not there, so a restore of `UInsight` 0.20.0 fails
+with NU1102 and resolves no higher than 0.19.0. The version cannot be pushed
+again, so this release carries the same code under a version that consumers can
+actually resolve. crates.io and npm are republished with it to keep the three
+channels on one version.
+
 ## [0.20.0] - 2026-09-16
 
 ### Fixed
