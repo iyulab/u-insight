@@ -7,7 +7,7 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
-## What's New in 0.19.0
+## What's New in 0.20.0
 
 - **Box-Cox capability reports when its λ search hit a range limit**
   (`lambda_at_bound`), searches `[-5, 5]` by default or a range you pass, and
