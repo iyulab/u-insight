@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Fixed
+
+- **`distribution::jarque_bera` inherits a corrected statistic and p-value**
+  (`u-analytics` `jarque_bera_test`): the moment form Jarque & Bera (1987)
+  define rather than the bias-adjusted estimators, and a p-value that stays a
+  number in the tail. The statistic changes for every sample; on a 20-point
+  sample it moves from 7.498 to 5.564. Requires `u-analytics` 0.13. No API
+  change here.
+
 ## [0.19.0] - 2026-09-15
 
 Requires `u-analytics` 0.12 and `u-numflow` 0.6. `UInsight` NuGet **0.19.0** (lockstep).

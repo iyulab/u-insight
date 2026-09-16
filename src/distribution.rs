@@ -845,6 +845,28 @@ mod tests {
         assert!(!result.rejected);
     }
 
+    /// The statistic this reports is the crate's, unchanged. Pinning the value
+    /// here rather than only a threshold is what makes a silent divergence in
+    /// the delegation visible: a wrapper that recomputed, rescaled or rounded
+    /// would still pass a `p > 0.05` assertion.
+    #[test]
+    fn jarque_bera_passes_the_engine_statistic_through() {
+        let data = [
+            2.1, 3.4, 1.9, 5.6, 2.2, 3.1, 4.8, 2.9, 3.3, 7.2, 2.5, 3.0, 4.1, 2.7, 3.8, 2.4, 6.1,
+            3.6, 2.8, 3.2,
+        ];
+        let here = jarque_bera(&data).expect("20 finite points");
+        let engine = u_analytics::testing::jarque_bera_test(&data).expect("same data");
+        assert_eq!(here.statistic, engine.statistic);
+        assert_eq!(here.p_value, engine.p_value);
+        // And that value is the moment form the cited paper defines.
+        assert!(
+            (here.statistic - 5.563_714_337_9).abs() < 1e-8,
+            "JB = {}",
+            here.statistic
+        );
+    }
+
     #[test]
     fn jarque_bera_insufficient() {
         assert!(jarque_bera(&[1.0, 2.0, 3.0]).is_none());
