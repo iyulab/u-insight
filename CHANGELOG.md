@@ -8,6 +8,15 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`estimate_period` landed below the true period when the series was not a
+  whole number of cycles long** -- 63 over 300 observations came back as 60.
+  Carried from `u-analytics`, which selected the autocorrelation hill on the
+  biased estimator; its monotone shrinkage tilted the choice toward shorter
+  lags. A candidate's `acf` is now the bias-corrected value it was judged on,
+  so it is comparable against the `acf_threshold` shipped beside it.
+
 ### Changed
 
 - **A refused `spectral_residual` reports the one condition that failed.**

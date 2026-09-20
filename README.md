@@ -531,6 +531,9 @@ above the `1.96/√n` bound. At least 8 finite values.
 ```json
 { "period": 7, "candidates": [{ "period": 7, "acf": 0.71, "bin": 18, "power": 21.3, "power_share": 0.62 }],
   "n": 16, "acf_threshold": 0.49, "power_threshold": 6.8 }
+// `acf` has the (n - lag)/n bias of the estimator undone, so it is comparable
+// against `acf_threshold`. The period is exact whether or not the series is a
+// whole number of cycles long.
 ```
 
 `period` is `null` — explicitly, not an error — when no periodicity passes both
