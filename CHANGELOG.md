@@ -42,15 +42,6 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   The C struct `CSrPoint` gains a trailing `bool`, so a caller that mirrors the
   layout has to add the field.
 
-### Fixed
-
-- **`estimate_period` landed below the true period when the series was not a
-  whole number of cycles long** -- 63 over 300 observations came back as 60.
-  Carried from `u-analytics`, which selected the autocorrelation hill on the
-  biased estimator; its monotone shrinkage tilted the choice toward shorter
-  lags. A candidate's `acf` is now the bias-corrected value it was judged on,
-  so it is comparable against the `acf_threshold` shipped beside it.
-
 ### Changed
 
 - **A refused `spectral_residual` reports the one condition that failed.**
@@ -60,6 +51,15 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   The message now names the option and what it has to satisfy -- `threshold
   must be a finite number > 0` -- or states the shortfall in observations, or
   the position of the first non-finite value.
+
+### Fixed
+
+- **`estimate_period` landed below the true period when the series was not a
+  whole number of cycles long** -- 63 over 300 observations came back as 60.
+  Carried from `u-analytics`, which selected the autocorrelation hill on the
+  biased estimator; its monotone shrinkage tilted the choice toward shorter
+  lags. A candidate's `acf` is now the bias-corrected value it was judged on,
+  so it is comparable against the `acf_threshold` shipped beside it.
 
 ## [0.20.1] - 2026-09-16
 
