@@ -4513,7 +4513,7 @@ pub unsafe extern "C" fn insight_spectral_residual(
                 .with_batch_size((o.batch_size > 0).then_some(o.batch_size as usize));
         }
         match sr.analyze(raw) {
-            Some(points) => {
+            Ok(points) => {
                 let n_anomalies = points.iter().filter(|p| p.is_anomaly).count() as u32;
                 let mut c_points: Vec<CSrPoint> = points
                     .iter()
@@ -4545,12 +4545,10 @@ pub unsafe extern "C" fn insight_spectral_residual(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error(
-                    "invalid input or options (need at least 12 finite observations; \
-                     averaging_window >= 1, judgement_window >= 1, threshold > 0, \
-                     min_zscore >= 0, 0 < sensitivity < 100, batch_size 0 or >= 12)",
-                );
+            // One condition, named -- not the whole rulebook for the caller
+            // to match its own settings against.
+            Err(e) => {
+                set_last_error(&e.to_string());
                 INSIGHT_ERR_INVALID_PARAM
             }
         }
@@ -5730,8 +5728,39 @@ mod tests {
         };
         let rc = unsafe { insight_spectral_residual(data.as_ptr(), 40, &bad, &mut out) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        // The refusal names the option that was wrong. It used to restate
+        // every rule, which left the C# and TS consumers re-validating the
+        // options to be able to say which one their user had to change.
+        let message = unsafe { CStr::from_ptr(insight_last_error()) }
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(message, "threshold must be a finite number > 0");
+        for other in [
+            "sensitivity",
+            "batch_size",
+            "averaging_window",
+            "observations",
+        ] {
+            assert!(!message.contains(other), "{message}");
+        }
+
+        let bad = CSpectralResidualOptions {
+            sensitivity: 100.0,
+            ..options
+        };
+        let rc = unsafe { insight_spectral_residual(data.as_ptr(), 40, &bad, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let message = unsafe { CStr::from_ptr(insight_last_error()) }
+            .to_string_lossy()
+            .into_owned();
+        assert!(message.starts_with("sensitivity"), "{message}");
+
         let rc = unsafe { insight_spectral_residual(data.as_ptr(), 5, ptr::null(), &mut out) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let message = unsafe { CStr::from_ptr(insight_last_error()) }
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(message, "needs at least 12 observations, got 5");
     }
 
     #[test]

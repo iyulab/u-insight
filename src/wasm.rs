@@ -1541,13 +1541,9 @@ pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
     if req.batch_size.is_some() {
         sr = sr.with_batch_size(req.batch_size);
     }
-    let points = sr.analyze(&req.data).ok_or_else(|| {
-        js_err(
-            "invalid configuration or data (need at least 12 finite values; averaging_window >= 1, \
-             judgement_window >= 1, threshold > 0, min_zscore >= 0, 0 < sensitivity < 100, \
-             batch_size >= 12)",
-        )
-    })?;
+    // The crate names the one condition that failed; repeating the whole
+    // rulebook here is what left consumers re-validating the options.
+    let points = sr.analyze(&req.data).map_err(js_err)?;
     let dto = Dto {
         anomalies: points
             .iter()

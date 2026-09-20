@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- **A refused `spectral_residual` reports the one condition that failed.**
+  Both the C entry point and the WASM binding answered every rejected option
+  with the same sentence listing all of the rules, so a consumer could not tell
+  a caller which setting to change and validated the options itself instead.
+  The message now names the option and what it has to satisfy -- `threshold
+  must be a finite number > 0` -- or states the shortfall in observations, or
+  the position of the first non-finite value.
+
 ## [0.20.1] - 2026-09-16
 
 No change to this library. 0.20.0 was accepted by nuget.org but never became
