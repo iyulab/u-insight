@@ -1481,7 +1481,8 @@ pub fn estimate_period(data: JsValue) -> Result<JsValue, JsValue> {
 /// the options default to the paper's (3, 40, 3, 1.5, 70, none).
 ///
 /// # Output
-/// `{ points: [{ index, value, saliency, score, expected, lower, upper, is_anomaly }],
+/// `{ points: [{ index, value, saliency, score, expected, lower, upper, is_anomaly,
+/// near_edge }],
 ///    anomalies: number[] }`
 #[wasm_bindgen]
 pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
@@ -1512,6 +1513,9 @@ pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
         lower: f64,
         upper: f64,
         is_anomaly: bool,
+        /// Within kappa = 5 places of an end of the batch, where the
+        /// transform's own boundary handling moves the saliency most.
+        near_edge: bool,
     }
     #[derive(Serialize)]
     struct Dto {
@@ -1561,6 +1565,7 @@ pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
                 lower: p.lower,
                 upper: p.upper,
                 is_anomaly: p.is_anomaly,
+                near_edge: p.near_edge,
             })
             .collect(),
     };

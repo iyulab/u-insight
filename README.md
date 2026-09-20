@@ -557,7 +557,7 @@ paper's.
 **Output:**
 ```json
 { "points": [{ "index": 4, "value": 6, "saliency": 2.1, "score": 5.3,
-               "expected": 1.0, "lower": 0.9, "upper": 1.1, "is_anomaly": true }],
+               "expected": 1.0, "lower": 0.9, "upper": 1.1, "is_anomaly": true, "near_edge": false }],
   "anomalies": [4] }
 ```
 

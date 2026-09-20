@@ -935,6 +935,7 @@ public sealed class InsightClient : IDisposable
                             Lower = raw[i].Lower,
                             Upper = raw[i].Upper,
                             IsAnomaly = raw[i].IsAnomaly != 0,
+                            NearEdge = raw[i].NearEdge != 0,
                         };
                     }
                 }
@@ -2157,6 +2158,14 @@ public class SrPoint
     public double Upper { get; init; }
     /// <summary>Whether the point is an anomaly.</summary>
     public bool IsAnomaly { get; init; }
+    /// <summary>
+    /// Whether the point lies within kappa = 5 places of an end of its batch,
+    /// where the transform's own boundary handling moves the saliency most.
+    /// A position, not a verdict: a real anomaly there is still reported as
+    /// one, but a flag that appears only at an end is the one worth a second
+    /// look.
+    /// </summary>
+    public bool NearEdge { get; init; }
 }
 
 /// <summary>Result of <see cref="InsightClient.SpectralResidual"/>.</summary>

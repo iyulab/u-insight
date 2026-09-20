@@ -256,6 +256,7 @@ internal static class NativeStructs
         public double Lower;
         public double Upper;
         public byte IsAnomaly;
+        public byte NearEdge;
     }
 
     [StructLayout(LayoutKind.Sequential)]

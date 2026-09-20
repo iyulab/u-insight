@@ -4462,6 +4462,11 @@ pub struct CSrPoint {
     pub upper: f64,
     /// 1 when the point is an anomaly.
     pub is_anomaly: bool,
+    /// 1 when the point lies within kappa = 5 places of an end of its batch,
+    /// where the transform's own boundary handling moves the saliency most.
+    /// A position, not a verdict -- but a lone flag there is the one worth a
+    /// second look.
+    pub near_edge: bool,
 }
 
 /// C-compatible result of `insight_spectral_residual`.
@@ -4526,6 +4531,7 @@ pub unsafe extern "C" fn insight_spectral_residual(
                         lower: p.lower,
                         upper: p.upper,
                         is_anomaly: p.is_anomaly,
+                        near_edge: p.near_edge,
                     })
                     .collect();
                 let n_points = c_points.len() as u32;
@@ -5703,6 +5709,14 @@ mod tests {
         let points = unsafe { slice::from_raw_parts(out.points, 40) };
         assert!(points[25].is_anomaly);
         assert_eq!(points[25].index, 25);
+        // The boundary marker reaches the C record, at both ends of the batch.
+        let marked: Vec<u32> = points
+            .iter()
+            .filter(|p| p.near_edge)
+            .map(|p| p.index)
+            .collect();
+        assert_eq!(marked, vec![0, 1, 2, 3, 4, 35, 36, 37, 38, 39]);
+        assert!(!points[25].near_edge);
         assert!(points[25].value > points[25].upper);
         assert!(points
             .iter()

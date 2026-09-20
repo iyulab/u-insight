@@ -8,6 +8,18 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Added
+
+- **A scored point says whether it sits near a batch boundary** -- `near_edge`
+  on the C record, the WASM object and `SrPoint.NearEdge` in C#. The transform
+  appends five points before running and is circular, so its boundary handling
+  moves the saliency of the five points at *either* end of a batch about eight
+  times as much as the middle. A lone flag there can now be told from a
+  detection in the body of the series. It marks a position, not a verdict.
+
+  The C struct `CSrPoint` gains a trailing `bool`, so a caller that mirrors the
+  layout has to add the field.
+
 ### Fixed
 
 - **`estimate_period` landed below the true period when the series was not a

@@ -1085,6 +1085,13 @@ typedef struct CSrPoint {
    * 1 when the point is an anomaly.
    */
   bool is_anomaly;
+  /**
+   * 1 when the point lies within kappa = 5 places of an end of its batch,
+   * where the transform's own boundary handling moves the saliency most.
+   * A position, not a verdict -- but a lone flag there is the one worth a
+   * second look.
+   */
+  bool near_edge;
 } CSrPoint;
 
 /**
