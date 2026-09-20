@@ -10,6 +10,28 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Added
 
+- **Every exported WASM function declares its return type.** All 17 were
+  `(data: any, config: any) => any`, with the output's field *names* in the doc
+  comment above and the element types only in the README. A consumer read
+  `anomalies` as a list of indices where it is a per-point boolean mask,
+  wrote `as WasmAnomalyResult`, and shipped a panel that printed the same
+  subgroup twelve times and a chart overlay that silently drew nothing. `as`
+  is the only thing that can be written against `any`, and it is exactly the
+  construct that silences this.
+
+  The declarations are derived from the structs the binding already
+  serialises, so there is no second copy to drift: `tsify` emits the interface
+  and `unchecked_return_type` names it in the signature. The runtime path is
+  unchanged -- same serializer, same bytes. An optional field is declared
+  `T | undefined`, which is what the binding sends.
+
+  A publish-path check (`scripts/check-typed-dts.sh`) fails the release if any
+  exported function returns `any`. It runs before publishing rather than
+  beside it in CI, because the two run on the same push.
+
+  Inputs remain `any`; they are validated at the boundary.
+
+
 - **A scored point says whether it sits near a batch boundary** -- `near_edge`
   on the C record, the WASM object and `SrPoint.NearEdge` in C#. The transform
   appends five points before running and is circular, so its boundary handling

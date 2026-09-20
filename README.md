@@ -384,6 +384,32 @@ await init();
 const stats = describe({ col1: [1, 2, 3], col2: [4, 5, 6] });
 ```
 
+### TypeScript
+
+Every exported function declares its return type, and the declarations are
+generated from the same structs the binding serialises, so they cannot drift
+from what it actually returns:
+
+```ts
+export function isolation_forest(data: any, config: any): IsolationForestDto;
+
+export interface IsolationForestDto {
+    scores: number[];
+    anomalies: boolean[];   // a per-point mask, not a list of indices
+    threshold: number;
+    anomaly_count: number;
+    anomaly_fraction: number;
+}
+```
+
+An optional field is declared `T | undefined`, which is what the binding
+sends. Nothing needs an `as` cast -- and a wrong assumption about a result's
+shape is a compile error rather than something that renders incorrectly.
+
+Inputs are still `any`: they are validated at the boundary and a rejected one
+names the field, so a wrong input is an error you can read rather than one
+that compiles.
+
 ### Functions
 
 #### `describe(data) -> [ColumnResult]`

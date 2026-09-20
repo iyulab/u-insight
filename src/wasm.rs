@@ -75,7 +75,7 @@ fn extract_numeric_array(value: &serde_json::Value, name: &str) -> Result<Vec<f6
 // ── Serializable DTOs ─────────────────────────────────────────────────
 
 /// Descriptive statistics for a single numeric column.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct NumericStats {
     count: usize,
     null_count: usize,
@@ -96,7 +96,7 @@ struct NumericStats {
 }
 
 /// Summary statistics for a boolean column.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct BoolStats {
     count: usize,
     null_count: usize,
@@ -107,7 +107,7 @@ struct BoolStats {
 }
 
 /// Summary statistics for a categorical column.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct CatStats {
     count: usize,
     null_count: usize,
@@ -119,7 +119,7 @@ struct CatStats {
 }
 
 /// Summary statistics for a text column.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct TextStats {
     count: usize,
     null_count: usize,
@@ -132,7 +132,7 @@ struct TextStats {
 }
 
 /// Column profile result returned by `describe`.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct ColumnResult {
     name: String,
     data_type: String,
@@ -143,7 +143,7 @@ struct ColumnResult {
 }
 
 /// Result of correlation analysis.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct CorrelationResult {
     /// Column names (in order).
     names: Vec<String>,
@@ -155,7 +155,7 @@ struct CorrelationResult {
     high_pairs: Vec<CorrelationPairDto>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct CorrelationPairDto {
     col_a: String,
     col_b: String,
@@ -164,7 +164,7 @@ struct CorrelationPairDto {
 }
 
 /// Result of K-Means clustering.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct KMeansDto {
     k: usize,
     labels: Vec<usize>,
@@ -175,14 +175,14 @@ struct KMeansDto {
 }
 
 /// Result of silhouette analysis.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct SilhouetteDto {
     avg: f64,
     per_sample: Vec<f64>,
 }
 
 /// Result of PCA.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct PcaDto {
     n_components: usize,
     n_features: usize,
@@ -213,7 +213,7 @@ struct PcaDto {
 ///
 /// # Output
 /// Array of column profile objects, one per column.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "ColumnResult[]")]
 pub fn describe(data: JsValue) -> Result<JsValue, JsValue> {
     use crate::json_parser::JsonParser;
     use crate::profiling::profile_dataframe;
@@ -304,7 +304,7 @@ pub fn describe(data: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// # Output
 /// `{ names, matrix (flattened n×n), n, high_pairs }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "CorrelationResult")]
 pub fn correlation_matrix(data: JsValue) -> Result<JsValue, JsValue> {
     let mut raw: HashMap<String, serde_json::Value> = from_js(data, "data")?;
 
@@ -378,7 +378,7 @@ pub fn correlation_matrix(data: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// # Output
 /// `{ k, labels, centroids, wcss, iterations, cluster_sizes }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "KMeansDto")]
 pub fn kmeans(data: JsValue, k: usize) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
 
@@ -411,7 +411,7 @@ pub fn kmeans(data: JsValue, k: usize) -> Result<JsValue, JsValue> {
 /// (0.0 for singleton-cluster points).
 ///
 /// O(n²) — use sparingly on very large inputs.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "SilhouetteDto")]
 pub fn silhouette(data: JsValue, labels: JsValue, k: usize) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let labels: Vec<usize> = from_js(labels, "labels")?;
@@ -446,7 +446,7 @@ pub fn silhouette(data: JsValue, labels: JsValue, k: usize) -> Result<JsValue, J
 ///
 /// # Output
 /// `{ n_components, n_features, eigenvalues, explained_variance_ratio, ... }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "PcaDto")]
 pub fn pca(data: JsValue, n_components: usize) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
 
@@ -480,7 +480,7 @@ struct DbscanConfigDto {
 }
 
 /// DBSCAN clustering result.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct DbscanDto {
     /// Cluster label per point: null = noise, number = cluster id.
     labels: Vec<Option<usize>>,
@@ -501,7 +501,7 @@ struct DbscanDto {
 /// # Output
 ///
 /// `{ labels, n_clusters, noise_count, cluster_sizes, core_points }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "DbscanDto")]
 pub fn dbscan(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let cfg: DbscanConfigDto = from_js(config, "config")?;
@@ -544,7 +544,7 @@ fn default_linkage() -> String {
 }
 
 /// A single merge step in the dendrogram.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct MergeDto {
     cluster_a: usize,
     cluster_b: usize,
@@ -553,7 +553,7 @@ struct MergeDto {
 }
 
 /// Hierarchical clustering result.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct HierarchicalDto {
     merges: Vec<MergeDto>,
     labels: Option<Vec<usize>>,
@@ -572,7 +572,7 @@ struct HierarchicalDto {
 /// # Output
 ///
 /// `{ merges, labels, n_clusters }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "HierarchicalDto")]
 pub fn hierarchical(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let cfg: HierarchicalConfigDto = from_js(config, "config")?;
@@ -651,7 +651,7 @@ fn default_seed() -> Option<u64> {
 }
 
 /// Isolation Forest anomaly detection result.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct IsolationForestDto {
     scores: Vec<f64>,
     anomalies: Vec<bool>,
@@ -671,7 +671,7 @@ struct IsolationForestDto {
 /// # Output
 ///
 /// `{ scores, anomalies, threshold, anomaly_count, anomaly_fraction }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "IsolationForestDto")]
 pub fn isolation_forest(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let cfg: IsolationForestConfigDto = from_js(config, "config")?;
@@ -720,7 +720,7 @@ fn default_lof_threshold() -> f64 {
 }
 
 /// LOF anomaly detection result.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct LofDto {
     scores: Vec<f64>,
     anomalies: Vec<bool>,
@@ -740,7 +740,7 @@ struct LofDto {
 /// # Output
 ///
 /// `{ scores, anomalies, threshold, anomaly_count, anomaly_fraction }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "LofDto")]
 pub fn lof(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let cfg: LofConfigDto = from_js(config, "config")?;
@@ -814,13 +814,13 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct EcdfDto {
     values: Vec<f64>,
     probabilities: Vec<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct HistogramDto {
     n_bins: usize,
     bin_width: f64,
@@ -829,20 +829,20 @@ struct HistogramDto {
     method: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct QQPlotDto {
     theoretical: Vec<f64>,
     sample: Vec<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct NormalityTestDto {
     statistic: f64,
     p_value: f64,
     rejected: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct NormalityDto {
     ks_test: Option<NormalityTestDto>,
     jarque_bera: Option<NormalityTestDto>,
@@ -852,7 +852,7 @@ struct NormalityDto {
     significance_level: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct FitResultDto {
     distribution: String,
     parameters: Vec<(String, f64)>,
@@ -862,7 +862,7 @@ struct FitResultDto {
     n_params: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct DistributionAnalysisDto {
     n: usize,
     ecdf: Option<EcdfDto>,
@@ -889,7 +889,7 @@ struct DistributionAnalysisDto {
 /// # Output
 ///
 /// `{ n, ecdf, histogram, qq_plot, normality, fits }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "DistributionAnalysisDto")]
 pub fn distribution_analysis(data: JsValue, config: JsValue) -> Result<JsValue, JsValue> {
     let data: Vec<f64> = from_js(data, "data")?;
     let cfg: DistributionConfigDto = from_js(config, "config")?;
@@ -974,7 +974,7 @@ struct RegressionInputDto {
 }
 
 /// Regression analysis result.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct RegressionDto {
     target_name: String,
     predictor_names: Vec<String>,
@@ -1002,7 +1002,7 @@ struct RegressionDto {
 /// # Output
 ///
 /// `{ target_name, predictor_names, r_squared, adj_r_squared, coefficients, p_values, vif, f_p_value }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "RegressionDto")]
 pub fn regression(data: JsValue) -> Result<JsValue, JsValue> {
     let input: RegressionInputDto = from_js(data, "data")?;
 
@@ -1080,7 +1080,7 @@ fn default_fi_seed() -> u64 {
 }
 
 /// A single feature's importance result.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct FeatureImportanceItemDto {
     name: String,
     index: usize,
@@ -1094,7 +1094,7 @@ struct FeatureImportanceItemDto {
 }
 
 /// Feature importance result.
-#[derive(Serialize)]
+#[derive(Serialize, tsify::Tsify)]
 struct FeatureImportanceDto {
     method: String,
     features: Vec<FeatureImportanceItemDto>,
@@ -1127,7 +1127,7 @@ struct FeatureImportanceDto {
 /// # Output
 ///
 /// `{ method, features: [{ name, index, score, std_dev?, p_value? }], baseline_score?, selected_indices? }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "FeatureImportanceDto")]
 pub fn feature_importance(data: JsValue) -> Result<JsValue, JsValue> {
     let input: FeatureImportanceInputDto = from_js(data, "data")?;
 
@@ -1244,6 +1244,14 @@ pub fn feature_importance(data: JsValue) -> Result<JsValue, JsValue> {
 
 // ── Multicollinearity Diagnostics (VIF / Condition Number) ───────────
 
+#[derive(Serialize, tsify::Tsify)]
+struct VifDto {
+    vif_per_column: Vec<f64>,
+    high_vif_columns: Vec<u32>,
+    threshold: f64,
+    names: Vec<String>,
+}
+
 /// Variance Inflation Factor diagnostics for column-major numeric data.
 ///
 /// # Input
@@ -1254,7 +1262,7 @@ pub fn feature_importance(data: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// # Output
 /// `{ vif_per_column, high_vif_columns, threshold, names }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "VifDto")]
 pub fn vif_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
     let mut raw: HashMap<String, serde_json::Value> = from_js(data, "data")?;
 
@@ -1276,20 +1284,19 @@ pub fn vif_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
 
     let r = crate::analysis::vif_analysis(&columns, &names, threshold).map_err(js_err)?;
 
-    #[derive(Serialize)]
-    struct Dto {
-        vif_per_column: Vec<f64>,
-        high_vif_columns: Vec<u32>,
-        threshold: f64,
-        names: Vec<String>,
-    }
-    serde_wasm_bindgen::to_value(&Dto {
+    serde_wasm_bindgen::to_value(&VifDto {
         vif_per_column: r.vif_per_column,
         high_vif_columns: r.high_vif_columns,
         threshold: r.threshold,
         names: r.names,
     })
     .map_err(js_err)
+}
+
+#[derive(Serialize, tsify::Tsify)]
+struct ConditionNumberDto {
+    condition_number: f64,
+    names: Vec<String>,
 }
 
 /// 2-norm condition number of the sample covariance matrix.
@@ -1304,7 +1311,7 @@ pub fn vif_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
 ///
 /// Standard threshold: `cond > 30` indicates multicollinearity (Belsley 1991).
 /// Returns `Infinity` for numerically singular input.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "ConditionNumberDto")]
 pub fn condition_number_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
     let raw: HashMap<String, Vec<f64>> = from_js(data, "data")?;
 
@@ -1318,12 +1325,7 @@ pub fn condition_number_diagnostic(data: JsValue) -> Result<JsValue, JsValue> {
 
     let cond = crate::analysis::condition_number(&columns, &names).map_err(js_err)?;
 
-    #[derive(Serialize)]
-    struct Dto {
-        condition_number: f64,
-        names: Vec<String>,
-    }
-    serde_wasm_bindgen::to_value(&Dto {
+    serde_wasm_bindgen::to_value(&ConditionNumberDto {
         condition_number: cond,
         names,
     })
@@ -1357,21 +1359,21 @@ fn default_outlier_method() -> String {
     "iqr".to_string()
 }
 
-#[wasm_bindgen]
-pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
-    #[derive(Serialize)]
-    struct Dto {
-        method: String,
-        indices: Vec<usize>,
-        scores: Vec<f64>,
-        count: usize,
-        pct: f64,
-        lower_fence: f64,
-        upper_fence: f64,
-        center: f64,
-        spread: f64,
-    }
+#[derive(Serialize, tsify::Tsify)]
+struct UnivariateOutlierDto {
+    method: String,
+    indices: Vec<usize>,
+    scores: Vec<f64>,
+    count: usize,
+    pct: f64,
+    lower_fence: f64,
+    upper_fence: f64,
+    center: f64,
+    spread: f64,
+}
 
+#[wasm_bindgen(unchecked_return_type = "UnivariateOutlierDto")]
+pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
     let req: OutlierInputDto = from_js(data, "data")?;
 
     use crate::profiling::{detect_outliers_slice, OutlierMethod};
@@ -1391,7 +1393,7 @@ pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
         OutlierMethod::ModifiedZscore => "modified_zscore",
     };
 
-    let dto = Dto {
+    let dto = UnivariateOutlierDto {
         method: method_str.to_string(),
         indices: r.indices,
         scores: r.scores,
@@ -1408,6 +1410,30 @@ pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
 
 // ── Time series ──────────────────────────────────────────────────────
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SeasonalityInputDto {
+    data: Vec<f64>,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+struct PeriodCandidateDto {
+    period: usize,
+    acf: f64,
+    bin: usize,
+    power: f64,
+    power_share: f64,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+struct SeasonalityDto {
+    period: Option<usize>,
+    candidates: Vec<PeriodCandidateDto>,
+    n: usize,
+    acf_threshold: f64,
+    power_threshold: f64,
+}
+
 /// Estimate the dominant period of a univariate series (AutoPeriod —
 /// Vlachos, Yu & Castelli 2005: permutation-thresholded periodogram peaks
 /// refined on the autocorrelation function; deterministic for a series).
@@ -1422,41 +1448,20 @@ pub fn detect_univariate_outliers(data: JsValue) -> Result<JsValue, JsValue> {
 /// `period` is `null` — explicitly, not an error — when no periodicity passes
 /// both stages (a constant, a pure trend, white noise). Only periods from 2 to
 /// `n / 2` are admissible.
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "SeasonalityDto")]
 pub fn estimate_period(data: JsValue) -> Result<JsValue, JsValue> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Input {
-        data: Vec<f64>,
-    }
-    #[derive(Serialize)]
-    struct CandidateDto {
-        period: usize,
-        acf: f64,
-        bin: usize,
-        power: f64,
-        power_share: f64,
-    }
-    #[derive(Serialize)]
-    struct Dto {
-        period: Option<usize>,
-        candidates: Vec<CandidateDto>,
-        n: usize,
-        acf_threshold: f64,
-        power_threshold: f64,
-    }
-    let req: Input = from_js(data, "data")?;
+    let req: SeasonalityInputDto = from_js(data, "data")?;
     if let Some(i) = req.data.iter().position(|x| !x.is_finite()) {
         return Err(js_err(format!("data[{i}] is not a finite number")));
     }
     let r = u_analytics::seasonality::estimate_period(&req.data)
         .ok_or_else(|| js_err("data must have at least 8 observations"))?;
-    let dto = Dto {
+    let dto = SeasonalityDto {
         period: r.period,
         candidates: r
             .candidates
             .into_iter()
-            .map(|c| CandidateDto {
+            .map(|c| PeriodCandidateDto {
                 period: c.period,
                 acf: c.acf,
                 bin: c.bin,
@@ -1469,6 +1474,45 @@ pub fn estimate_period(data: JsValue) -> Result<JsValue, JsValue> {
         power_threshold: r.power_threshold,
     };
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpectralResidualInputDto {
+    data: Vec<f64>,
+    #[serde(default)]
+    averaging_window: Option<usize>,
+    #[serde(default)]
+    judgement_window: Option<usize>,
+    #[serde(default)]
+    threshold: Option<f64>,
+    #[serde(default)]
+    min_zscore: Option<f64>,
+    #[serde(default)]
+    sensitivity: Option<f64>,
+    #[serde(default)]
+    batch_size: Option<usize>,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+struct SrPointDto {
+    index: usize,
+    value: f64,
+    saliency: f64,
+    score: f64,
+    expected: f64,
+    lower: f64,
+    upper: f64,
+    is_anomaly: bool,
+    /// Within kappa = 5 places of an end of the batch, where the
+    /// transform's own boundary handling moves the saliency most.
+    near_edge: bool,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+struct SpectralResidualDto {
+    points: Vec<SrPointDto>,
+    anomalies: Vec<usize>,
 }
 
 /// Score every point of a series for anomalies by spectral residual saliency
@@ -1484,45 +1528,9 @@ pub fn estimate_period(data: JsValue) -> Result<JsValue, JsValue> {
 /// `{ points: [{ index, value, saliency, score, expected, lower, upper, is_anomaly,
 /// near_edge }],
 ///    anomalies: number[] }`
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "SpectralResidualDto")]
 pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Input {
-        data: Vec<f64>,
-        #[serde(default)]
-        averaging_window: Option<usize>,
-        #[serde(default)]
-        judgement_window: Option<usize>,
-        #[serde(default)]
-        threshold: Option<f64>,
-        #[serde(default)]
-        min_zscore: Option<f64>,
-        #[serde(default)]
-        sensitivity: Option<f64>,
-        #[serde(default)]
-        batch_size: Option<usize>,
-    }
-    #[derive(Serialize)]
-    struct PointDto {
-        index: usize,
-        value: f64,
-        saliency: f64,
-        score: f64,
-        expected: f64,
-        lower: f64,
-        upper: f64,
-        is_anomaly: bool,
-        /// Within kappa = 5 places of an end of the batch, where the
-        /// transform's own boundary handling moves the saliency most.
-        near_edge: bool,
-    }
-    #[derive(Serialize)]
-    struct Dto {
-        points: Vec<PointDto>,
-        anomalies: Vec<usize>,
-    }
-    let req: Input = from_js(data, "data")?;
+    let req: SpectralResidualInputDto = from_js(data, "data")?;
     if let Some(i) = req.data.iter().position(|x| !x.is_finite()) {
         return Err(js_err(format!("data[{i}] is not a finite number")));
     }
@@ -1548,7 +1556,7 @@ pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
     // The crate names the one condition that failed; repeating the whole
     // rulebook here is what left consumers re-validating the options.
     let points = sr.analyze(&req.data).map_err(js_err)?;
-    let dto = Dto {
+    let dto = SpectralResidualDto {
         anomalies: points
             .iter()
             .filter(|p| p.is_anomaly)
@@ -1556,7 +1564,7 @@ pub fn spectral_residual(data: JsValue) -> Result<JsValue, JsValue> {
             .collect(),
         points: points
             .into_iter()
-            .map(|p| PointDto {
+            .map(|p| SrPointDto {
                 index: p.index,
                 value: p.value,
                 saliency: p.saliency,
