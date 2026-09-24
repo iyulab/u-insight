@@ -908,6 +908,12 @@ public sealed class InsightClient : IDisposable
                 }
                 else
                 {
+                    // The C struct spells "no batch size" as 0, so an explicit 0 would
+                    // silently become one batch. It cannot be passed on; refuse it here.
+                    if (options.BatchSize == 0)
+                        throw InsightException.FromCode(Native.INSIGHT_ERR_INVALID_PARAM,
+                            "batch_size = 0 cannot be passed; leave it null for a single batch",
+                            "batch_size");
                     var o = new NativeStructs.CSpectralResidualOptions
                     {
                         AveragingWindow = options.AveragingWindow,

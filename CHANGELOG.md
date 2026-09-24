@@ -25,6 +25,11 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   `INSIGHT_ERR_INSUFFICIENT_DATA` and a non-finite value
   `INSIGHT_ERR_INVALID_INPUT`, so C#'s `Category` says `InsufficientData` /
   `InvalidInput` instead of `InvalidParameter`.
+- C#: `SpectralResidualOptions { BatchSize = 0 }` ran as a single batch. The C
+  struct spells "no batch size" as 0, so the explicit 0 was indistinguishable
+  from leaving it unset; `SpectralResidual` now refuses it
+  (`InvalidParameter`, `Parameter` = `batch_size`) -- leave it `null` for one
+  batch.
 
 - **The Mahalanobis outlier threshold is the exact chi-squared quantile.** It
   was the Wilson-Hilferty cube-root approximation, which is off most where
