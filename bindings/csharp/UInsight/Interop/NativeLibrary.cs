@@ -67,6 +67,9 @@ internal static partial class NativeLibrary
     public static partial IntPtr insight_last_error();
 
     [LibraryImport(LibraryName)]
+    public static partial IntPtr insight_last_error_parameter();
+
+    [LibraryImport(LibraryName)]
     public static partial void insight_clear_error();
 
     #endregion
@@ -448,7 +451,16 @@ internal static partial class NativeLibrary
     public static void ThrowIfFailed(int code)
     {
         if (code == INSIGHT_OK) return;
-        throw InsightException.FromCode(code, GetLastError());
+        throw InsightException.FromCode(code, GetLastError(), GetLastErrorParameter());
+    }
+
+    /// <summary>
+    /// Gets the name of the parameter the last native error is about, or null.
+    /// </summary>
+    public static string? GetLastErrorParameter()
+    {
+        var ptr = insight_last_error_parameter();
+        return ptr != IntPtr.Zero ? Marshal.PtrToStringUTF8(ptr) : null;
     }
 
     #endregion

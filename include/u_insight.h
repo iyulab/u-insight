@@ -1123,7 +1123,20 @@ typedef struct CSpectralResidualResult {
 INSIGHT_API const char *insight_last_error(void);
 
 /**
- * Clears the last error message.
+ * Returns the name of the parameter the last error is about, or null when it
+ * is not about one. Set together with an `INSIGHT_ERR_INVALID_PARAM` whose
+ * cause is a single named argument or option -- `chi2_quantile`, or a spectral
+ * residual option such as `threshold` or `batch_size` -- so a caller can
+ * branch on it or map it to its own name without reading the message.
+ * The returned string is valid until the next FFI call on this thread.
+ *
+ * # Safety
+ * The caller must not free the returned pointer.
+ */
+INSIGHT_API const char *insight_last_error_parameter(void);
+
+/**
+ * Clears the last error message and parameter name.
  */
 INSIGHT_API void insight_clear_error(void);
 

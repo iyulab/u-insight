@@ -34,6 +34,16 @@ public class InsightException : Exception
     public int ErrorCode { get; }
 
     /// <summary>
+    /// The name of the argument or option the error is about, as the native
+    /// library spells it (<c>chi2_quantile</c>, <c>threshold</c>,
+    /// <c>batch_size</c>, ...), or <c>null</c> when the error is not about one
+    /// named parameter. Set with <see cref="InsightErrorCategory.InvalidParameter"/>,
+    /// so a caller can branch on it or map it to its own name without parsing
+    /// <see cref="Exception.Message"/>.
+    /// </summary>
+    public string? Parameter { get; }
+
+    /// <summary>
     /// Broad error category derived from <see cref="ErrorCode"/>.
     /// </summary>
     public InsightErrorCategory Category => ErrorCode switch
@@ -80,9 +90,16 @@ public class InsightException : Exception
     /// We surface that message verbatim and rely on <see cref="Category"/> for typed classification,
     /// avoiding "Degenerate data: degenerate data: ..." prefix duplication.
     /// </remarks>
-    internal static InsightException FromCode(int code, string? nativeError)
+    internal static InsightException FromCode(int code, string? nativeError, string? parameter = null)
     {
         var msg = nativeError ?? Interop.NativeLibrary.GetErrorMessage(code);
-        return new InsightException(code, msg);
+        return new InsightException(code, msg, parameter);
+    }
+
+    private InsightException(int errorCode, string message, string? parameter)
+        : base(message)
+    {
+        ErrorCode = errorCode;
+        Parameter = parameter;
     }
 }

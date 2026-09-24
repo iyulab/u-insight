@@ -305,6 +305,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | Function | Description |
 |----------|-------------|
 | `insight_last_error` | Last error message (thread-local) |
+| `insight_last_error_parameter` | Name of the argument or option the last `INSIGHT_ERR_INVALID_PARAM` is about (`chi2_quantile`, `threshold`, …), or null (thread-local) |
 | `insight_clear_error` | Clear error state |
 | `insight_version` | Library version string |
 
@@ -334,7 +335,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 - `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 67 FFI functions
 - `Interop/NativeStructs.cs` — `[StructLayout]` mappings for all 35 C structs
 - `InsightClient.cs` — High-level managed API (automatic memory management)
-- `InsightException.cs` — Error code to exception conversion
+- `InsightException.cs` — Error code to exception conversion; `Category` classifies the error and `Parameter` names the argument or option an invalid-parameter error is about
 
 ## Test Status
 

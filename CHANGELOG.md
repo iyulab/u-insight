@@ -8,7 +8,23 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Added
+
+- `insight_last_error_parameter()` (C ABI) and `InsightException.Parameter`
+  (C#): the name of the argument or option an `INSIGHT_ERR_INVALID_PARAM`
+  error is about -- `chi2_quantile`, or a spectral residual option such as
+  `threshold` or `batch_size` -- and null otherwise. The core already carried
+  the name; across the C ABI only the message survived, so a caller with its
+  own option names had to parse the message, or restate the rules, to tell
+  its user which setting to change.
+
 ### Fixed
+
+- `insight_spectral_residual` reported every failure as
+  `INSIGHT_ERR_INVALID_PARAM`. Too short a series is now
+  `INSIGHT_ERR_INSUFFICIENT_DATA` and a non-finite value
+  `INSIGHT_ERR_INVALID_INPUT`, so C#'s `Category` says `InsufficientData` /
+  `InvalidInput` instead of `InvalidParameter`.
 
 - **The Mahalanobis outlier threshold is the exact chi-squared quantile.** It
   was the Wilson-Hilferty cube-root approximation, which is off most where

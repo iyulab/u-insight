@@ -51,6 +51,7 @@ pub const INSIGHT_ERR_COMPUTATION_FAILED: i32 = -8;
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
+    static LAST_ERROR_PARAMETER: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
 
 fn error_to_code(e: &crate::error::InsightError) -> i32 {
@@ -61,16 +62,31 @@ fn error_to_code(e: &crate::error::InsightError) -> i32 {
         | InsightError::ColumnNotFound { .. }
         | InsightError::DimensionMismatch { .. } => INSIGHT_ERR_INVALID_INPUT,
         InsightError::InsufficientData { .. } => INSIGHT_ERR_INSUFFICIENT_DATA,
-        InsightError::InvalidParameter { .. } => INSIGHT_ERR_INVALID_PARAM,
+        InsightError::InvalidParameter { name, .. } => {
+            set_last_error_parameter(name);
+            INSIGHT_ERR_INVALID_PARAM
+        }
         InsightError::DegenerateData { .. } => INSIGHT_ERR_DEGENERATE_DATA,
         InsightError::ComputationFailed { .. } => INSIGHT_ERR_COMPUTATION_FAILED,
         InsightError::Io(_) => INSIGHT_ERR_ANALYSIS_FAILED,
     }
 }
 
+/// Records the error message. Clears the parameter name: an error is about a
+/// named parameter only when [`set_last_error_parameter`] says so afterwards.
 fn set_last_error(msg: &str) {
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = CString::new(msg).ok();
+    });
+    LAST_ERROR_PARAMETER.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
+/// Names the parameter the last error is about (call after [`set_last_error`]).
+fn set_last_error_parameter(name: &str) {
+    LAST_ERROR_PARAMETER.with(|cell| {
+        *cell.borrow_mut() = CString::new(name).ok();
     });
 }
 
@@ -90,10 +106,33 @@ pub extern "C" fn insight_last_error() -> *const c_char {
     })
 }
 
-/// Clears the last error message.
+/// Returns the name of the parameter the last error is about, or null when it
+/// is not about one. Set together with an `INSIGHT_ERR_INVALID_PARAM` whose
+/// cause is a single named argument or option -- `chi2_quantile`, or a spectral
+/// residual option such as `threshold` or `batch_size` -- so a caller can
+/// branch on it or map it to its own name without reading the message.
+/// The returned string is valid until the next FFI call on this thread.
+///
+/// # Safety
+/// The caller must not free the returned pointer.
+#[no_mangle]
+pub extern "C" fn insight_last_error_parameter() -> *const c_char {
+    LAST_ERROR_PARAMETER.with(|cell| {
+        let borrow = cell.borrow();
+        match borrow.as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => ptr::null(),
+        }
+    })
+}
+
+/// Clears the last error message and parameter name.
 #[no_mangle]
 pub extern "C" fn insight_clear_error() {
     LAST_ERROR.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+    LAST_ERROR_PARAMETER.with(|cell| {
         *cell.borrow_mut() = None;
     });
 }
@@ -4551,10 +4590,21 @@ pub unsafe extern "C" fn insight_spectral_residual(
                 INSIGHT_OK
             }
             // One condition, named -- not the whole rulebook for the caller
-            // to match its own settings against.
+            // to match its own settings against. The option's name also goes
+            // out on its own (`insight_last_error_parameter`), and a series
+            // that is too short or not finite is a data problem, not an option.
             Err(e) => {
+                use u_analytics::detection::SpectralResidualError as E;
                 set_last_error(&e.to_string());
-                INSIGHT_ERR_INVALID_PARAM
+                match e {
+                    E::OptionOutOfRange { option, .. } => {
+                        set_last_error_parameter(option);
+                        INSIGHT_ERR_INVALID_PARAM
+                    }
+                    E::TooFewObservations { .. } => INSIGHT_ERR_INSUFFICIENT_DATA,
+                    E::ValueNotFinite { .. } => INSIGHT_ERR_INVALID_INPUT,
+                    _ => INSIGHT_ERR_INVALID_PARAM,
+                }
             }
         }
     });
@@ -5748,6 +5798,9 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert_eq!(message, "threshold must be a finite number > 0");
+        // ...and hands the option's name out on its own, so a caller mapping it
+        // to its own naming does not have to parse the message.
+        assert_eq!(last_error_parameter().as_deref(), Some("threshold"));
         for other in [
             "sensitivity",
             "batch_size",
@@ -5767,13 +5820,59 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert!(message.starts_with("sensitivity"), "{message}");
+        assert_eq!(last_error_parameter().as_deref(), Some("sensitivity"));
 
+        // Too short a series is a data problem, not an option: it used to come
+        // back as INSIGHT_ERR_INVALID_PARAM, which C# reports as
+        // InvalidParameter. No parameter is named.
         let rc = unsafe { insight_spectral_residual(data.as_ptr(), 5, ptr::null(), &mut out) };
-        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
         let message = unsafe { CStr::from_ptr(insight_last_error()) }
             .to_string_lossy()
             .into_owned();
         assert_eq!(message, "needs at least 12 observations, got 5");
+        assert_eq!(last_error_parameter(), None);
+
+        let mut nan = data.clone();
+        nan[7] = f64::NAN;
+        let rc = unsafe { insight_spectral_residual(nan.as_ptr(), 40, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+        assert_eq!(last_error_parameter(), None);
+    }
+
+    fn last_error_parameter() -> Option<String> {
+        let ptr = insight_last_error_parameter();
+        (!ptr.is_null()).then(|| {
+            unsafe { CStr::from_ptr(ptr) }
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
+
+    /// An `InvalidParameter` from the core names its parameter across the C
+    /// ABI; the next error that is not about one clears it.
+    #[test]
+    fn ffi_last_error_parameter_follows_invalid_parameter() {
+        let data: Vec<f64> = (0..40).map(|i| ((i * 37) % 11) as f64).collect();
+        let mut out = CMahalanobisResult {
+            distances: ptr::null_mut(),
+            anomalies: ptr::null_mut(),
+            n: 0,
+            threshold: 0.0,
+            outlier_count: 0,
+        };
+        let rc = unsafe { insight_mahalanobis(data.as_ptr(), 20, 2, 1.5, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_parameter().as_deref(), Some("chi2_quantile"));
+
+        let rc = unsafe { insight_mahalanobis(ptr::null(), 20, 2, 0.975, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+        assert_eq!(last_error_parameter(), None);
+
+        let rc = unsafe { insight_mahalanobis(data.as_ptr(), 20, 2, 1.5, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        insight_clear_error();
+        assert_eq!(last_error_parameter(), None);
     }
 
     #[test]
