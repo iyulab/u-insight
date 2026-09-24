@@ -1328,6 +1328,11 @@ pub struct CMahalanobisResult {
 
 /// Runs Mahalanobis distance multivariate outlier detection on row-major data.
 ///
+/// `chi2_quantile` is the probability whose chi-squared quantile (with
+/// `n_cols` degrees of freedom) is the outlier threshold, e.g. 0.975. A value
+/// outside (0, 1) is refused with `INSIGHT_ERR_INVALID_PARAM`; it used to be
+/// replaced by 0.975 without notice.
+///
 /// # Safety
 /// - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
 /// - `out` must point to a valid `CMahalanobisResult`.
@@ -1358,13 +1363,7 @@ pub unsafe extern "C" fn insight_mahalanobis(
             .map(|i| raw[i * nc..(i + 1) * nc].to_vec())
             .collect();
 
-        let config = crate::mahalanobis::MahalanobisConfig {
-            chi2_quantile: if chi2_quantile > 0.0 && chi2_quantile < 1.0 {
-                chi2_quantile
-            } else {
-                0.975
-            },
-        };
+        let config = crate::mahalanobis::MahalanobisConfig { chi2_quantile };
 
         match crate::mahalanobis::mahalanobis(&points, &config) {
             Ok(r) => {

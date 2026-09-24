@@ -1384,6 +1384,11 @@ int32_t insight_regression(const double *x,
 /**
  * Runs Mahalanobis distance multivariate outlier detection on row-major data.
  *
+ * `chi2_quantile` is the probability whose chi-squared quantile (with
+ * `n_cols` degrees of freedom) is the outlier threshold, e.g. 0.975. A value
+ * outside (0, 1) is refused with `INSIGHT_ERR_INVALID_PARAM`; it used to be
+ * replaced by 0.975 without notice.
+ *
  * # Safety
  * - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
  * - `out` must point to a valid `CMahalanobisResult`.

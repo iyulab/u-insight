@@ -146,6 +146,17 @@ pub fn mahalanobis(
         });
     }
 
+    // A probability outside (0, 1) has no chi-squared quantile; left unchecked
+    // the threshold is NaN, no distance exceeds it, and the result reports no
+    // outliers as if the data had none.
+    let q = config.chi2_quantile;
+    if !(q > 0.0 && q < 1.0) {
+        return Err(InsightError::InvalidParameter {
+            name: "chi2_quantile".into(),
+            message: format!("must be strictly between 0 and 1, got {q}"),
+        });
+    }
+
     // Validate dimensions and values
     for (row_idx, point) in data.iter().enumerate() {
         if point.len() != p {
@@ -241,7 +252,7 @@ pub fn mahalanobis(
     }
 
     // Compute chi-squared threshold
-    let threshold = chi2_quantile(p as f64, config.chi2_quantile);
+    let threshold = u_numflow::special::chi_squared_quantile(q, p as f64);
 
     // Classify outliers
     let anomalies: Vec<bool> = distances.iter().map(|&d| d > threshold).collect();
@@ -260,31 +271,6 @@ pub fn mahalanobis(
         outlier_fraction,
         mean,
     })
-}
-
-// ── Chi-squared quantile (Wilson-Hilferty approximation) ─────────────
-
-/// Approximate chi-squared quantile using Wilson-Hilferty normal approximation.
-///
-/// For df degrees of freedom and probability p:
-/// χ²_p ≈ df * (1 - 2/(9*df) + z_p * sqrt(2/(9*df)))^3
-///
-/// where z_p = Φ⁻¹(p) is the standard normal quantile.
-fn chi2_quantile(df: f64, p: f64) -> f64 {
-    if df <= 0.0 || p <= 0.0 || p >= 1.0 {
-        return f64::NAN;
-    }
-
-    let z = u_numflow::special::inverse_normal_cdf(p);
-    let term = 2.0 / (9.0 * df);
-    let cube = 1.0 - term + z * term.sqrt();
-
-    // Handle edge case where cube might be negative
-    if cube <= 0.0 {
-        return 0.0;
-    }
-
-    df * cube * cube * cube
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -514,27 +500,50 @@ mod tests {
         assert!(strict.threshold >= lenient.threshold);
     }
 
+    /// The threshold is the chi-squared quantile to table precision
+    /// (NIST/SEMATECH §1.3.6.7.4), including one and two dimensions, where the
+    /// Wilson-Hilferty approximation this used to rely on was 1.9 % low at
+    /// 0.975 and 3.0 % high at 0.999 -- off in opposite directions, so it
+    /// flagged too many points at one level and too few at the other.
     #[test]
-    fn chi2_quantile_known_values() {
-        // χ²(2, 0.95) ≈ 5.991
-        let q = chi2_quantile(2.0, 0.95);
-        assert!(
-            (q - 5.991).abs() < 0.1,
-            "chi2(2, 0.95) expected ~5.991, got {q}"
-        );
+    fn threshold_is_the_exact_chi_squared_quantile() {
+        let cases = [
+            (1, 0.975, 5.024),
+            (1, 0.999, 10.828),
+            (2, 0.95, 5.991),
+            (2, 0.975, 7.378),
+            (3, 0.975, 9.348),
+            (5, 0.975, 12.833),
+        ];
+        for (dim, q, want) in cases {
+            let data: Vec<Vec<f64>> = (0..40)
+                .map(|i| {
+                    (0..dim)
+                        .map(|j| ((i * (j + 3) * 7919) % 101) as f64 / 10.0)
+                        .collect()
+                })
+                .collect();
+            let r = mahalanobis(&data, &MahalanobisConfig::default().chi2_quantile(q)).unwrap();
+            assert!(
+                (r.threshold - want).abs() < 1e-3,
+                "dim {dim}, q {q}: threshold {} want {want}",
+                r.threshold
+            );
+        }
+    }
 
-        // χ²(1, 0.95) ≈ 3.841
-        let q1 = chi2_quantile(1.0, 0.95);
-        assert!(
-            (q1 - 3.841).abs() < 0.1,
-            "chi2(1, 0.95) expected ~3.841, got {q1}"
-        );
-
-        // χ²(5, 0.975) ≈ 12.833
-        let q5 = chi2_quantile(5.0, 0.975);
-        assert!(
-            (q5 - 12.833).abs() < 0.2,
-            "chi2(5, 0.975) expected ~12.833, got {q5}"
-        );
+    /// A quantile outside (0, 1) used to yield a NaN threshold that no distance
+    /// exceeds -- a result claiming there were no outliers.
+    #[test]
+    fn quantile_outside_the_unit_interval_is_refused() {
+        let data = make_cluster(&[0.0, 0.0], 30, 1.0);
+        for q in [0.0, 1.0, 1.5, -0.1, f64::NAN] {
+            match mahalanobis(&data, &MahalanobisConfig::default().chi2_quantile(q)) {
+                Err(InsightError::InvalidParameter { name, .. }) => {
+                    assert_eq!(name, "chi2_quantile")
+                }
+                other => panic!("q = {q}: {other:?}"),
+            }
+        }
     }
 }

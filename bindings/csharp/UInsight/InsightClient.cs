@@ -461,6 +461,14 @@ public sealed class InsightClient : IDisposable
     /// <summary>
     /// Runs Mahalanobis distance outlier detection.
     /// </summary>
+    /// <param name="data">Rows are observations, columns are variables.</param>
+    /// <param name="chi2Quantile">
+    /// The probability whose chi-squared quantile (degrees of freedom = number of
+    /// columns) is the outlier threshold. Must lie strictly between 0 and 1.
+    /// </param>
+    /// <exception cref="InsightException">
+    /// <paramref name="chi2Quantile"/> is outside (0, 1), or the data cannot be analysed.
+    /// </exception>
     public MahalanobisResult Mahalanobis(double[,] data, double chi2Quantile = 0.975)
     {
         var (nRows, nCols, flat) = Flatten(data);

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Fixed
+
+- **The Mahalanobis outlier threshold is the exact chi-squared quantile.** It
+  was the Wilson-Hilferty cube-root approximation, which is off most where
+  exploratory data sits -- one or two variables: 1.9 % low at the default
+  0.975 (too many points flagged) and 3.0 % high at 0.999 (too few). The
+  threshold now comes from the chi-squared quantile in `u-numflow`, and
+  `threshold` values change for small dimension counts.
+- **A `chi2_quantile` outside (0, 1) is refused** with `InvalidParameter`.
+  The core computed a NaN threshold that no distance exceeds and reported no
+  outliers; the C FFI (and so the C# `Mahalanobis`) silently replaced the value
+  with 0.975. Both now return the error (`INSIGHT_ERR_INVALID_PARAM` across the
+  C ABI, `InsightException` in C#).
+
 ## [0.21.0] - 2026-09-20
 
 ### Added
