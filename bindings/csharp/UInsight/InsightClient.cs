@@ -186,7 +186,8 @@ public sealed class InsightClient : IDisposable
 
     /// <summary>
     /// Runs Hierarchical Agglomerative clustering.
-    /// Linkage: 0=Single, 1=Complete, 2=Average, 3=Ward.
+    /// Linkage: 0=Single, 1=Complete, 2=Average, 3=Ward. Any other value throws
+    /// <see cref="InsightException"/> with <c>Parameter</c> = <c>"linkage"</c>.
     /// </summary>
     public HierarchicalResult Hierarchical(double[,] data, uint linkage, uint nClusters)
     {

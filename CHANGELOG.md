@@ -8,6 +8,36 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- **Every exported WASM function declares its parameter types.** Inputs were
+  typed `any`, so a misspelt option, a field a configuration does not have, or
+  a flat array where a matrix belongs compiled. Configurations are declared
+  from the structs the binding deserialises (`HierarchicalConfigDto`,
+  `IsolationForestConfigDto`, `FeatureImportanceInputDto`, ...; fields with a
+  default are optional, and an optional number accepts `null`); option names
+  are unions of the values accepted (`linkage`, `bin_method`, the
+  feature-importance and outlier `method`); column-major inputs are
+  `DescribeInput`, `CorrelationInput`, `VifInput` or
+  `Record<string, number[]>`. **TypeScript code that passed a wrong shape now
+  fails to compile**; the runtime path is unchanged.
+- The publishing workflow now also fails if an exported function takes a
+  parameter typed `any` (`check-typed-dts.sh --params`).
+
+### Fixed
+
+- **An unknown option name is refused instead of being read as the default.**
+  In WebAssembly, `hierarchical` ran Ward linkage for any `linkage` it did not
+  know (`"centroid"` clustered as Ward), `distribution_analysis` used
+  Freedman-Diaconis for any `bin_method`, and `feature_importance` ran
+  permutation importance for any `method` (`"mutual-info"` returned
+  permutation scores labelled `"permutation"`). A `_method` that is not a
+  string and a `_threshold` that is not a number were likewise replaced by
+  `"pearson"` and 10. Each is now an error naming the parameter. Across the C
+  ABI (and so C# `Hierarchical`), a `linkage` above 3 ran Ward; it now returns
+  `INSIGHT_ERR_INVALID_PARAM` with `insight_last_error_parameter()` =
+  `"linkage"`.
+
 ## [0.22.0] - 2026-09-25
 
 Requires `u-numflow` 0.6.3 (`chi_squared_quantile`). `UInsight` NuGet 0.22.0 (lockstep).

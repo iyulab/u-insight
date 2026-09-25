@@ -1678,11 +1678,20 @@ pub unsafe extern "C" fn insight_hierarchical(
 
         let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
 
+        // A value past 3 used to be read as Ward, so a caller's out-of-range
+        // enum ran a method nobody asked for; it is refused and named.
         let linkage_method = match linkage {
             0 => Linkage::Single,
             1 => Linkage::Complete,
             2 => Linkage::Average,
-            _ => Linkage::Ward,
+            3 => Linkage::Ward,
+            other => {
+                set_last_error(&format!(
+                    "linkage must be 0 (single), 1 (complete), 2 (average) or 3 (ward), got {other}"
+                ));
+                set_last_error_parameter("linkage");
+                return INSIGHT_ERR_INVALID_PARAM;
+            }
         };
 
         // The C ABI exposes no max_points override, so preserve prior unlimited
@@ -5230,6 +5239,24 @@ mod tests {
         };
         let rc = unsafe { insight_hierarchical(ptr::null(), 6, 2, 3, 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    /// A linkage past 3 used to run Ward; it is refused and named.
+    #[test]
+    fn ffi_hierarchical_refuses_an_unknown_linkage() {
+        let data: Vec<f64> = vec![0.0, 0.0, 0.1, 0.1, 10.0, 10.0, 10.1, 10.1];
+        let mut result = CHierarchicalResult {
+            n_clusters: 0,
+            labels: ptr::null_mut(),
+            n_labels: 0,
+            n_merges: 0,
+            merge_distances: ptr::null_mut(),
+            merge_sizes: ptr::null_mut(),
+        };
+        let rc = unsafe { insight_hierarchical(data.as_ptr(), 4, 2, 4, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_parameter().as_deref(), Some("linkage"));
+        assert!(result.labels.is_null(), "nothing is allocated on refusal");
     }
 
     // ── HDBSCAN FFI tests ───────────────────────────────────────────

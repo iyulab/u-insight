@@ -387,12 +387,12 @@ const stats = describe({ col1: [1, 2, 3], col2: [4, 5, 6] });
 
 ### TypeScript
 
-Every exported function declares its return type, and the declarations are
-generated from the same structs the binding serialises, so they cannot drift
-from what it actually returns:
+Every exported function declares its parameter and return types, and the
+declarations are generated from the same structs the binding reads and
+serialises, so they cannot drift from what it actually accepts and returns:
 
 ```ts
-export function isolation_forest(data: any, config: any): IsolationForestDto;
+export function isolation_forest(data: number[][], config: IsolationForestConfigDto): IsolationForestDto;
 
 export interface IsolationForestDto {
     scores: number[];
@@ -407,9 +407,16 @@ An optional field is declared `T | undefined`, which is what the binding
 sends. Nothing needs an `as` cast -- and a wrong assumption about a result's
 shape is a compile error rather than something that renders incorrectly.
 
-Inputs are still `any`: they are validated at the boundary and a rejected one
-names the field, so a wrong input is an error you can read rather than one
-that compiles.
+The same holds on the way in: a misspelt option (`linkage: "centroid"`,
+`method: "mutual-info"`, `bin_method: "sturgess"`), a field a configuration
+does not have, or a flat array where a matrix belongs does not compile.
+Column-major inputs are declared by hand, since their keys are your column
+names: `DescribeInput`, `CorrelationInput` (with `_method`), `VifInput` (with
+`_threshold`) and `Record<string, number[]>`.
+
+The binding still validates every input at the boundary, for JavaScript
+callers and for values that reach it through a cast, and a rejected one names
+the parameter.
 
 ### Functions
 
@@ -471,7 +478,7 @@ DBSCAN density-based clustering. `config`: `{ "epsilon": 1.5, "min_samples": 3 }
 Hierarchical agglomerative clustering (nearest-neighbor-chain, **O(n²)** time / O(n²) memory). `config`: `{ "linkage": "ward", "n_clusters": 3 }` or `{ "linkage": "single", "distance_threshold": 5.0 }`.
 
 **Config fields:**
-- `linkage` — `"single" | "complete" | "average" | "ward"` (default `"ward"`).
+- `linkage` — `"single" | "complete" | "average" | "ward"` (default `"ward"`). Any other name is refused.
 - `n_clusters` — flat clusters to extract (mutually exclusive with `distance_threshold`).
 - `distance_threshold` — dendrogram cut height (mutually exclusive with `n_clusters`).
 - `max_points` — memory guard; inputs with more points are rejected before allocating the O(n²) distance matrix. Omit for the default (`10000`, ≈400 MB matrix); set `0` to disable. Raise it for large native batches; lower it for tight memory (e.g. a browser tab).
@@ -508,7 +515,7 @@ Local Outlier Factor anomaly detection. `config`: `{ "k": 20, "threshold": 1.5 }
 
 Distribution analysis on a 1-D array. `config`: `{ "bin_method": "freedman_diaconis", "bins": null, "significance_level": 0.05, "compute_ecdf": true, "compute_histogram": true, "compute_qq_plot": true, "fit_distributions": false }`.
 
-- `bin_method`: `"sturges" | "scott" | "freedman_diaconis"` — automatic bin count rule (default `"freedman_diaconis"`).
+- `bin_method`: `"sturges" | "scott" | "freedman_diaconis"` — automatic bin count rule (default `"freedman_diaconis"`). Any other name is refused, with or without `bins`.
 - `bins` (optional, integer >= 1): explicit histogram bin count. When set it takes precedence over `bin_method`, and the histogram `method` field echoes `"Fixed(n)"`.
 
 **Output:**
