@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-25
+
+Requires `u-numflow` 0.6.3 (`chi_squared_quantile`). `UInsight` NuGet 0.22.0 (lockstep).
+
 ### Added
 
 - `insight_last_error_parameter()` (C ABI) and `InsightException.Parameter`
