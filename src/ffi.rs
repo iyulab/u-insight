@@ -1646,11 +1646,20 @@ pub struct CHierarchicalResult {
     pub merge_sizes: *mut i32,
 }
 
+/// Linkage codes for [`insight_hierarchical`]: single (nearest neighbour).
+pub const INSIGHT_LINKAGE_SINGLE: u32 = 0;
+/// Complete linkage (farthest neighbour).
+pub const INSIGHT_LINKAGE_COMPLETE: u32 = 1;
+/// Average linkage (UPGMA).
+pub const INSIGHT_LINKAGE_AVERAGE: u32 = 2;
+/// Ward's minimum-variance linkage.
+pub const INSIGHT_LINKAGE_WARD: u32 = 3;
+
 /// Runs hierarchical agglomerative clustering on row-major data.
 ///
 /// # Parameters
 ///
-/// - `linkage`: 0 = Single, 1 = Complete, 2 = Average, 3 = Ward.
+/// - `linkage`: one of `INSIGHT_LINKAGE_SINGLE` (0) / `_COMPLETE` (1) / `_AVERAGE` (2) / `_WARD` (3).
 /// - `n_clusters`: Desired number of flat clusters (0 = no cut).
 ///
 /// # Safety
@@ -1681,10 +1690,10 @@ pub unsafe extern "C" fn insight_hierarchical(
         // A value past 3 used to be read as Ward, so a caller's out-of-range
         // enum ran a method nobody asked for; it is refused and named.
         let linkage_method = match linkage {
-            0 => Linkage::Single,
-            1 => Linkage::Complete,
-            2 => Linkage::Average,
-            3 => Linkage::Ward,
+            INSIGHT_LINKAGE_SINGLE => Linkage::Single,
+            INSIGHT_LINKAGE_COMPLETE => Linkage::Complete,
+            INSIGHT_LINKAGE_AVERAGE => Linkage::Average,
+            INSIGHT_LINKAGE_WARD => Linkage::Ward,
             other => {
                 set_last_error(&format!(
                     "linkage must be 0 (single), 1 (complete), 2 (average) or 3 (ward), got {other}"
@@ -2284,13 +2293,19 @@ pub struct CPeltResult {
     pub n_changepoints: u32,
 }
 
+/// Cost codes for [`insight_pelt`] and [`insight_pelt_multi`]: Gaussian
+/// cost with known variance — detects changes in the mean.
+pub const INSIGHT_PELT_COST_L2: u32 = 0;
+/// Gaussian cost with unknown variance — detects changes in mean and variance.
+pub const INSIGHT_PELT_COST_NORMAL: u32 = 1;
+
 /// Runs PELT changepoint detection on a univariate time series.
 ///
 /// # Parameters
 ///
 /// - `data`: pointer to `n` contiguous f64 values
 /// - `n`: number of data points
-/// - `cost`: cost function (0 = L2 mean change, 1 = Normal mean+variance)
+/// - `cost`: `INSIGHT_PELT_COST_L2` (0, mean change) or `INSIGHT_PELT_COST_NORMAL` (1, mean + variance)
 /// - `penalty`: penalty value. Pass 0.0 to use BIC (automatic).
 /// - `min_segment_len`: minimum segment length (must be >= 2)
 /// - `out`: pointer to `CPeltResult` (filled on success)
@@ -2319,10 +2334,11 @@ pub unsafe extern "C" fn insight_pelt(
         let raw = unsafe { slice::from_raw_parts(data, len) };
 
         let cost_fn = match cost {
-            0 => u_analytics::detection::CostFunction::L2,
-            1 => u_analytics::detection::CostFunction::Normal,
-            _ => {
-                set_last_error("cost must be 0 (L2) or 1 (Normal)");
+            INSIGHT_PELT_COST_L2 => u_analytics::detection::CostFunction::L2,
+            INSIGHT_PELT_COST_NORMAL => u_analytics::detection::CostFunction::Normal,
+            other => {
+                set_last_error(&format!("cost must be 0 (L2) or 1 (Normal), got {other}"));
+                set_last_error_parameter("cost");
                 return INSIGHT_ERR_INVALID_PARAM;
             }
         };
@@ -2425,10 +2441,11 @@ pub unsafe extern "C" fn insight_pelt_multi(
         let refs: Vec<&[f64]> = signals.iter().map(|s| s.as_slice()).collect();
 
         let cost_fn = match cost {
-            0 => u_analytics::detection::CostFunction::L2,
-            1 => u_analytics::detection::CostFunction::Normal,
-            _ => {
-                set_last_error("cost must be 0 (L2) or 1 (Normal)");
+            INSIGHT_PELT_COST_L2 => u_analytics::detection::CostFunction::L2,
+            INSIGHT_PELT_COST_NORMAL => u_analytics::detection::CostFunction::Normal,
+            other => {
+                set_last_error(&format!("cost must be 0 (L2) or 1 (Normal), got {other}"));
+                set_last_error_parameter("cost");
                 return INSIGHT_ERR_INVALID_PARAM;
             }
         };
@@ -5961,6 +5978,36 @@ mod tests {
         };
         let rc = unsafe { insight_pelt(data.as_ptr(), 10, 99, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_parameter().as_deref(), Some("cost"));
+    }
+
+    #[test]
+    fn ffi_pelt_multi_invalid_cost_names_the_parameter() {
+        let data = [1.0_f64; 20];
+        let mut result = CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        };
+        let rc = unsafe { insight_pelt_multi(data.as_ptr(), 10, 2, 2, 0.0, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_parameter().as_deref(), Some("cost"));
+        assert!(result.changepoints.is_null(), "nothing is allocated on refusal");
+    }
+
+    /// The named codes are the ABI: a binding that mirrors them as an enum
+    /// (C# `Linkage`, `PeltCost`) depends on these exact values.
+    #[test]
+    fn ffi_enum_codes_are_stable() {
+        assert_eq!(
+            [
+                INSIGHT_LINKAGE_SINGLE,
+                INSIGHT_LINKAGE_COMPLETE,
+                INSIGHT_LINKAGE_AVERAGE,
+                INSIGHT_LINKAGE_WARD
+            ],
+            [0, 1, 2, 3]
+        );
+        assert_eq!([INSIGHT_PELT_COST_L2, INSIGHT_PELT_COST_NORMAL], [0, 1]);
     }
 
     #[test]

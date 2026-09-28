@@ -186,10 +186,10 @@ public sealed class InsightClient : IDisposable
 
     /// <summary>
     /// Runs Hierarchical Agglomerative clustering.
-    /// Linkage: 0=Single, 1=Complete, 2=Average, 3=Ward. Any other value throws
-    /// <see cref="InsightException"/> with <c>Parameter</c> = <c>"linkage"</c>.
+    /// A <paramref name="linkage"/> outside <see cref="Linkage"/> (an unchecked cast)
+    /// throws <see cref="InsightException"/> with <c>Parameter</c> = <c>"linkage"</c>.
     /// </summary>
-    public HierarchicalResult Hierarchical(double[,] data, uint linkage, uint nClusters)
+    public HierarchicalResult Hierarchical(double[,] data, Linkage linkage, uint nClusters)
     {
         var (nRows, nCols, flat) = Flatten(data);
         var native = new NativeStructs.CHierarchicalResult();
@@ -199,7 +199,7 @@ public sealed class InsightClient : IDisposable
             fixed (double* ptr = flat)
             {
                 Native.ThrowIfFailed(
-                    Native.insight_hierarchical(ptr, nRows, nCols, linkage, nClusters, ref native));
+                    Native.insight_hierarchical(ptr, nRows, nCols, (uint)linkage, nClusters, ref native));
             }
         }
 
@@ -799,10 +799,10 @@ public sealed class InsightClient : IDisposable
     /// Detect changepoints using the PELT algorithm (Killick et al., 2012).
     /// </summary>
     /// <param name="data">Univariate time series.</param>
-    /// <param name="cost">0 = L2 (mean change), 1 = Normal (mean+variance).</param>
+    /// <param name="cost">Segment cost: <see cref="PeltCost.L2"/> (mean change) or <see cref="PeltCost.Normal"/> (mean and variance).</param>
     /// <param name="penalty">Penalty per changepoint. 0.0 = BIC (automatic).</param>
     /// <param name="minSegmentLen">Minimum segment length (>= 2).</param>
-    public PeltResult Pelt(double[] data, uint cost = 0, double penalty = 0.0, uint minSegmentLen = 2)
+    public PeltResult Pelt(double[] data, PeltCost cost = PeltCost.L2, double penalty = 0.0, uint minSegmentLen = 2)
     {
         var native = new NativeStructs.CPeltResult();
 
@@ -811,7 +811,7 @@ public sealed class InsightClient : IDisposable
             fixed (double* ptr = data)
             {
                 Native.ThrowIfFailed(
-                    Native.insight_pelt(ptr, (uint)data.Length, cost, penalty, minSegmentLen, ref native));
+                    Native.insight_pelt(ptr, (uint)data.Length, (uint)cost, penalty, minSegmentLen, ref native));
             }
         }
 
@@ -975,10 +975,10 @@ public sealed class InsightClient : IDisposable
     /// the same convention as <see cref="Pca"/>, <see cref="KMeans"/>, and every other
     /// multi-dimensional API in this library.
     /// </param>
-    /// <param name="cost">0 = L2 (mean change), 1 = Normal (mean+variance).</param>
+    /// <param name="cost">Segment cost: <see cref="PeltCost.L2"/> (mean change) or <see cref="PeltCost.Normal"/> (mean and variance).</param>
     /// <param name="penalty">Penalty per changepoint. 0.0 = BIC (automatic).</param>
     /// <param name="minSegmentLen">Minimum segment length (>= 2).</param>
-    public PeltResult PeltMulti(double[,] data, uint cost = 0, double penalty = 0.0, uint minSegmentLen = 2)
+    public PeltResult PeltMulti(double[,] data, PeltCost cost = PeltCost.L2, double penalty = 0.0, uint minSegmentLen = 2)
     {
         var (nSamples, nChannels, flat) = Flatten(data);
         var native = new NativeStructs.CPeltResult();
@@ -988,7 +988,7 @@ public sealed class InsightClient : IDisposable
             fixed (double* ptr = flat)
             {
                 Native.ThrowIfFailed(
-                    Native.insight_pelt_multi(ptr, nSamples, nChannels, cost, penalty, minSegmentLen, ref native));
+                    Native.insight_pelt_multi(ptr, nSamples, nChannels, (uint)cost, penalty, minSegmentLen, ref native));
             }
         }
 
@@ -1962,6 +1962,34 @@ public class CorrelationResult
     public double[,] Matrix { get; init; } = new double[0, 0];
     /// <summary>Number of high-correlation pairs.</summary>
     public uint NHighPairs { get; init; }
+}
+
+/// <summary>
+/// Linkage criteria for <see cref="InsightClient.Hierarchical"/>. Numeric values
+/// match the native <c>INSIGHT_LINKAGE_*</c> constants.
+/// </summary>
+public enum Linkage : uint
+{
+    /// <summary>Single linkage: distance between the closest members (tends to chain).</summary>
+    Single = 0,
+    /// <summary>Complete linkage: distance between the farthest members (compact clusters).</summary>
+    Complete = 1,
+    /// <summary>Average linkage (UPGMA): mean pairwise distance.</summary>
+    Average = 2,
+    /// <summary>Ward's method: merge that least increases within-cluster variance.</summary>
+    Ward = 3,
+}
+
+/// <summary>
+/// Segment cost for <see cref="InsightClient.Pelt"/> and <see cref="InsightClient.PeltMulti"/>.
+/// Numeric values match the native <c>INSIGHT_PELT_COST_*</c> constants.
+/// </summary>
+public enum PeltCost : uint
+{
+    /// <summary>Gaussian cost with known variance — detects changes in the mean.</summary>
+    L2 = 0,
+    /// <summary>Gaussian cost with unknown variance — detects changes in mean and variance.</summary>
+    Normal = 1,
 }
 
 /// <summary>

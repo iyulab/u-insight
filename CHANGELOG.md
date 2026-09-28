@@ -22,7 +22,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   `Record<string, number[]>`. **TypeScript code that passed a wrong shape now
   fails to compile**; the runtime path is unchanged.
 - The publishing workflow now also fails if an exported function takes a
-  parameter typed `any` (`check-typed-dts.sh --params`).
+  parameter typed `any` (`check-typed-dts.sh`).
+- **C#: `Hierarchical` takes a `Linkage` and `Pelt`/`PeltMulti` take a
+  `PeltCost` instead of a `uint` code.** The codes were easy to get wrong —
+  `0` is single linkage, not Ward — and the compiler could not help. Callers
+  write `Linkage.Ward` or `PeltCost.Normal`; code passing a number no longer
+  compiles. The C ABI names the same values as `INSIGHT_LINKAGE_SINGLE`..`_WARD`
+  and `INSIGHT_PELT_COST_L2`/`_NORMAL` (values unchanged).
 
 ### Fixed
 
@@ -36,7 +42,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   `"pearson"` and 10. Each is now an error naming the parameter. Across the C
   ABI (and so C# `Hierarchical`), a `linkage` above 3 ran Ward; it now returns
   `INSIGHT_ERR_INVALID_PARAM` with `insight_last_error_parameter()` =
-  `"linkage"`.
+  `"linkage"`. An unknown PELT `cost` was already refused but did not name the
+  parameter; `insight_last_error_parameter()` now reports `"cost"`.
 
 ## [0.22.0] - 2026-09-25
 

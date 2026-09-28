@@ -96,7 +96,7 @@ public sealed class InsightClient : IDisposable
     KMeansResult KMeans(double[,] data, uint k);
     KMeansResult MiniBatchKMeans(double[,] data, uint k, uint batchSize = 100, uint maxIter = 100, ulong seed = 42);
     DbscanResult Dbscan(double[,] data, double epsilon, uint minSamples);
-    HierarchicalResult Hierarchical(double[,] data, uint linkage, uint nClusters);
+    HierarchicalResult Hierarchical(double[,] data, Linkage linkage, uint nClusters);   // Linkage.Single | Complete | Average | Ward
     HdbscanResult Hdbscan(double[,] data, uint minClusterSize, uint minSamples);
     GapStatResult GapStatistic(double[,] data, uint kMin, uint kMax, uint nRefs = 10, ulong seed = 42);
 

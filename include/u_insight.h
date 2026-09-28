@@ -47,6 +47,37 @@
 #define INSIGHT_CORR_KENDALL 2
 
 /**
+ * Linkage codes for [`insight_hierarchical`]: single (nearest neighbour).
+ */
+#define INSIGHT_LINKAGE_SINGLE 0
+
+/**
+ * Complete linkage (farthest neighbour).
+ */
+#define INSIGHT_LINKAGE_COMPLETE 1
+
+/**
+ * Average linkage (UPGMA).
+ */
+#define INSIGHT_LINKAGE_AVERAGE 2
+
+/**
+ * Ward's minimum-variance linkage.
+ */
+#define INSIGHT_LINKAGE_WARD 3
+
+/**
+ * Cost codes for [`insight_pelt`] and [`insight_pelt_multi`]: Gaussian
+ * cost with known variance — detects changes in the mean.
+ */
+#define INSIGHT_PELT_COST_L2 0
+
+/**
+ * Gaussian cost with unknown variance — detects changes in mean and variance.
+ */
+#define INSIGHT_PELT_COST_NORMAL 1
+
+/**
  * Silverman's rule of thumb bandwidth.
  */
 #define INSIGHT_KDE_SILVERMAN 0
@@ -1466,7 +1497,7 @@ INSIGHT_API const char *insight_version(void);
  *
  * # Parameters
  *
- * - `linkage`: 0 = Single, 1 = Complete, 2 = Average, 3 = Ward.
+ * - `linkage`: one of `INSIGHT_LINKAGE_SINGLE` (0) / `_COMPLETE` (1) / `_AVERAGE` (2) / `_WARD` (3).
  * - `n_clusters`: Desired number of flat clusters (0 = no cut).
  *
  * # Safety
@@ -1608,7 +1639,7 @@ INSIGHT_API void insight_free_perm_features(struct CPermImportanceFeature *ptr, 
  *
  * - `data`: pointer to `n` contiguous f64 values
  * - `n`: number of data points
- * - `cost`: cost function (0 = L2 mean change, 1 = Normal mean+variance)
+ * - `cost`: `INSIGHT_PELT_COST_L2` (0, mean change) or `INSIGHT_PELT_COST_NORMAL` (1, mean + variance)
  * - `penalty`: penalty value. Pass 0.0 to use BIC (automatic).
  * - `min_segment_len`: minimum segment length (must be >= 2)
  * - `out`: pointer to `CPeltResult` (filled on success)
