@@ -444,6 +444,8 @@ K-Means++ clustering on row-major data `[[x,y,...], ...]`.
 { "k": 3, "labels": [0,0,1,1,2,2], "centroids": [[...]], "wcss": 5.2, "iterations": 12, "cluster_sizes": [2,2,2] }
 ```
 
+Clusters are numbered by first appearance — the first point is in cluster 0, the first point outside it in cluster 1, and so on; `centroids` and `cluster_sizes` follow that numbering. `dbscan` and `hierarchical` number their clusters the same way, so the same group gets the same number whichever method found it.
+
 #### `silhouette(data, labels, k) -> SilhouetteResult`
 
 Silhouette analysis for an existing clustering assignment. Works with any clustering output (`kmeans`, `dbscan`, `hierarchical`, etc.). `data` is row-major `[[x,y,...], ...]`, `labels` is one cluster id per row (each `< k`), `k` is the number of distinct clusters. O(n²) — use sparingly on very large inputs.

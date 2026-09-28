@@ -5991,7 +5991,10 @@ mod tests {
         let rc = unsafe { insight_pelt_multi(data.as_ptr(), 10, 2, 2, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
         assert_eq!(last_error_parameter().as_deref(), Some("cost"));
-        assert!(result.changepoints.is_null(), "nothing is allocated on refusal");
+        assert!(
+            result.changepoints.is_null(),
+            "nothing is allocated on refusal"
+        );
     }
 
     /// The named codes are the ABI: a binding that mirrors them as an enum

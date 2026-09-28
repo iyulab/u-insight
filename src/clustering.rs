@@ -95,7 +95,9 @@ pub struct KMeansResult {
     pub k: usize,
     /// Cluster centroids (k × d matrix, row-major).
     pub centroids: Vec<Vec<f64>>,
-    /// Cluster label for each data point (0..k).
+    /// Cluster label for each data point (0..k), numbered by first
+    /// appearance: point 0 is in cluster 0, the first point outside it in
+    /// cluster 1, and so on (the numbering DBSCAN and hierarchical use).
     pub labels: Vec<usize>,
     /// Within-Cluster Sum of Squares (total).
     pub wcss: f64,
@@ -188,7 +190,38 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
         }
     }
 
-    Ok(best_result.expect("n_init > 0 guarantees at least one result"))
+    Ok(number_by_first_appearance(
+        best_result.expect("n_init > 0 guarantees at least one result"),
+    ))
+}
+
+/// Renumbers clusters by first appearance: the cluster of point 0 becomes 0,
+/// the next cluster met while scanning the points becomes 1, and so on —
+/// the numbering DBSCAN and hierarchical clustering produce. `centroids` and
+/// `cluster_sizes` are reordered to match; clusters no point is assigned to
+/// keep their relative order after the rest. WCSS is unchanged.
+fn number_by_first_appearance(mut result: KMeansResult) -> KMeansResult {
+    let k = result.centroids.len();
+    let mut new_of_old = vec![usize::MAX; k];
+    let mut order = Vec::with_capacity(k);
+    for &l in &result.labels {
+        if new_of_old[l] == usize::MAX {
+            new_of_old[l] = order.len();
+            order.push(l);
+        }
+    }
+    for (old, slot) in new_of_old.iter_mut().enumerate() {
+        if *slot == usize::MAX {
+            *slot = order.len();
+            order.push(old);
+        }
+    }
+    for l in &mut result.labels {
+        *l = new_of_old[*l];
+    }
+    result.centroids = order.iter().map(|&o| result.centroids[o].clone()).collect();
+    result.cluster_sizes = order.iter().map(|&o| result.cluster_sizes[o]).collect();
+    result
 }
 
 /// Selects the optimal K by maximizing silhouette score over a range.
@@ -664,7 +697,8 @@ impl DbscanConfig {
 #[derive(Debug, Clone)]
 pub struct DbscanResult {
     /// Cluster label for each data point.
-    /// `None` = noise point, `Some(id)` = cluster membership (0-indexed).
+    /// `None` = noise point, `Some(id)` = cluster membership (0-indexed,
+    /// numbered by first appearance).
     pub labels: Vec<Option<usize>>,
     /// Number of clusters discovered.
     pub n_clusters: usize,
@@ -956,8 +990,8 @@ pub struct HierarchicalResult {
     /// Merge history (dendrogram). Length = n − 1.
     /// Merges are sorted by ascending distance.
     pub merges: Vec<Merge>,
-    /// Flat cluster labels (0-based). Only present when `n_clusters` or
-    /// `distance_threshold` was set in the config.
+    /// Flat cluster labels (0-based, numbered by first appearance). Only
+    /// present when `n_clusters` or `distance_threshold` was set in the config.
     pub labels: Option<Vec<usize>>,
     /// Number of flat clusters (if labels present).
     pub n_clusters: Option<usize>,
@@ -1419,7 +1453,8 @@ impl HdbscanConfig {
 /// Result of HDBSCAN clustering.
 #[derive(Debug, Clone)]
 pub struct HdbscanResult {
-    /// Cluster labels (0-based). `None` means noise/outlier.
+    /// Cluster labels (0-based), numbered by first appearance. `None` means
+    /// noise/outlier.
     pub labels: Vec<Option<usize>>,
     /// Membership probability for each point (0.0–1.0).
     /// Noise points have probability 0.0.
@@ -1594,19 +1629,22 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
     let condensed = condense_tree(&dendrogram, n, min_cluster_size);
 
     // Phase 6: Extract clusters using EOM
-    let (labels, probabilities) = extract_eom_clusters(&condensed, n);
+    let (mut labels, probabilities) = extract_eom_clusters(&condensed, n);
 
-    let n_clusters = labels
-        .iter()
-        .flatten()
-        .collect::<std::collections::HashSet<_>>()
-        .len();
+    // The extraction's ids are condensed-tree node ids, neither contiguous
+    // nor in any order a reader would recognise. Number clusters by first
+    // appearance (as the other clustering functions do), which also makes
+    // them exactly 0..n_clusters.
+    let mut renumber: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for l in labels.iter_mut().flatten() {
+        let next = renumber.len();
+        *l = *renumber.entry(*l).or_insert(next);
+    }
+    let n_clusters = renumber.len();
     let noise_count = labels.iter().filter(|l| l.is_none()).count();
     let mut cluster_sizes = vec![0_usize; n_clusters];
-    for c in labels.iter().flatten() {
-        if *c < n_clusters {
-            cluster_sizes[*c] += 1;
-        }
+    for &c in labels.iter().flatten() {
+        cluster_sizes[c] += 1;
     }
 
     Ok(HdbscanResult {
@@ -2452,14 +2490,14 @@ pub fn mini_batch_kmeans(
         wcss += min_dist;
     }
 
-    Ok(KMeansResult {
+    Ok(number_by_first_appearance(KMeansResult {
         k,
         centroids,
         labels,
         wcss,
         iterations,
         cluster_sizes,
-    })
+    }))
 }
 
 /// Simple LCG-based pseudorandom index sampling (no external dependency).
@@ -2676,6 +2714,112 @@ fn generate_uniform_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn is_first_appearance(labels: impl IntoIterator<Item = usize>) -> bool {
+        let mut next = 0;
+        for l in labels {
+            if l > next {
+                return false;
+            }
+            if l == next {
+                next += 1;
+            }
+        }
+        true
+    }
+
+    /// The numbering contract k-means now follows is the one the other
+    /// clustering functions already had; this pins it for all of them.
+    #[test]
+    fn every_clustering_numbers_clusters_by_first_appearance() {
+        let data: Vec<Vec<f64>> = [10.0, 11.0, 0.0, 1.0, 20.0, 21.0, 0.5, 10.5, 20.5, 0.2]
+            .iter()
+            .map(|&x| vec![x, 0.0])
+            .collect();
+        let db = dbscan(&data, &DbscanConfig::new(1.2, 2)).unwrap();
+        assert!(
+            is_first_appearance(db.labels.iter().flatten().copied()),
+            "dbscan {:?}",
+            db.labels
+        );
+        for linkage in [
+            Linkage::Single,
+            Linkage::Complete,
+            Linkage::Average,
+            Linkage::Ward,
+        ] {
+            let mut cfg = HierarchicalConfig::with_k(3);
+            cfg.linkage = linkage;
+            let h = hierarchical(&data, &cfg).unwrap();
+            let labels = h.labels.expect("n_clusters set");
+            assert!(
+                is_first_appearance(labels.iter().copied()),
+                "{linkage:?} {labels:?}"
+            );
+        }
+        let hd = hdbscan(&data, &HdbscanConfig::new(2)).unwrap();
+        assert!(
+            is_first_appearance(hd.labels.iter().flatten().copied()),
+            "hdbscan {:?}",
+            hd.labels
+        );
+    }
+
+    /// Clusters are numbered by first appearance — the point with the lowest
+    /// index is in cluster 0, the first point outside it in cluster 1, … —
+    /// the same numbering DBSCAN and hierarchical clustering produce, and
+    /// `centroids`/`cluster_sizes` follow the labels.
+    #[test]
+    fn kmeans_numbers_clusters_by_first_appearance() {
+        let data = vec![
+            vec![1.0, 1.0],
+            vec![1.5, 2.0],
+            vec![3.0, 4.0],
+            vec![5.0, 7.0],
+            vec![3.5, 5.0],
+            vec![4.5, 5.0],
+            vec![3.5, 4.5],
+        ];
+        let assert_first_appearance = |r: &KMeansResult| {
+            let mut next = 0;
+            for &l in &r.labels {
+                assert!(
+                    l <= next,
+                    "labels {:?} not in first-appearance order",
+                    r.labels
+                );
+                if l == next {
+                    next += 1;
+                }
+            }
+            // Centroids and sizes follow the renumbered labels: each point's
+            // label is its nearest centroid, and sizes count the labels.
+            for (p, &l) in data.iter().zip(&r.labels) {
+                let d = |c: &Vec<f64>| (p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2);
+                let nearest = r.centroids.iter().map(d).fold(f64::INFINITY, f64::min);
+                assert!(
+                    (d(&r.centroids[l]) - nearest).abs() < 1e-9,
+                    "centroid {l} does not follow its label"
+                );
+            }
+            for (c, &size) in r.cluster_sizes.iter().enumerate() {
+                assert_eq!(size, r.labels.iter().filter(|&&l| l == c).count());
+            }
+        };
+        let r = kmeans(&data, &KMeansConfig::new(2)).unwrap();
+        assert_eq!(r.labels, vec![0, 0, 1, 1, 1, 1, 1]);
+        assert_first_appearance(&r);
+        for k in 1..=4 {
+            for seed in 0..20 {
+                let mut cfg = KMeansConfig::new(k);
+                cfg.seed = Some(seed);
+                assert_first_appearance(&kmeans(&data, &cfg).unwrap());
+                let mut mb = MiniBatchKMeansConfig::new(k);
+                mb.seed = Some(seed);
+                assert_first_appearance(&mini_batch_kmeans(&data, &mb).unwrap());
+            }
+        }
+    }
 
     fn make_two_clusters() -> Vec<Vec<f64>> {
         vec![

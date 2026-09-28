@@ -29,6 +29,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   `stds` were always 1. The C ABI and C# already exposed the choice (C#
   defaults to standardised); WebAssembly now does too, with the same default.
   Pass `auto_scale: false` for the previous results; `pca(data, 3)` is refused.
+- **K-means and HDBSCAN number clusters by first appearance**, as DBSCAN and
+  hierarchical clustering already did: the first point is in cluster 0, the
+  first point outside it in cluster 1, and so on. K-means numbered clusters
+  in its internal order (which changed with the seed), and HDBSCAN by
+  condensed-tree node, so the same group got a different number depending on
+  the method. `centroids` and `cluster_sizes` follow the new numbering; WCSS
+  and the grouping itself are unchanged (Rust, C ABI, C# and WebAssembly).
 - **C#: `Hierarchical` takes a `Linkage` and `Pelt`/`PeltMulti` take a
   `PeltCost` instead of a `uint` code.** The codes were easy to get wrong —
   `0` is single linkage, not Ward — and the compiler could not help. Callers

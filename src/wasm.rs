@@ -1845,7 +1845,8 @@ mod dto_strictness_tests {
     /// default as the C# binding; `false` gives covariance PCA.
     #[test]
     fn pca_config_defaults_to_standardised() {
-        let dto: super::PcaConfigDto = serde_json::from_value(json!({ "n_components": 2 })).unwrap();
+        let dto: super::PcaConfigDto =
+            serde_json::from_value(json!({ "n_components": 2 })).unwrap();
         let cfg = super::pca_config(&dto);
         assert_eq!(cfg.n_components, 2);
         assert!(cfg.auto_scale);
