@@ -7,7 +7,7 @@
 //! - `describe(data)` — Descriptive statistics per column
 //! - `correlation_matrix(data)` — Pearson correlation matrix
 //! - `kmeans(data, k)` — K-Means++ clustering
-//! - `pca(data, n_components)` — Principal Component Analysis
+//! - `pca(data, config)` — Principal Component Analysis (standardised by default)
 //! - `dbscan(data, config)` — DBSCAN density-based clustering
 //! - `hierarchical(data, config)` — Hierarchical agglomerative clustering
 //! - `isolation_forest(data, config)` — Isolation Forest anomaly detection
@@ -478,24 +478,47 @@ pub fn silhouette(
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
 }
 
+/// PCA configuration input.
+#[derive(Deserialize, tsify::Tsify)]
+#[serde(deny_unknown_fields)]
+struct PcaConfigDto {
+    /// Number of principal components to keep.
+    n_components: usize,
+    /// Standardise each column to unit variance before the decomposition
+    /// (correlation-matrix PCA). Default: `true` — without it a column in
+    /// large units takes the leading components. `false` gives
+    /// covariance-matrix PCA.
+    #[serde(default = "default_true")]
+    #[tsify(optional)]
+    auto_scale: bool,
+}
+
+fn pca_config(dto: &PcaConfigDto) -> crate::pca::PcaConfig {
+    crate::pca::PcaConfig::new(dto.n_components).auto_scale(dto.auto_scale)
+}
+
 /// Runs Principal Component Analysis on row-major data.
 ///
 /// # Input
 /// ```json
 /// [[1.0, 0.1], [2.0, 0.2], [3.0, 0.3]]
 /// ```
+/// Config: `{ n_components: 2, auto_scale?: true }`.
 ///
 /// # Output
-/// `{ n_components, n_features, eigenvalues, explained_variance_ratio, ... }`
+/// `{ n_components, n_features, eigenvalues, explained_variance_ratio, ... }`;
+/// `stds` are the column standard deviations used for scaling (all `1` when
+/// `auto_scale` is `false`).
 #[wasm_bindgen(unchecked_return_type = "PcaDto")]
 pub fn pca(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
-    n_components: usize,
+    #[wasm_bindgen(unchecked_param_type = "PcaConfigDto")] config: JsValue,
 ) -> Result<JsValue, JsValue> {
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
+    let config: PcaConfigDto = from_js(config, "config")?;
 
-    use crate::pca::{pca as pca_fn, PcaConfig};
-    let config = PcaConfig::new(n_components);
+    use crate::pca::pca as pca_fn;
+    let config = pca_config(&config);
     let result = pca_fn(&data, &config).map_err(js_err)?;
 
     let dto = PcaDto {
@@ -1816,6 +1839,22 @@ mod dto_strictness_tests {
             Ok(_) => panic!("unknown key must be rejected"),
             Err(e) => assert!(e.to_string().contains("unknown field"), "{e}"),
         }
+    }
+
+    /// `auto_scale` is optional and defaults to standardised PCA, the same
+    /// default as the C# binding; `false` gives covariance PCA.
+    #[test]
+    fn pca_config_defaults_to_standardised() {
+        let dto: super::PcaConfigDto = serde_json::from_value(json!({ "n_components": 2 })).unwrap();
+        let cfg = super::pca_config(&dto);
+        assert_eq!(cfg.n_components, 2);
+        assert!(cfg.auto_scale);
+        let dto: super::PcaConfigDto =
+            serde_json::from_value(json!({ "n_components": 2, "auto_scale": false })).unwrap();
+        assert!(!super::pca_config(&dto).auto_scale);
+        assert_rejects_unknown::<super::PcaConfigDto>(json!({
+            "n_components": 2, "scale": true
+        }));
     }
 
     #[test]

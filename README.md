@@ -455,9 +455,13 @@ Silhouette analysis for an existing clustering assignment. Works with any cluste
 
 `avg` ranges from -1 (wrong cluster) to +1 (well-separated); singleton-cluster points report 0.0 in `per_sample`.
 
-#### `pca(data, n_components) -> PcaResult`
+#### `pca(data, config) -> PcaResult`
 
-Principal Component Analysis on row-major data.
+Principal Component Analysis on row-major data. `config`: `{ "n_components": 2 }` or `{ "n_components": 2, "auto_scale": false }`.
+
+**Config fields:**
+- `n_components` — number of components to keep.
+- `auto_scale` — standardise each column before the decomposition (correlation-matrix PCA; default `true`, the same default as the C# binding). Set `false` for covariance-matrix PCA, where a column in large units dominates the leading components. `stds` in the output are the scales used (all `1` when `false`).
 
 **Output:**
 ```json

@@ -23,6 +23,12 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   fails to compile**; the runtime path is unchanged.
 - The publishing workflow now also fails if an exported function takes a
   parameter typed `any` (`check-typed-dts.sh`).
+- **WebAssembly: `pca(data, config)` takes `{ n_components, auto_scale? }`
+  and standardises by default.** `pca(data, n_components)` could only run
+  covariance PCA, so a column in large units took the leading components and
+  `stds` were always 1. The C ABI and C# already exposed the choice (C#
+  defaults to standardised); WebAssembly now does too, with the same default.
+  Pass `auto_scale: false` for the previous results; `pca(data, 3)` is refused.
 - **C#: `Hierarchical` takes a `Linkage` and `Pelt`/`PeltMulti` take a
   `PeltCost` instead of a `uint` code.** The codes were easy to get wrong —
   `0` is single linkage, not Ward — and the compiler could not help. Callers
