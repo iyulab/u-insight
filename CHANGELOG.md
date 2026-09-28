@@ -38,6 +38,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Fixed
 
+- **Permutation importance no longer changes when a feature is renamed or
+  reordered.** All features drew their shuffles from one random stream, in
+  the order the features were given (in WebAssembly, alphabetical by name), so
+  a feature's score depended on how many features came before it — renaming a
+  column moved another column's score by more than its own `std_dev`. Every
+  feature now replays the same seeded sequence of shuffles, as scikit-learn
+  does. **Scores for a given seed change** (C ABI, C# and WebAssembly alike).
 - **An unknown option name is refused instead of being read as the default.**
   In WebAssembly, `hierarchical` ran Ward linkage for any `linkage` it did not
   know (`"centroid"` clustered as Ward), `distribution_analysis` used

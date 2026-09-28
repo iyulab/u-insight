@@ -540,7 +540,12 @@ pub struct PermutationImportanceResult {
 /// * `feature_names` — Name for each feature.
 /// * `target` — Target variable.
 /// * `n_repeats` — Number of permutation repeats (default: 5).
-/// * `seed` — Random seed.
+/// * `seed` — Random seed. Each feature is shuffled with the same seeded
+///   sequence of permutations, so its score does not change when other
+///   features are added, removed or reordered.
+///
+/// Five repeats is a low count for small samples — the spread across shuffles
+/// is reported as `std_dev`; raise `n_repeats` when it is large.
 ///
 /// ```
 /// use u_insight::feature_importance::permutation_importance;
@@ -603,10 +608,13 @@ pub fn permutation_importance(
     let baseline_score = compute_r2_multiple(target, &pred_refs, n).max(0.0);
 
     let n_repeats = n_repeats.max(1);
-    let mut rng_state = seed;
     let mut results: Vec<PermutationImportanceFeature> = Vec::with_capacity(p);
 
     for fi in 0..p {
+        // Every feature replays the same seeded sequence of shuffles (as
+        // scikit-learn does), so a feature's score depends on its data and
+        // the seed — not on how many features precede it.
+        let mut rng_state = seed;
         let mut decreases = Vec::with_capacity(n_repeats);
 
         for _ in 0..n_repeats {
@@ -670,6 +678,51 @@ pub fn permutation_importance(
 
 #[cfg(test)]
 mod tests {
+
+    /// A feature's score depends on its own data and the seed only — not on
+    /// where it sits among the others. Reordering (which is what renaming does
+    /// once a binding sorts names) used to re-draw every later feature's
+    /// shuffles from one shared random stream.
+    #[test]
+    fn permutation_importance_does_not_depend_on_feature_order() {
+        let study = vec![2.0, 4.0, 1.0, 6.0, 5.0, 3.0, 8.0, 7.0, 9.0, 4.5];
+        let sleep = vec![7.0, 6.5, 8.0, 5.0, 6.0, 7.5, 5.5, 6.0, 4.5, 7.0];
+        let screen = vec![3.0, 2.0, 4.0, 1.5, 2.5, 3.5, 1.0, 2.0, 0.5, 3.0];
+        let target: Vec<f64> = (0..10)
+            .map(|i| 5.0 * study[i] + 2.0 * sleep[i] - screen[i] + (i % 3) as f64)
+            .collect();
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        let a = permutation_importance(
+            &[study.clone(), sleep.clone(), screen.clone()],
+            &names(&["study", "sleep", "screen"]),
+            &target,
+            5,
+            42,
+        )
+        .unwrap();
+        let b = permutation_importance(
+            &[screen, study, sleep],
+            &names(&["screen", "study", "sleep"]),
+            &target,
+            5,
+            42,
+        )
+        .unwrap();
+        for name in ["study", "sleep", "screen"] {
+            let fa = a.features.iter().find(|f| f.name == name).unwrap();
+            let fb = b.features.iter().find(|f| f.name == name).unwrap();
+            assert!(
+                (fa.importance - fb.importance).abs() < 1e-12
+                    && (fa.std_dev - fb.std_dev).abs() < 1e-12,
+                "{name}: {} ± {} vs {} ± {}",
+                fa.importance,
+                fa.std_dev,
+                fb.importance,
+                fb.std_dev
+            );
+        }
+    }
     use super::*;
 
     fn names(n: &[&str]) -> Vec<String> {
