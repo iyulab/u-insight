@@ -8,6 +8,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-29
+
 ### Changed
 
 - **Every exported WASM function declares its parameter types.** Inputs were
