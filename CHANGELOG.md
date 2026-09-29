@@ -8,6 +8,17 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- **HDBSCAN refuses `min_samples` above the number of points, and returns all
+  noise when `min_cluster_size` exceeds it.** A core distance is the distance
+  to the `min_samples`-th neighbour, which does not exist with fewer points;
+  and no cluster can reach a minimum size larger than the data. Both used to
+  come back as a single cluster holding every point, with membership
+  probability 0. `min_samples` defaults to `min_cluster_size`, so an oversized
+  cluster size with no explicit `min_samples` is now refused, naming
+  `min_samples` (as scikit-learn does).
+
 ## [0.23.0] - 2026-09-29
 
 ### Changed

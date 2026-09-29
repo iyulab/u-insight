@@ -1531,6 +1531,21 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
             message: format!("must be at least 1, got {min_samples}"),
         });
     }
+    // A core distance is the distance to the min_samples-th neighbour; with
+    // fewer points there is none to take (scikit-learn refuses this too).
+    if min_samples > n {
+        return Err(InsightError::InvalidParameter {
+            name: "min_samples".into(),
+            message: format!(
+                "must be at most the number of points ({n}), got {min_samples}{}",
+                if config.min_samples.is_none() {
+                    " (it defaults to min_cluster_size)"
+                } else {
+                    ""
+                }
+            ),
+        });
+    }
 
     // Validate dimensions and values
     let d = data[0].len();
@@ -1554,6 +1569,19 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
                 });
             }
         }
+    }
+
+    // No cluster can reach min_cluster_size: every point is noise. (The
+    // extraction below would otherwise select the whole data set as one
+    // cluster smaller than the minimum.)
+    if n < min_cluster_size {
+        return Ok(HdbscanResult {
+            labels: vec![None; n],
+            probabilities: vec![0.0; n],
+            n_clusters: 0,
+            noise_count: n,
+            cluster_sizes: Vec::new(),
+        });
     }
 
     // Phase 1: Compute pairwise Euclidean distances
@@ -2726,6 +2754,39 @@ mod tests {
             }
         }
         true
+    }
+
+    /// `min_samples` above the number of points has no k-th neighbour to
+    /// take a core distance from; it is refused (as scikit-learn does), not
+    /// clamped. It defaults to `min_cluster_size`, so an oversized cluster
+    /// size with no explicit `min_samples` is refused the same way.
+    #[test]
+    fn hdbscan_refuses_min_samples_above_n() {
+        let data: Vec<Vec<f64>> = (0..30)
+            .map(|i| vec![(i % 3) as f64 * 10.0 + i as f64 * 0.01])
+            .collect();
+        match hdbscan(&data, &HdbscanConfig::new(5).min_samples(31)) {
+            Err(InsightError::InvalidParameter { name, .. }) => assert_eq!(name, "min_samples"),
+            other => panic!("expected min_samples refusal, got {other:?}"),
+        }
+        match hdbscan(&data, &HdbscanConfig::new(1000)) {
+            Err(InsightError::InvalidParameter { name, .. }) => assert_eq!(name, "min_samples"),
+            other => panic!("expected min_samples refusal, got {other:?}"),
+        }
+    }
+
+    /// No cluster can reach a `min_cluster_size` larger than the data: every
+    /// point is noise. It used to come back as one cluster holding them all.
+    #[test]
+    fn hdbscan_min_cluster_size_above_n_is_all_noise() {
+        let data: Vec<Vec<f64>> = (0..30)
+            .map(|i| vec![(i % 3) as f64 * 10.0 + i as f64 * 0.01])
+            .collect();
+        let r = hdbscan(&data, &HdbscanConfig::new(1000).min_samples(3)).unwrap();
+        assert_eq!(r.n_clusters, 0, "labels {:?}", r.labels);
+        assert!(r.labels.iter().all(Option::is_none));
+        assert_eq!(r.noise_count, 30);
+        assert!(r.cluster_sizes.is_empty());
     }
 
     /// The numbering contract k-means now follows is the one the other
