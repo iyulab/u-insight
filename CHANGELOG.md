@@ -29,6 +29,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   is imported, in Node and in bundlers alike -- so the example threw
   `init is not a function` on its first line. It now imports the functions
   directly.
+- Two diagrams in the README were fenced without a language, so the
+  doc-tests read them as Rust; they are now marked as text.
+  The README's Rust examples are now compiled and run with the doc-tests,
+  so an example that stops matching the API fails CI.
 
 ## [0.23.0] - 2026-09-29
 

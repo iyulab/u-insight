@@ -61,7 +61,7 @@ A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
 u-insight transforms raw tabular data into actionable statistical insights. It operates in two distinct layers with **opposite assumptions about input data quality**:
 
-```
+```text
 CSV (raw)
   │
   ├─→ Profiling ─→ "What is the state of this data?"
@@ -339,7 +339,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 
 ## Test Status
 
-```
+```text
 474 lib tests + 53 doc-tests = 527 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
