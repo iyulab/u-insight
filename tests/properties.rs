@@ -231,7 +231,20 @@ proptest! {
             prop_assert!(h, "cluster {c} has no core point");
         }
 
-        let hd = hdbscan(&data, &HdbscanConfig::new(min_samples)).unwrap();
+        let hd = hdbscan(&data, &HdbscanConfig::new(min_samples));
+        if min_samples > n {
+            // A core distance is the distance to the min_samples-th neighbour,
+            // which fewer points do not have: refused, naming the parameter.
+            prop_assert!(
+                matches!(&hd, Err(e) if e.to_string().contains("min_samples")),
+                "min_samples {} over {} points was not refused: {:?}",
+                min_samples,
+                n,
+                hd.as_ref().map(|r| r.n_clusters)
+            );
+            return Ok(());
+        }
+        let hd = hd.unwrap();
         prop_assert_eq!(hd.labels.len(), n);
         prop_assert_eq!(hd.probabilities.len(), n);
         check_optional_partition(&hd.labels, hd.n_clusters, hd.noise_count, &hd.cluster_sizes)?;
