@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
-## [Unreleased]
+## [0.24.0] - 2026-09-30
 
 ### Changed
+
+- C# `UInsight` 0.24.0 (lockstep; its C# surface is unchanged).
+- Depends on u-numflow 0.7 and u-analytics 0.16.
 
 - **Breaking:** the WebAssembly functions throw an `Error` carrying a stable
   `code` and the values behind it instead of a bare string: `unknown_option`
