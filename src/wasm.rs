@@ -27,20 +27,182 @@
 //! ```json
 //! [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
 //! ```
+//!
+//! # Errors
+//!
+//! Every refusal throws an `Error` whose `message` is readable text and which
+//! carries `code` -- a stable reason -- and the values behind it
+//! (`parameter`, `index`, `got`, `expected`, ...). See the README's *Errors*.
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
-fn js_err(e: impl std::fmt::Display) -> JsValue {
-    JsValue::from_str(&e.to_string())
+use crate::error::InsightError;
+
+// ── Refusals ────────────────────────────────────────────────────────
+
+/// A refusal on its way to JavaScript: the text for `Error.message`, and the
+/// fields -- `code` first among them -- copied onto the `Error`.
+#[derive(Debug)]
+struct WireError {
+    message: String,
+    fields: serde_json::Value,
+}
+
+impl WireError {
+    fn new(code: &str, message: String, mut extra: serde_json::Value) -> Self {
+        let mut fields = serde_json::Map::new();
+        fields.insert("code".into(), json!(code));
+        if let Some(extra) = extra.as_object_mut() {
+            fields.append(extra);
+        }
+        WireError {
+            message,
+            fields: serde_json::Value::Object(fields),
+        }
+    }
+
+    /// An argument that is not the shape the function takes: a JSON string
+    /// instead of a value, a wrong type, a missing or unknown key.
+    fn malformed_input(parameter: &str, message: String) -> Self {
+        Self::new(
+            "malformed_input",
+            message,
+            json!({ "parameter": parameter }),
+        )
+    }
+
+    /// A string option that names none of the values the function knows.
+    fn unknown_option(parameter: &str, got: &str, expected: &[&str]) -> Self {
+        let quoted: Vec<String> = expected.iter().map(|e| format!("{e:?}")).collect();
+        Self::new(
+            "unknown_option",
+            format!(
+                "unknown {parameter} {got:?}; expected one of {}",
+                quoted.join(", ")
+            ),
+            json!({ "parameter": parameter, "got": got, "expected": expected }),
+        )
+    }
+
+    /// An input that has to hold at least one column.
+    fn empty_input(parameter: &str, message: &str) -> Self {
+        Self::new(
+            "empty_input",
+            message.to_string(),
+            json!({ "parameter": parameter }),
+        )
+    }
+
+    /// A NaN or infinity at `index` of `parameter`.
+    fn value_not_finite(parameter: &str, index: usize) -> Self {
+        Self::new(
+            "value_not_finite",
+            format!("{parameter}[{index}] is not a finite number"),
+            json!({ "parameter": parameter, "index": index }),
+        )
+    }
+
+    /// The stable reason, as the `code` field carries it.
+    #[cfg(test)]
+    fn code(&self) -> &str {
+        self.fields["code"]
+            .as_str()
+            .expect("every refusal carries a code")
+    }
+}
+
+impl From<InsightError> for WireError {
+    fn from(e: InsightError) -> Self {
+        let message = e.to_string();
+        let (code, fields) = match e {
+            InsightError::CsvParse { line, .. } => ("csv_parse", json!({ "line": line })),
+            InsightError::JsonParse { .. } => ("malformed_input", json!({ "parameter": "data" })),
+            InsightError::MissingValues { column, count } => (
+                "missing_values",
+                json!({ "column": column, "count": count }),
+            ),
+            InsightError::InsufficientData {
+                min_required,
+                actual,
+            } => (
+                "insufficient_data",
+                json!({ "min": min_required, "got": actual }),
+            ),
+            InsightError::InvalidParameter { name, .. } => {
+                ("invalid_option", json!({ "parameter": name }))
+            }
+            InsightError::DegenerateData { .. } => ("degenerate_data", json!({})),
+            InsightError::ComputationFailed { operation, .. } => {
+                ("computation_failed", json!({ "operation": operation }))
+            }
+            InsightError::ColumnNotFound { name } => {
+                ("column_not_found", json!({ "column": name }))
+            }
+            InsightError::DimensionMismatch { expected, actual } => (
+                "dimension_mismatch",
+                json!({ "expected": expected, "got": actual }),
+            ),
+            InsightError::Io(_) => ("internal", json!({})),
+        };
+        WireError::new(code, message, fields)
+    }
+}
+
+impl From<u_analytics::detection::SpectralResidualError> for WireError {
+    fn from(e: u_analytics::detection::SpectralResidualError) -> Self {
+        use u_analytics::detection::SpectralResidualError as E;
+        let message = e.to_string();
+        match e {
+            E::OptionOutOfRange { option, .. } => WireError::new(
+                "parameter_out_of_range",
+                message,
+                json!({ "parameter": option }),
+            ),
+            E::TooFewObservations { needed, got } => WireError::new(
+                "insufficient_data",
+                message,
+                json!({ "parameter": "data", "min": needed, "got": got }),
+            ),
+            E::ValueNotFinite { index } => WireError::value_not_finite("data", index),
+            _ => WireError::new("invalid_input", message, json!({})),
+        }
+    }
+}
+
+/// A result that could not be turned into a JavaScript value.
+impl From<serde_wasm_bindgen::Error> for WireError {
+    fn from(e: serde_wasm_bindgen::Error) -> Self {
+        WireError::malformed_input("result", e.to_string())
+    }
+}
+
+/// Every refusal crosses into JavaScript as an `Error` whose `message` is the
+/// readable text and which carries `code` -- a stable reason -- and the values
+/// behind it as further properties. A program branches on `err.code` and
+/// reads the fields; `err.message` reads as it always did.
+fn js_err(error: impl Into<WireError>) -> JsValue {
+    let error = error.into();
+    let js = js_sys::Error::new(&error.message);
+    // `json_compatible` turns the map into a plain object; the default would
+    // produce a JavaScript `Map`, which `Object.assign` does not read.
+    if let Ok(fields) = error
+        .fields
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+    {
+        js_sys::Object::assign(&js, &fields.into());
+    }
+    js.into()
 }
 
 /// Deserialize a native JS value, rejecting JSON strings with an actionable
 /// message and prefixing the offending parameter name to any serde error.
 fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Result<T, JsValue> {
+    let refuse = |message: String| js_err(WireError::malformed_input(param, message));
     if value.as_string().is_some() {
-        return Err(js_err(format!(
+        return Err(refuse(format!(
             "{param}: expected a native JS object/array, got a string — \
              pass the value directly, not JSON.stringify(...)"
         )));
@@ -49,8 +211,8 @@ fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Resul
     // object, so `deny_unknown_fields` never sees extra keys. Round-trip
     // through serde_json::Value so the strict wire schema is enforced.
     let json: serde_json::Value =
-        serde_wasm_bindgen::from_value(value).map_err(|e| js_err(format!("{param}: {e}")))?;
-    serde_json::from_value(json).map_err(|e| js_err(format!("{param}: {e}")))
+        serde_wasm_bindgen::from_value(value).map_err(|e| refuse(format!("{param}: {e}")))?;
+    serde_json::from_value(json).map_err(|e| refuse(format!("{param}: {e}")))
 }
 
 /// Strict column-extractor for column-major JSON inputs.
@@ -59,12 +221,19 @@ fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Resul
 /// silently coercing it to an empty / partial vector. Returns an `InvalidInput`-style
 /// JS error if the value is not a JSON array, or if any element is not a JSON number.
 fn extract_numeric_array(value: &serde_json::Value, name: &str) -> Result<Vec<f64>, JsValue> {
+    let refuse = |message: String| {
+        js_err(WireError::new(
+            "malformed_input",
+            message,
+            json!({ "parameter": "data", "column": name }),
+        ))
+    };
     let arr = value
         .as_array()
-        .ok_or_else(|| js_err(format!("column '{name}' must be a numeric array")))?;
+        .ok_or_else(|| refuse(format!("column '{name}' must be a numeric array")))?;
     let parsed: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
     if parsed.len() != arr.len() {
-        return Err(js_err(format!(
+        return Err(refuse(format!(
             "column '{name}' contains {} non-numeric value(s)",
             arr.len() - parsed.len()
         )));
@@ -248,7 +417,10 @@ pub fn describe(
     let df = JsonParser::new().parse_value(&raw).map_err(js_err)?;
 
     if df.is_empty() {
-        return Err(js_err("data must contain at least one column"));
+        return Err(js_err(WireError::empty_input(
+            "data",
+            "data must contain at least one column",
+        )));
     }
 
     let profiles = profile_dataframe(&df);
@@ -348,7 +520,10 @@ pub fn correlation_matrix(
         .unwrap_or_else(|| "pearson".to_string());
 
     if raw.is_empty() {
-        return Err(js_err("data must contain at least one column"));
+        return Err(js_err(WireError::empty_input(
+            "data",
+            "data must contain at least one column",
+        )));
     }
 
     // Sort keys for deterministic order
@@ -365,7 +540,13 @@ pub fn correlation_matrix(
         "pearson" => CorrelationMethod::Pearson,
         "spearman" => CorrelationMethod::Spearman,
         "kendall" => CorrelationMethod::Kendall,
-        other => return Err(js_err(format!("unknown correlation method '{other}'"))),
+        other => {
+            return Err(js_err(WireError::unknown_option(
+                "_method",
+                other,
+                &["pearson", "spearman", "kendall"],
+            )))
+        }
     };
     let config = CorrelationConfig {
         method,
@@ -458,14 +639,28 @@ pub fn silhouette(
     let labels: Vec<usize> = from_js(labels, "labels")?;
 
     if labels.len() != data.len() {
-        return Err(js_err(format!(
-            "labels length ({}) must match data row count ({})",
-            labels.len(),
-            data.len()
+        return Err(js_err(WireError::new(
+            "dimension_mismatch",
+            format!(
+                "labels length ({}) must match data row count ({})",
+                labels.len(),
+                data.len()
+            ),
+            json!({ "parameter": "labels", "expected": data.len(), "got": labels.len() }),
         )));
     }
-    if let Some(&bad) = labels.iter().find(|&&l| l >= k) {
-        return Err(js_err(format!("label {bad} out of range for k={k}")));
+    if let Some((index, &bad)) = labels.iter().enumerate().find(|(_, &l)| l >= k) {
+        return Err(js_err(WireError::new(
+            "parameter_out_of_range",
+            format!("label {bad} out of range for k={k}"),
+            json!({
+                "parameter": "labels",
+                "index": index,
+                "min": 0,
+                "max": k.saturating_sub(1),
+                "got": bad,
+            }),
+        )));
     }
 
     use crate::clustering::silhouette_samples;
@@ -624,19 +819,18 @@ fn default_linkage() -> String {
 /// Reads a linkage name, case-insensitively. A name it does not know is
 /// refused: it used to be read as `"ward"`, so a misspelling ran a different
 /// method than the one asked for and nothing said so.
-fn parse_linkage(name: &str) -> Result<crate::clustering::Linkage, crate::error::InsightError> {
+fn parse_linkage(name: &str) -> Result<crate::clustering::Linkage, WireError> {
     use crate::clustering::Linkage;
     match name.to_lowercase().as_str() {
         "single" => Ok(Linkage::Single),
         "complete" => Ok(Linkage::Complete),
         "average" => Ok(Linkage::Average),
         "ward" => Ok(Linkage::Ward),
-        other => Err(crate::error::InsightError::InvalidParameter {
-            name: "linkage".into(),
-            message: format!(
-                "expected \"single\", \"complete\", \"average\" or \"ward\", got {other:?}"
-            ),
-        }),
+        _ => Err(WireError::unknown_option(
+            "linkage",
+            name,
+            &["single", "complete", "average", "ward"],
+        )),
     }
 }
 
@@ -685,9 +879,11 @@ pub fn hierarchical(
         (Some(k), _) => HierarchicalConfig::with_k(k).linkage(linkage),
         (None, Some(t)) => HierarchicalConfig::with_threshold(t).linkage(linkage),
         (None, None) => {
-            return Err(js_err(
-                "config must specify either n_clusters or distance_threshold",
-            ))
+            return Err(js_err(WireError::new(
+                "missing_option",
+                "config must specify either n_clusters or distance_threshold".to_string(),
+                json!({ "parameter": "config", "expected": ["n_clusters", "distance_threshold"] }),
+            )))
         }
     };
     if let Some(mp) = cfg.max_points {
@@ -916,19 +1112,18 @@ fn default_bin_method() -> String {
 fn resolve_bin_method(
     bin_method: &str,
     bins: Option<usize>,
-) -> Result<crate::distribution::BinMethod, crate::error::InsightError> {
+) -> Result<crate::distribution::BinMethod, WireError> {
     use crate::distribution::BinMethod;
     let named = match bin_method.to_lowercase().as_str() {
         "sturges" => BinMethod::Sturges,
         "scott" => BinMethod::Scott,
         "freedman_diaconis" => BinMethod::FreedmanDiaconis,
-        other => {
-            return Err(crate::error::InsightError::InvalidParameter {
-                name: "bin_method".into(),
-                message: format!(
-                    "expected \"sturges\", \"scott\" or \"freedman_diaconis\", got {other:?}"
-                ),
-            })
+        _ => {
+            return Err(WireError::unknown_option(
+                "bin_method",
+                bin_method,
+                &["sturges", "scott", "freedman_diaconis"],
+            ))
         }
     };
     Ok(match bins {
@@ -1144,7 +1339,10 @@ pub fn regression(
     use crate::analysis::regression_analysis;
 
     if input.predictors.is_empty() {
-        return Err(js_err("predictors must contain at least one column"));
+        return Err(js_err(WireError::empty_input(
+            "predictors",
+            "predictors must contain at least one column",
+        )));
     }
 
     // Sort predictor names for deterministic order
@@ -1277,7 +1475,10 @@ pub fn feature_importance(
     let input: FeatureImportanceInputDto = from_js(data, "data")?;
 
     if input.features.is_empty() {
-        return Err(js_err("features must contain at least one column"));
+        return Err(js_err(WireError::empty_input(
+            "features",
+            "features must contain at least one column",
+        )));
     }
 
     // Sort feature names for deterministic order
@@ -1383,12 +1584,11 @@ pub fn feature_importance(
 
             serde_wasm_bindgen::to_value(&dto).map_err(js_err)
         }
-        other => Err(js_err(crate::error::InsightError::InvalidParameter {
-            name: "method".into(),
-            message: format!(
-                "expected \"permutation\", \"anova\" or \"mutual_info\", got {other:?}"
-            ),
-        })),
+        other => Err(js_err(WireError::unknown_option(
+            "method",
+            other,
+            &["permutation", "anova", "mutual_info"],
+        ))),
     }
 }
 
@@ -1432,7 +1632,10 @@ pub fn vif_diagnostic(
         .unwrap_or(10.0);
 
     if raw.is_empty() {
-        return Err(js_err("input must contain at least one numeric column"));
+        return Err(js_err(WireError::empty_input(
+            "data",
+            "input must contain at least one numeric column",
+        )));
     }
 
     let mut names: Vec<String> = raw.keys().cloned().collect();
@@ -1478,7 +1681,10 @@ pub fn condition_number_diagnostic(
     let raw: HashMap<String, Vec<f64>> = from_js(data, "data")?;
 
     if raw.is_empty() {
-        return Err(js_err("input must contain at least one numeric column"));
+        return Err(js_err(WireError::empty_input(
+            "data",
+            "input must contain at least one numeric column",
+        )));
     }
 
     let mut names: Vec<String> = raw.keys().cloned().collect();
@@ -1549,11 +1755,29 @@ pub fn detect_univariate_outliers(
         "iqr" | "tukey" => OutlierMethod::Iqr,
         "zscore" | "three_sigma" => OutlierMethod::Zscore,
         "modified_zscore" | "hampel" => OutlierMethod::ModifiedZscore,
-        other => return Err(js_err(format!("unknown method '{other}'"))),
+        other => {
+            return Err(js_err(WireError::unknown_option(
+                "method",
+                other,
+                &[
+                    "iqr",
+                    "tukey",
+                    "zscore",
+                    "three_sigma",
+                    "modified_zscore",
+                    "hampel",
+                ],
+            )))
+        }
     };
 
-    let r = detect_outliers_slice(&req.data, method)
-        .ok_or_else(|| js_err("outlier computation returned None"))?;
+    let r = detect_outliers_slice(&req.data, method).ok_or_else(|| {
+        js_err(WireError::new(
+            "computation_failed",
+            "outlier computation returned None".to_string(),
+            json!({ "operation": "outliers" }),
+        ))
+    })?;
 
     let method_str = match r.method {
         OutlierMethod::Iqr => "iqr",
@@ -1622,10 +1846,15 @@ pub fn estimate_period(
 ) -> Result<JsValue, JsValue> {
     let req: SeasonalityInputDto = from_js(data, "data")?;
     if let Some(i) = req.data.iter().position(|x| !x.is_finite()) {
-        return Err(js_err(format!("data[{i}] is not a finite number")));
+        return Err(js_err(WireError::value_not_finite("data", i)));
     }
-    let r = u_analytics::seasonality::estimate_period(&req.data)
-        .ok_or_else(|| js_err("data must have at least 8 observations"))?;
+    let r = u_analytics::seasonality::estimate_period(&req.data).ok_or_else(|| {
+        js_err(WireError::new(
+            "insufficient_data",
+            "data must have at least 8 observations".to_string(),
+            json!({ "parameter": "data", "min": 8, "got": req.data.len() }),
+        ))
+    })?;
     let dto = SeasonalityDto {
         period: r.period,
         candidates: r
@@ -1716,7 +1945,7 @@ pub fn spectral_residual(
 ) -> Result<JsValue, JsValue> {
     let req: SpectralResidualInputDto = from_js(data, "data")?;
     if let Some(i) = req.data.iter().position(|x| !x.is_finite()) {
-        return Err(js_err(format!("data[{i}] is not a finite number")));
+        return Err(js_err(WireError::value_not_finite("data", i)));
     }
     let mut sr = u_analytics::detection::SpectralResidual::new();
     if let Some(q) = req.averaging_window {
@@ -1768,16 +1997,63 @@ pub fn spectral_residual(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_linkage, resolve_bin_method};
+    use super::{parse_linkage, resolve_bin_method, WireError};
     use crate::clustering::Linkage;
     use crate::distribution::BinMethod;
     use crate::error::InsightError;
+    use serde_json::json;
 
-    fn refused_parameter<T: std::fmt::Debug>(r: Result<T, InsightError>) -> String {
+    fn refused_parameter<T: std::fmt::Debug>(r: Result<T, WireError>) -> String {
         match r {
-            Err(InsightError::InvalidParameter { name, .. }) => name,
-            other => panic!("expected InvalidParameter, got {other:?}"),
+            Err(e) if e.code() == "unknown_option" => e.fields["parameter"]
+                .as_str()
+                .expect("a parameter name")
+                .to_string(),
+            other => panic!("expected unknown_option, got {other:?}"),
         }
+    }
+
+    /// A refused name carries what was given and what would have been read.
+    #[test]
+    fn an_unknown_option_names_what_was_given_and_what_is_known() {
+        let e = parse_linkage("centroid").expect_err("unknown");
+        assert_eq!(
+            e.fields,
+            json!({
+                "code": "unknown_option",
+                "parameter": "linkage",
+                "got": "centroid",
+                "expected": ["single", "complete", "average", "ward"],
+            })
+        );
+    }
+
+    /// The crate's own errors keep their reason and the values behind it.
+    #[test]
+    fn crate_errors_become_codes_with_their_values() {
+        let e = WireError::from(InsightError::InsufficientData {
+            min_required: 3,
+            actual: 1,
+        });
+        assert_eq!(
+            e.fields,
+            json!({ "code": "insufficient_data", "min": 3, "got": 1 })
+        );
+        let e = WireError::from(InsightError::InvalidParameter {
+            name: "threshold".into(),
+            message: "must be positive".into(),
+        });
+        assert_eq!(
+            e.fields,
+            json!({ "code": "invalid_option", "parameter": "threshold" })
+        );
+        let e = WireError::from(
+            u_analytics::detection::SpectralResidualError::ValueNotFinite { index: 4 },
+        );
+        assert_eq!(
+            e.fields,
+            json!({ "code": "value_not_finite", "parameter": "data", "index": 4 })
+        );
     }
 
     #[test]

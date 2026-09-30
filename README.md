@@ -414,8 +414,40 @@ names: `DescribeInput`, `CorrelationInput` (with `_method`), `VifInput` (with
 `_threshold`) and `Record<string, number[]>`.
 
 The binding still validates every input at the boundary, for JavaScript
-callers and for values that reach it through a cast, and a rejected one names
-the parameter.
+callers and for values that reach it through a cast.
+
+### Errors
+
+A refusal throws an `Error` whose `message` is readable text and which carries
+a `code` naming the reason, next to the values behind it — so a program can
+point at what to change without parsing the message:
+
+```js
+import { hierarchical } from '@iyulab/u-insight';
+
+try {
+  hierarchical([[0, 0], [1, 1], [5, 5]], { linkage: 'centroid', n_clusters: 2 });
+} catch (err) {
+  console.log(err.code, err.parameter, err.got, err.expected);
+  // unknown_option linkage centroid [ 'single', 'complete', 'average', 'ward' ]
+}
+```
+
+| `code` | Fields | Meaning |
+|---|---|---|
+| `unknown_option` | `parameter`, `got`, `expected` | A `linkage`, `method`, `bin_method` or `_method` that names none of the supported values |
+| `missing_option` | `parameter`, `expected` | A `hierarchical` config with neither `n_clusters` nor `distance_threshold` |
+| `invalid_option` | `parameter` | An option value the analysis refuses (a non-positive `threshold`, a `_threshold` that is not a number, …) |
+| `parameter_out_of_range` | `parameter` (and `index`, `min`, `max`, `got` where they apply) | A `spectral_residual` option outside its domain, or a `silhouette` label `≥ k` |
+| `insufficient_data` | `min`, `got` (and `parameter`) | Fewer rows or observations than the method needs |
+| `value_not_finite` | `parameter`, `index` | A NaN or infinity in a series |
+| `dimension_mismatch` | `expected`, `got` (and `parameter`) | Lengths that have to agree do not (`labels` vs data rows, …) |
+| `empty_input` | `parameter` | An input with no columns |
+| `missing_values` | `column`, `count` | A column with missing values where the analysis needs complete data |
+| `degenerate_data` | — | Constant columns, a singular matrix, … |
+| `column_not_found` | `column` | A column name the data does not have |
+| `computation_failed` | `operation` | A numerical step that did not converge or produced no result |
+| `malformed_input` | `parameter` (and `column`) | An argument of the wrong shape or type, a non-numeric column entry, or a JSON string |
 
 ### Functions
 

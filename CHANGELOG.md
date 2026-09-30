@@ -10,6 +10,16 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Changed
 
+- **Breaking:** the WebAssembly functions throw an `Error` carrying a stable
+  `code` and the values behind it instead of a bare string: `unknown_option`
+  (`parameter`, `got`, `expected`) for a misspelt `linkage`, `method`,
+  `bin_method` or `_method`; `insufficient_data` (`min`, `got`);
+  `value_not_finite` (`parameter`, `index`); `parameter_out_of_range`;
+  `dimension_mismatch`; `empty_input`; and one code per `InsightError`
+  variant. `err.message` reads as before, but `String(err)` now starts with
+  `Error: `. The README lists every code and its fields. The C library and the
+  .NET binding are unchanged.
+
 - The README says a browser without a bundler is not supported (the package
   loads its `.wasm` through an ES module import, which browsers refuse), instead
   of listing only the environments that work.
