@@ -379,9 +379,8 @@ npm install @iyulab/u-insight
 ### Quick Start
 
 ```javascript
-import init, { describe, kmeans } from '@iyulab/u-insight';
+import { describe, kmeans } from '@iyulab/u-insight';
 
-await init();
 const stats = describe({ col1: [1, 2, 3], col2: [4, 5, 6] });
 ```
 

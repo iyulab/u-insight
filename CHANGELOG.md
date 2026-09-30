@@ -8,6 +8,12 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- The publishing workflow runs the README's JavaScript examples against the
+  built package before it publishes, so an example that throws is caught
+  before a reader copies it.
+
 ### Fixed
 
 - **HDBSCAN refuses `min_samples` above the number of points, and returns all
@@ -18,6 +24,11 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   probability 0. `min_samples` defaults to `min_cluster_size`, so an oversized
   cluster size with no explicit `min_samples` is now refused, naming
   `min_samples` (as scikit-learn does).
+- The README's JavaScript example imported a default `init` and called
+  `await init()`. This package has no default export -- it initialises when it
+  is imported, in Node and in bundlers alike -- so the example threw
+  `init is not a function` on its first line. It now imports the functions
+  directly.
 
 ## [0.23.0] - 2026-09-29
 
