@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-09-30
+
+C# `UInsight` NuGet **0.23.1** (lockstep).
+
 ### Changed
 
 - The publishing workflow runs the README's JavaScript examples against the
