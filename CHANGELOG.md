@@ -8,6 +8,12 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- The README says a browser without a bundler is not supported (the package
+  loads its `.wasm` through an ES module import, which browsers refuse), instead
+  of listing only the environments that work.
+
 ## [0.23.1] - 2026-09-30
 
 C# `UInsight` NuGet **0.23.1** (lockstep).
