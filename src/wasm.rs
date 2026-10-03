@@ -197,14 +197,114 @@ fn js_err(error: impl Into<WireError>) -> JsValue {
     js.into()
 }
 
+/// A NaN or ±Infinity found in a JS argument, and where it sits.
+///
+/// JSON has no non-finite numbers, so on the way to the wire schema
+/// `serde_json` turns one into `null` and the caller would be told a value has
+/// the wrong type. [`find_non_finite`] looks before that happens, so the
+/// refusal names the real reason and the place.
+struct NonFinite {
+    /// The argument's name, then `.key` and `[i]` steps down to the array or
+    /// field that holds the number.
+    parameter: String,
+    /// The number's position, when it is an array element.
+    index: Option<usize>,
+    value: f64,
+}
+
+impl NonFinite {
+    fn message(&self) -> String {
+        let at = match self.index {
+            Some(i) => format!("{}[{i}]", self.parameter),
+            None => self.parameter.clone(),
+        };
+        let got = if self.value.is_nan() {
+            "NaN"
+        } else if self.value > 0.0 {
+            "Infinity"
+        } else {
+            "-Infinity"
+        };
+        format!("{at}: expected a finite number, got {got}")
+    }
+
+    /// `parameter` and `index` (`null` when the number is not an array element).
+    fn fields(&self) -> serde_json::Value {
+        serde_json::json!({ "parameter": self.parameter, "index": self.index })
+    }
+}
+
+/// The first NaN or ±Infinity in `value`, searching arrays, iterables and
+/// plain objects. `allow_nan` lets NaN through for an input that reads it as a
+/// missing value; it then arrives as `null`.
+fn find_non_finite(value: &JsValue, parameter: &str, allow_nan: bool) -> Option<NonFinite> {
+    let refused = |n: f64| !n.is_finite() && !(allow_nan && n.is_nan());
+    let found = |index: Option<usize>, value: f64| NonFinite {
+        parameter: parameter.to_string(),
+        index,
+        value,
+    };
+    if let Some(n) = value.as_f64() {
+        return refused(n).then(|| found(None, n));
+    }
+    if !value.is_object() {
+        return None;
+    }
+    if let Ok(Some(items)) = js_sys::try_iter(value) {
+        for (i, item) in items.enumerate() {
+            // An iterator that throws is left for serde to report.
+            let item = item.ok()?;
+            match item.as_f64() {
+                Some(n) if refused(n) => return Some(found(Some(i), n)),
+                Some(_) => {}
+                None => {
+                    let inner = find_non_finite(&item, &format!("{parameter}[{i}]"), allow_nan);
+                    if inner.is_some() {
+                        return inner;
+                    }
+                }
+            }
+        }
+        return None;
+    }
+    let object: &js_sys::Object = wasm_bindgen::JsCast::unchecked_ref(value);
+    for entry in js_sys::Object::entries(object).iter() {
+        let pair: js_sys::Array = wasm_bindgen::JsCast::unchecked_into(entry);
+        let key = pair.get(0).as_string().unwrap_or_default();
+        let inner = find_non_finite(&pair.get(1), &format!("{parameter}.{key}"), allow_nan);
+        if inner.is_some() {
+            return inner;
+        }
+    }
+    None
+}
+
 /// Deserialize a native JS value, rejecting JSON strings with an actionable
 /// message and prefixing the offending parameter name to any serde error.
 fn from_js<T: serde::de::DeserializeOwned>(value: JsValue, param: &str) -> Result<T, JsValue> {
+    from_js_with(value, param, false)
+}
+
+/// [`from_js`], letting NaN through as a missing value when `allow_nan`
+/// (it arrives as `null`, which [`describe`] counts as missing). ±Infinity is
+/// refused either way.
+fn from_js_with<T: serde::de::DeserializeOwned>(
+    value: JsValue,
+    param: &str,
+    allow_nan: bool,
+) -> Result<T, JsValue> {
     let refuse = |message: String| js_err(WireError::malformed_input(param, message));
     if value.as_string().is_some() {
         return Err(refuse(format!(
             "{param}: expected a native JS object/array, got a string — \
              pass the value directly, not JSON.stringify(...)"
+        )));
+    }
+    if let Some(found) = find_non_finite(&value, param, allow_nan) {
+        return Err(js_err(WireError::new(
+            "value_not_finite",
+            found.message(),
+            found.fields(),
         )));
     }
     // serde-wasm-bindgen reads only a struct's declared fields from a JS
@@ -412,7 +512,8 @@ pub fn describe(
     use crate::json_parser::JsonParser;
     use crate::profiling::profile_dataframe;
 
-    let raw: serde_json::Value = from_js(data, "data")?;
+    // NaN is a missing value here, like null; ±Infinity is still refused.
+    let raw: serde_json::Value = from_js_with(data, "data", true)?;
 
     let df = JsonParser::new().parse_value(&raw).map_err(js_err)?;
 

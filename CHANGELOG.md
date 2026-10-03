@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Fixed
+
+- WASM: a NaN or ±Infinity anywhere in an argument is refused with
+  `value_not_finite`, with `parameter` the path to it and `index` its position
+  in that array. JSON has no such numbers, so it used to reach the wire schema
+  as `null` and be refused as `malformed_input` ("invalid type: null, expected
+  f64") — the wrong reason, and the library's own non-finite checks behind the
+  binding could not be reached.
+- WASM `describe` reads NaN as a missing value, like `null` — as it already
+  did, now on purpose and documented; ±Infinity is refused.
+
 ## [0.24.0] - 2026-09-30
 
 ### Changed

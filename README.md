@@ -440,7 +440,7 @@ try {
 | `invalid_option` | `parameter` | An option value the analysis refuses (a non-positive `threshold`, a `_threshold` that is not a number, …) |
 | `parameter_out_of_range` | `parameter` (and `index`, `min`, `max`, `got` where they apply) | A `spectral_residual` option outside its domain, or a `silhouette` label `≥ k` |
 | `insufficient_data` | `min`, `got` (and `parameter`) | Fewer rows or observations than the method needs |
-| `value_not_finite` | `parameter`, `index` | A NaN or infinity in a series |
+| `value_not_finite` | `parameter`, `index` | A NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`data.b`), `index` its position in that array, or `null`. `describe` reads NaN as a missing value, like `null` |
 | `dimension_mismatch` | `expected`, `got` (and `parameter`) | Lengths that have to agree do not (`labels` vs data rows, …) |
 | `empty_input` | `parameter` | An input with no columns |
 | `missing_values` | `column`, `count` | A column with missing values where the analysis needs complete data |
@@ -454,6 +454,7 @@ try {
 #### `describe(data) -> [ColumnResult]`
 
 Descriptive statistics per column. Input: column-major `{ "col1": [1,2,3] }`.
+`null` and `NaN` are both counted as missing (`null_count`); ±Infinity is refused.
 
 **Output:** Array of `{ name, data_type, numeric: { count, min, max, mean, median, std_dev, variance, skewness, kurtosis, q1, q3, iqr, p5, p95, ... } }`.
 
