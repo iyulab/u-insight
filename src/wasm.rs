@@ -39,136 +39,13 @@ use serde_json::json;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
-use crate::error::InsightError;
-
 // ── Refusals ────────────────────────────────────────────────────────
 
-/// A refusal on its way to JavaScript: the text for `Error.message`, and the
-/// fields -- `code` first among them -- copied onto the `Error`.
-#[derive(Debug)]
-struct WireError {
-    message: String,
-    fields: serde_json::Value,
-}
-
-impl WireError {
-    fn new(code: &str, message: String, mut extra: serde_json::Value) -> Self {
-        let mut fields = serde_json::Map::new();
-        fields.insert("code".into(), json!(code));
-        if let Some(extra) = extra.as_object_mut() {
-            fields.append(extra);
-        }
-        WireError {
-            message,
-            fields: serde_json::Value::Object(fields),
-        }
-    }
-
-    /// An argument that is not the shape the function takes: a JSON string
-    /// instead of a value, a wrong type, a missing or unknown key.
-    fn malformed_input(parameter: &str, message: String) -> Self {
-        Self::new(
-            "malformed_input",
-            message,
-            json!({ "parameter": parameter }),
-        )
-    }
-
-    /// A string option that names none of the values the function knows.
-    fn unknown_option(parameter: &str, got: &str, expected: &[&str]) -> Self {
-        let quoted: Vec<String> = expected.iter().map(|e| format!("{e:?}")).collect();
-        Self::new(
-            "unknown_option",
-            format!(
-                "unknown {parameter} {got:?}; expected one of {}",
-                quoted.join(", ")
-            ),
-            json!({ "parameter": parameter, "got": got, "expected": expected }),
-        )
-    }
-
-    /// An input that has to hold at least one column.
-    fn empty_input(parameter: &str, message: &str) -> Self {
-        Self::new(
-            "empty_input",
-            message.to_string(),
-            json!({ "parameter": parameter }),
-        )
-    }
-
-    /// A NaN or infinity at `index` of `parameter`.
-    fn value_not_finite(parameter: &str, index: usize) -> Self {
-        Self::new(
-            "value_not_finite",
-            format!("{parameter}[{index}] is not a finite number"),
-            json!({ "parameter": parameter, "index": index }),
-        )
-    }
-
-    /// The stable reason, as the `code` field carries it.
-    #[cfg(test)]
-    fn code(&self) -> &str {
-        self.fields["code"]
-            .as_str()
-            .expect("every refusal carries a code")
-    }
-}
-
-impl From<InsightError> for WireError {
-    fn from(e: InsightError) -> Self {
-        let message = e.to_string();
-        let (code, fields) = match e {
-            InsightError::CsvParse { line, .. } => ("csv_parse", json!({ "line": line })),
-            InsightError::JsonParse { .. } => ("malformed_input", json!({ "parameter": "data" })),
-            InsightError::MissingValues { column, count } => (
-                "missing_values",
-                json!({ "column": column, "count": count }),
-            ),
-            InsightError::InsufficientData {
-                min_required,
-                actual,
-            } => (
-                "insufficient_data",
-                json!({ "min": min_required, "got": actual }),
-            ),
-            InsightError::InvalidParameter { name, .. } => {
-                ("invalid_option", json!({ "parameter": name }))
-            }
-            InsightError::DegenerateData { .. } => ("degenerate_data", json!({})),
-            InsightError::ComputationFailed { operation, .. } => {
-                ("computation_failed", json!({ "operation": operation }))
-            }
-            InsightError::ColumnNotFound { name } => {
-                ("column_not_found", json!({ "column": name }))
-            }
-            InsightError::DimensionMismatch { expected, actual } => (
-                "dimension_mismatch",
-                json!({ "expected": expected, "got": actual }),
-            ),
-            InsightError::Io(_) => ("internal", json!({})),
-        };
-        WireError::new(code, message, fields)
-    }
-}
+use crate::refusal::Refusal as WireError;
 
 impl From<u_analytics::detection::SpectralResidualError> for WireError {
     fn from(e: u_analytics::detection::SpectralResidualError) -> Self {
-        use u_analytics::detection::SpectralResidualError as E;
-        let message = e.to_string();
-        match e {
-            E::OptionOutOfRange { option, .. } => WireError::new(
-                "parameter_out_of_range",
-                message,
-                json!({ "parameter": option }),
-            ),
-            E::TooFewObservations { needed, got } => WireError::new(
-                "insufficient_data",
-                message,
-                json!({ "parameter": "data", "min": needed, "got": got }),
-            ),
-            E::ValueNotFinite { index } => WireError::value_not_finite("data", index),
-            _ => WireError::new("invalid_input", message, json!({})),
-        }
+        WireError::from(&e)
     }
 }
 

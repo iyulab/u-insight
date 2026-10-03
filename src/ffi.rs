@@ -33,6 +33,7 @@ use crate::feature_importance::{feature_analysis, permutation_importance, Featur
 use crate::json_parser::JsonParser;
 use crate::pca::{pca, PcaConfig};
 use crate::profiling::profile_dataframe;
+use crate::refusal::Refusal;
 
 // ── Error handling ────────────────────────────────────────────────────
 
@@ -52,6 +53,24 @@ pub const INSIGHT_ERR_COMPUTATION_FAILED: i32 = -8;
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
     static LAST_ERROR_PARAMETER: RefCell<Option<CString>> = const { RefCell::new(None) };
+    /// The last refusal's whole body, and its text form for
+    /// [`insight_last_error_json`].
+    static LAST_ERROR_BODY: RefCell<Option<(serde_json::Value, CString)>> = const { RefCell::new(None) };
+}
+
+/// The `code` an `INSIGHT_ERR_*` category carries when nothing more specific
+/// is known about the refusal. Errors from the analyses carry their own
+/// (see [`Refusal`]).
+fn code_name(rc: i32) -> &'static str {
+    match rc {
+        INSIGHT_ERR_NULL_PTR | INSIGHT_ERR_PARSE_FAILED => "malformed_input",
+        INSIGHT_ERR_INVALID_INPUT => "invalid_input",
+        INSIGHT_ERR_INSUFFICIENT_DATA => "insufficient_data",
+        INSIGHT_ERR_INVALID_PARAM => "invalid_option",
+        INSIGHT_ERR_DEGENERATE_DATA => "degenerate_data",
+        INSIGHT_ERR_COMPUTATION_FAILED => "computation_failed",
+        _ => "internal",
+    }
 }
 
 fn error_to_code(e: &crate::error::InsightError) -> i32 {
@@ -62,32 +81,65 @@ fn error_to_code(e: &crate::error::InsightError) -> i32 {
         | InsightError::ColumnNotFound { .. }
         | InsightError::DimensionMismatch { .. } => INSIGHT_ERR_INVALID_INPUT,
         InsightError::InsufficientData { .. } => INSIGHT_ERR_INSUFFICIENT_DATA,
-        InsightError::InvalidParameter { name, .. } => {
-            set_last_error_parameter(name);
-            INSIGHT_ERR_INVALID_PARAM
-        }
+        InsightError::InvalidParameter { .. } => INSIGHT_ERR_INVALID_PARAM,
         InsightError::DegenerateData { .. } => INSIGHT_ERR_DEGENERATE_DATA,
         InsightError::ComputationFailed { .. } => INSIGHT_ERR_COMPUTATION_FAILED,
         InsightError::Io(_) => INSIGHT_ERR_ANALYSIS_FAILED,
     }
 }
 
-/// Records the error message. Clears the parameter name: an error is about a
-/// named parameter only when [`set_last_error_parameter`] says so afterwards.
-fn set_last_error(msg: &str) {
+/// Records a refusal: its text (`insight_last_error`), the parameter it is
+/// about when its fields name one (`insight_last_error_parameter`), and the
+/// whole body (`insight_last_error_json`).
+fn record(refusal: Refusal) {
     LAST_ERROR.with(|cell| {
-        *cell.borrow_mut() = CString::new(msg).ok();
+        *cell.borrow_mut() = CString::new(refusal.message.as_str()).ok();
     });
+    let mut body = serde_json::Map::new();
+    body.insert("error".into(), serde_json::Value::String(refusal.message));
+    if let serde_json::Value::Object(fields) = refusal.fields {
+        body.extend(fields);
+    }
+    store_body(serde_json::Value::Object(body));
+}
+
+/// Keeps `body` as the last refusal's. `insight_last_error_parameter` names
+/// the option when the refusal is about one; a refusal of the data (`data`
+/// too short, `data[7]` not finite) carries its `parameter` in the body only.
+fn store_body(body: serde_json::Value) {
+    let about_an_option = matches!(
+        body.get("code").and_then(|c| c.as_str()),
+        Some("invalid_option" | "parameter_out_of_range" | "unknown_option" | "missing_option")
+    );
+    let parameter = body
+        .get("parameter")
+        .and_then(|p| p.as_str())
+        .filter(|_| about_an_option)
+        .and_then(|p| CString::new(p).ok());
     LAST_ERROR_PARAMETER.with(|cell| {
-        *cell.borrow_mut() = None;
+        *cell.borrow_mut() = parameter;
+    });
+    let text = CString::new(body.to_string()).ok();
+    LAST_ERROR_BODY.with(|cell| {
+        *cell.borrow_mut() = text.map(|text| (body, text));
     });
 }
 
-/// Names the parameter the last error is about (call after [`set_last_error`]).
-fn set_last_error_parameter(name: &str) {
-    LAST_ERROR_PARAMETER.with(|cell| {
-        *cell.borrow_mut() = CString::new(name).ok();
-    });
+/// Records an analysis error with its own code and fields, and returns its
+/// `INSIGHT_ERR_*` category.
+fn fail(e: &crate::error::InsightError) -> i32 {
+    record(Refusal::from(e));
+    error_to_code(e)
+}
+
+/// Records a refusal known only by its category and text, and returns `rc`.
+fn refuse(rc: i32, message: impl Into<String>) -> i32 {
+    record(Refusal::new(
+        code_name(rc),
+        message.into(),
+        serde_json::json!({}),
+    ));
+    rc
 }
 
 /// Returns the last error message, or null if no error.
@@ -126,13 +178,36 @@ pub extern "C" fn insight_last_error_parameter() -> *const c_char {
     })
 }
 
-/// Clears the last error message and parameter name.
+/// Returns the last refusal as a JSON object, or null if no error:
+/// `{"error": <message>, "code": <reason>, ...fields}` -- the same `code` and
+/// fields the WebAssembly binding puts on its `Error` (`index`, `parameter`,
+/// `min`, `got`, `column`, ...), so a caller can say which value was refused
+/// and why without parsing the message.
+/// The returned string is valid until the next FFI call on this thread.
+///
+/// # Safety
+/// The caller must not free the returned pointer.
+#[no_mangle]
+pub extern "C" fn insight_last_error_json() -> *const c_char {
+    LAST_ERROR_BODY.with(|cell| {
+        let borrow = cell.borrow();
+        match borrow.as_ref() {
+            Some((_, text)) => text.as_ptr(),
+            None => ptr::null(),
+        }
+    })
+}
+
+/// Clears the last error message, parameter name and body.
 #[no_mangle]
 pub extern "C" fn insight_clear_error() {
     LAST_ERROR.with(|cell| {
         *cell.borrow_mut() = None;
     });
     LAST_ERROR_PARAMETER.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+    LAST_ERROR_BODY.with(|cell| {
         *cell.borrow_mut() = None;
     });
 }
@@ -176,7 +251,7 @@ pub struct CColumnSummary {
 pub unsafe extern "C" fn insight_profile_csv(csv_data: *const c_char) -> *mut ProfileContext {
     let result = panic::catch_unwind(|| {
         if csv_data.is_null() {
-            set_last_error("null csv_data pointer");
+            refuse(INSIGHT_ERR_NULL_PTR, "null csv_data pointer");
             return ptr::null_mut();
         }
 
@@ -184,7 +259,7 @@ pub unsafe extern "C" fn insight_profile_csv(csv_data: *const c_char) -> *mut Pr
         let csv = match c_str.to_str() {
             Ok(s) => s,
             Err(e) => {
-                set_last_error(&format!("invalid UTF-8: {e}"));
+                refuse(INSIGHT_ERR_PARSE_FAILED, format!("invalid UTF-8: {e}"));
                 return ptr::null_mut();
             }
         };
@@ -192,7 +267,7 @@ pub unsafe extern "C" fn insight_profile_csv(csv_data: *const c_char) -> *mut Pr
         let df = match CsvParser::new().parse_str(csv) {
             Ok(df) => df,
             Err(e) => {
-                set_last_error(&format!("CSV parse error: {e}"));
+                fail(&e);
                 return ptr::null_mut();
             }
         };
@@ -209,7 +284,7 @@ pub unsafe extern "C" fn insight_profile_csv(csv_data: *const c_char) -> *mut Pr
     match result {
         Ok(ptr) => ptr,
         Err(_) => {
-            set_last_error("panic in insight_profile_csv");
+            refuse(INSIGHT_ERR_PANIC, "panic in insight_profile_csv");
             ptr::null_mut()
         }
     }
@@ -230,7 +305,7 @@ pub unsafe extern "C" fn insight_profile_csv(csv_data: *const c_char) -> *mut Pr
 pub unsafe extern "C" fn insight_profile_json(json_data: *const c_char) -> *mut ProfileContext {
     let result = panic::catch_unwind(|| {
         if json_data.is_null() {
-            set_last_error("null json_data pointer");
+            refuse(INSIGHT_ERR_NULL_PTR, "null json_data pointer");
             return ptr::null_mut();
         }
 
@@ -238,7 +313,7 @@ pub unsafe extern "C" fn insight_profile_json(json_data: *const c_char) -> *mut 
         let json = match c_str.to_str() {
             Ok(s) => s,
             Err(e) => {
-                set_last_error(&format!("invalid UTF-8: {e}"));
+                refuse(INSIGHT_ERR_PARSE_FAILED, format!("invalid UTF-8: {e}"));
                 return ptr::null_mut();
             }
         };
@@ -246,7 +321,7 @@ pub unsafe extern "C" fn insight_profile_json(json_data: *const c_char) -> *mut 
         let df = match JsonParser::new().parse_str(json) {
             Ok(df) => df,
             Err(e) => {
-                set_last_error(&format!("JSON parse error: {e}"));
+                fail(&e);
                 return ptr::null_mut();
             }
         };
@@ -263,7 +338,7 @@ pub unsafe extern "C" fn insight_profile_json(json_data: *const c_char) -> *mut 
     match result {
         Ok(ptr) => ptr,
         Err(_) => {
-            set_last_error("panic in insight_profile_json");
+            refuse(INSIGHT_ERR_PANIC, "panic in insight_profile_json");
             ptr::null_mut()
         }
     }
@@ -287,7 +362,7 @@ pub unsafe extern "C" fn insight_profile_free(ctx: *mut ProfileContext) {
 #[no_mangle]
 pub unsafe extern "C" fn insight_profile_row_count(ctx: *const ProfileContext) -> i64 {
     if ctx.is_null() {
-        set_last_error("null context");
+        refuse(INSIGHT_ERR_NULL_PTR, "null context");
         return -1;
     }
     let ctx = unsafe { &*ctx };
@@ -301,7 +376,7 @@ pub unsafe extern "C" fn insight_profile_row_count(ctx: *const ProfileContext) -
 #[no_mangle]
 pub unsafe extern "C" fn insight_profile_col_count(ctx: *const ProfileContext) -> i64 {
     if ctx.is_null() {
-        set_last_error("null context");
+        refuse(INSIGHT_ERR_NULL_PTR, "null context");
         return -1;
     }
     let ctx = unsafe { &*ctx };
@@ -320,15 +395,13 @@ pub unsafe extern "C" fn insight_profile_column(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if ctx.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
         let ctx = unsafe { &*ctx };
         let idx = col_idx as usize;
 
         if idx >= ctx.column_profiles.len() {
-            set_last_error("column index out of range");
-            return INSIGHT_ERR_INVALID_INPUT;
+            return refuse(INSIGHT_ERR_INVALID_INPUT, "column index out of range");
         }
 
         let profile = &ctx.column_profiles[idx];
@@ -372,10 +445,7 @@ pub unsafe extern "C" fn insight_profile_column(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_profile_column");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_profile_column"),
     }
 }
 
@@ -412,8 +482,7 @@ pub unsafe extern "C" fn insight_kmeans(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
@@ -427,8 +496,7 @@ pub unsafe extern "C" fn insight_kmeans(
         let km_result = match kmeans(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -453,10 +521,7 @@ pub unsafe extern "C" fn insight_kmeans(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_kmeans");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_kmeans"),
     }
 }
 
@@ -517,8 +582,7 @@ pub unsafe extern "C" fn insight_pca(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
@@ -531,8 +595,7 @@ pub unsafe extern "C" fn insight_pca(
         let pca_result = match pca(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -574,10 +637,7 @@ pub unsafe extern "C" fn insight_pca(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_pca");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_pca"),
     }
 }
 
@@ -626,15 +686,13 @@ pub unsafe extern "C" fn insight_silhouette(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || labels.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
         let d = n_cols as usize;
         if n == 0 || d == 0 {
-            set_last_error("empty input");
-            return INSIGHT_ERR_INVALID_INPUT;
+            return refuse(INSIGHT_ERR_INVALID_INPUT, "empty input");
         }
 
         let raw = unsafe { slice::from_raw_parts(data, n * d) };
@@ -646,8 +704,10 @@ pub unsafe extern "C" fn insight_silhouette(
         // Validate label range
         let k_usize = k as usize;
         if let Some(&bad) = labels_usize.iter().find(|&&l| l >= k_usize) {
-            set_last_error(&format!("label {bad} out of range for k={k_usize}"));
-            return INSIGHT_ERR_INVALID_INPUT;
+            return refuse(
+                INSIGHT_ERR_INVALID_INPUT,
+                format!("label {bad} out of range for k={k_usize}"),
+            );
         }
 
         let analysis = silhouette_samples(&points, &labels_usize, k_usize);
@@ -667,10 +727,7 @@ pub unsafe extern "C" fn insight_silhouette(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_silhouette");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_silhouette"),
     }
 }
 
@@ -718,8 +775,7 @@ pub unsafe extern "C" fn insight_dbscan(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
@@ -732,8 +788,7 @@ pub unsafe extern "C" fn insight_dbscan(
         let db_result = match dbscan(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -764,10 +819,7 @@ pub unsafe extern "C" fn insight_dbscan(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_dbscan");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_dbscan"),
     }
 }
 
@@ -823,8 +875,7 @@ pub unsafe extern "C" fn insight_distribution(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -842,8 +893,7 @@ pub unsafe extern "C" fn insight_distribution(
         let dist_result = match distribution_analysis(&values, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -888,10 +938,7 @@ pub unsafe extern "C" fn insight_distribution(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_distribution");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_distribution"),
     }
 }
 
@@ -928,8 +975,7 @@ pub unsafe extern "C" fn insight_feature_importance(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
@@ -947,8 +993,7 @@ pub unsafe extern "C" fn insight_feature_importance(
         let fi_result = match feature_analysis(&columns, &names, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -982,10 +1027,7 @@ pub unsafe extern "C" fn insight_feature_importance(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_feature_importance");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_feature_importance"),
     }
 }
 
@@ -1027,8 +1069,7 @@ pub unsafe extern "C" fn insight_isolation_forest(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let rows = n_rows as usize;
@@ -1047,8 +1088,7 @@ pub unsafe extern "C" fn insight_isolation_forest(
         let iforest = match crate::isolation_forest::isolation_forest(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -1074,10 +1114,7 @@ pub unsafe extern "C" fn insight_isolation_forest(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_isolation_forest");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_isolation_forest"),
     }
 }
 
@@ -1101,8 +1138,7 @@ pub unsafe extern "C" fn insight_lof(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let rows = n_rows as usize;
@@ -1120,8 +1156,7 @@ pub unsafe extern "C" fn insight_lof(
         let lof_result = match crate::lof::lof(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -1147,10 +1182,7 @@ pub unsafe extern "C" fn insight_lof(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_lof");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_lof"),
     }
 }
 
@@ -1195,15 +1227,16 @@ pub unsafe extern "C" fn insight_correlation(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let nr = n_rows as usize;
         let nc = n_cols as usize;
         if nr < 2 || nc < 2 {
-            set_last_error("need at least 2 rows and 2 columns");
-            return INSIGHT_ERR_INVALID_INPUT;
+            return refuse(
+                INSIGHT_ERR_INVALID_INPUT,
+                "need at least 2 rows and 2 columns",
+            );
         }
 
         let corr_method = match method {
@@ -1211,8 +1244,10 @@ pub unsafe extern "C" fn insight_correlation(
             INSIGHT_CORR_SPEARMAN => crate::analysis::CorrelationMethod::Spearman,
             INSIGHT_CORR_KENDALL => crate::analysis::CorrelationMethod::Kendall,
             _ => {
-                set_last_error("invalid correlation method (use 0=Pearson, 1=Spearman, 2=Kendall)");
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(
+                    INSIGHT_ERR_INVALID_PARAM,
+                    "invalid correlation method (use 0=Pearson, 1=Spearman, 2=Kendall)",
+                );
             }
         };
 
@@ -1251,19 +1286,13 @@ pub unsafe extern "C" fn insight_correlation(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_correlation");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_correlation"),
     }
 }
 
@@ -1303,14 +1332,12 @@ pub unsafe extern "C" fn insight_regression(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if x.is_null() || y.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
         if len < 3 {
-            set_last_error("need at least 3 data points");
-            return INSIGHT_ERR_INVALID_INPUT;
+            return refuse(INSIGHT_ERR_INVALID_INPUT, "need at least 3 data points");
         }
 
         let x_slice = unsafe { slice::from_raw_parts(x, len) };
@@ -1330,19 +1357,13 @@ pub unsafe extern "C" fn insight_regression(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_regression");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_regression"),
     }
 }
 
@@ -1386,15 +1407,16 @@ pub unsafe extern "C" fn insight_mahalanobis(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let nr = n_rows as usize;
         let nc = n_cols as usize;
         if nr < nc + 1 {
-            set_last_error("need n > p for Mahalanobis distance");
-            return INSIGHT_ERR_INVALID_INPUT;
+            return refuse(
+                INSIGHT_ERR_INVALID_INPUT,
+                "need n > p for Mahalanobis distance",
+            );
         }
 
         let raw = unsafe { slice::from_raw_parts(data, nr * nc) };
@@ -1422,19 +1444,13 @@ pub unsafe extern "C" fn insight_mahalanobis(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_mahalanobis");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_mahalanobis"),
     }
 }
 
@@ -1466,8 +1482,7 @@ pub unsafe extern "C" fn insight_cramers_v(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if table.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let nr = n_rows as usize;
@@ -1482,19 +1497,13 @@ pub unsafe extern "C" fn insight_cramers_v(
                 out_ref.p_value = r.p_value;
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("Cramér's V computation failed");
-                INSIGHT_ERR_ANALYSIS_FAILED
-            }
+            None => refuse(INSIGHT_ERR_ANALYSIS_FAILED, "Cramér's V computation failed"),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_cramers_v");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_cramers_v"),
     }
 }
 
@@ -1541,8 +1550,7 @@ pub unsafe extern "C" fn insight_anova_select(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || target.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let nr = n_rows as usize;
@@ -1585,19 +1593,13 @@ pub unsafe extern "C" fn insight_anova_select(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_anova_select");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_anova_select"),
     }
 }
 
@@ -1677,8 +1679,7 @@ pub unsafe extern "C" fn insight_hierarchical(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
@@ -1695,10 +1696,13 @@ pub unsafe extern "C" fn insight_hierarchical(
             INSIGHT_LINKAGE_AVERAGE => Linkage::Average,
             INSIGHT_LINKAGE_WARD => Linkage::Ward,
             other => {
-                set_last_error(&format!(
-                    "linkage must be 0 (single), 1 (complete), 2 (average) or 3 (ward), got {other}"
+                record(Refusal::new(
+                    "unknown_option",
+                    format!(
+                        "linkage must be 0 (single), 1 (complete), 2 (average) or 3 (ward), got {other}"
+                    ),
+                    serde_json::json!({ "parameter": "linkage", "got": other, "expected": [0, 1, 2, 3] }),
                 ));
-                set_last_error_parameter("linkage");
                 return INSIGHT_ERR_INVALID_PARAM;
             }
         };
@@ -1723,8 +1727,7 @@ pub unsafe extern "C" fn insight_hierarchical(
         let hc_result = match hierarchical(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -1765,10 +1768,7 @@ pub unsafe extern "C" fn insight_hierarchical(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_hierarchical");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_hierarchical"),
     }
 }
 
@@ -1808,8 +1808,7 @@ pub unsafe extern "C" fn insight_hdbscan(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
@@ -1826,8 +1825,7 @@ pub unsafe extern "C" fn insight_hdbscan(
         let hdb_result = match hdbscan(&points, &config) {
             Ok(r) => r,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return error_to_code(&e);
+                return fail(&e);
             }
         };
 
@@ -1864,10 +1862,7 @@ pub unsafe extern "C" fn insight_hdbscan(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_hdbscan");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_hdbscan"),
     }
 }
 
@@ -1906,8 +1901,7 @@ pub unsafe extern "C" fn insight_mutual_info(
     out: *mut CMutualInfoResult,
 ) -> i32 {
     if data.is_null() || target.is_null() || out.is_null() {
-        set_last_error("null pointer argument");
-        return INSIGHT_ERR_NULL_PTR;
+        return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
@@ -1955,19 +1949,13 @@ pub unsafe extern "C" fn insight_mutual_info(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_mutual_info");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_mutual_info"),
     }
 }
 
@@ -2008,8 +1996,7 @@ pub unsafe extern "C" fn insight_mini_batch_kmeans(
     out: *mut CKMeansResult,
 ) -> i32 {
     if data.is_null() || out.is_null() {
-        set_last_error("null pointer argument");
-        return INSIGHT_ERR_NULL_PTR;
+        return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
@@ -2055,19 +2042,13 @@ pub unsafe extern "C" fn insight_mini_batch_kmeans(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_mini_batch_kmeans");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_mini_batch_kmeans"),
     }
 }
 
@@ -2109,8 +2090,7 @@ pub unsafe extern "C" fn insight_gap_statistic(
     out: *mut CGapStatResult,
 ) -> i32 {
     if data.is_null() || out.is_null() {
-        set_last_error("null pointer argument");
-        return INSIGHT_ERR_NULL_PTR;
+        return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
@@ -2154,19 +2134,13 @@ pub unsafe extern "C" fn insight_gap_statistic(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_gap_statistic");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_gap_statistic"),
     }
 }
 
@@ -2209,8 +2183,7 @@ pub unsafe extern "C" fn insight_permutation_importance(
     out: *mut CPermImportanceResult,
 ) -> i32 {
     if data.is_null() || target.is_null() || out.is_null() {
-        set_last_error("null pointer argument");
-        return INSIGHT_ERR_NULL_PTR;
+        return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
@@ -2254,19 +2227,13 @@ pub unsafe extern "C" fn insight_permutation_importance(
 
                 INSIGHT_OK
             }
-            Err(e) => {
-                set_last_error(&e.to_string());
-                error_to_code(&e)
-            }
+            Err(e) => fail(&e),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_permutation_importance");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_permutation_importance"),
     }
 }
 
@@ -2326,8 +2293,7 @@ pub unsafe extern "C" fn insight_pelt(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -2337,8 +2303,11 @@ pub unsafe extern "C" fn insight_pelt(
             INSIGHT_PELT_COST_L2 => u_analytics::detection::CostFunction::L2,
             INSIGHT_PELT_COST_NORMAL => u_analytics::detection::CostFunction::Normal,
             other => {
-                set_last_error(&format!("cost must be 0 (L2) or 1 (Normal), got {other}"));
-                set_last_error_parameter("cost");
+                record(Refusal::new(
+                    "unknown_option",
+                    format!("cost must be 0 (L2) or 1 (Normal), got {other}"),
+                    serde_json::json!({ "parameter": "cost", "got": other, "expected": [0, 1] }),
+                ));
                 return INSIGHT_ERR_INVALID_PARAM;
             }
         };
@@ -2348,16 +2317,20 @@ pub unsafe extern "C" fn insight_pelt(
         } else if penalty > 0.0 && penalty.is_finite() {
             u_analytics::detection::Penalty::Custom(penalty)
         } else {
-            set_last_error("penalty must be 0.0 (BIC) or a positive finite number");
-            return INSIGHT_ERR_INVALID_PARAM;
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                "penalty must be 0.0 (BIC) or a positive finite number",
+            );
         };
 
         let min_seg = min_segment_len as usize;
         let pelt = match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
             Some(p) => p,
             None => {
-                set_last_error("invalid parameters (min_segment_len must be >= 2)");
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(
+                    INSIGHT_ERR_INVALID_PARAM,
+                    "invalid parameters (min_segment_len must be >= 2)",
+                );
             }
         };
 
@@ -2389,10 +2362,7 @@ pub unsafe extern "C" fn insight_pelt(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_pelt");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_pelt"),
     }
 }
 
@@ -2425,8 +2395,7 @@ pub unsafe extern "C" fn insight_pelt_multi(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let ns = n_samples as usize;
@@ -2444,8 +2413,11 @@ pub unsafe extern "C" fn insight_pelt_multi(
             INSIGHT_PELT_COST_L2 => u_analytics::detection::CostFunction::L2,
             INSIGHT_PELT_COST_NORMAL => u_analytics::detection::CostFunction::Normal,
             other => {
-                set_last_error(&format!("cost must be 0 (L2) or 1 (Normal), got {other}"));
-                set_last_error_parameter("cost");
+                record(Refusal::new(
+                    "unknown_option",
+                    format!("cost must be 0 (L2) or 1 (Normal), got {other}"),
+                    serde_json::json!({ "parameter": "cost", "got": other, "expected": [0, 1] }),
+                ));
                 return INSIGHT_ERR_INVALID_PARAM;
             }
         };
@@ -2455,24 +2427,27 @@ pub unsafe extern "C" fn insight_pelt_multi(
         } else if penalty > 0.0 && penalty.is_finite() {
             u_analytics::detection::Penalty::Custom(penalty)
         } else {
-            set_last_error("penalty must be 0.0 (BIC) or positive finite");
-            return INSIGHT_ERR_INVALID_PARAM;
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                "penalty must be 0.0 (BIC) or positive finite",
+            );
         };
 
         let min_seg = min_segment_len as usize;
         let pelt = match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
             Some(p) => p,
             None => {
-                set_last_error("invalid parameters");
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(INSIGHT_ERR_INVALID_PARAM, "invalid parameters");
             }
         };
 
         let pelt_result = match pelt.detect_multi(&refs) {
             Some(r) => r,
             None => {
-                set_last_error("all signals must have the same length");
-                return INSIGHT_ERR_INVALID_INPUT;
+                return refuse(
+                    INSIGHT_ERR_INVALID_INPUT,
+                    "all signals must have the same length",
+                );
             }
         };
 
@@ -2502,10 +2477,7 @@ pub unsafe extern "C" fn insight_pelt_multi(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_pelt_multi");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_pelt_multi"),
     }
 }
 
@@ -2568,14 +2540,12 @@ pub unsafe extern "C" fn insight_mann_kendall(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
         if len < 4 {
-            set_last_error("need at least 4 data points");
-            return INSIGHT_ERR_INSUFFICIENT_DATA;
+            return refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "need at least 4 data points");
         }
 
         let raw = unsafe { slice::from_raw_parts(data, len) };
@@ -2594,19 +2564,16 @@ pub unsafe extern "C" fn insight_mann_kendall(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("invalid input (non-finite values or zero variance)");
-                INSIGHT_ERR_INVALID_INPUT
-            }
+            None => refuse(
+                INSIGHT_ERR_INVALID_INPUT,
+                "invalid input (non-finite values or zero variance)",
+            ),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_mann_kendall");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_mann_kendall"),
     }
 }
 
@@ -2656,8 +2623,7 @@ pub unsafe extern "C" fn insight_kde(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let bw_method = match method {
@@ -2665,8 +2631,10 @@ pub unsafe extern "C" fn insight_kde(
             INSIGHT_KDE_SCOTT => u_analytics::distribution::BandwidthMethod::Scott,
             INSIGHT_KDE_MANUAL => u_analytics::distribution::BandwidthMethod::Manual(bandwidth),
             _ => {
-                set_last_error("invalid method (use 0=Silverman, 1=Scott, 2=Manual)");
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(
+                    INSIGHT_ERR_INVALID_PARAM,
+                    "invalid method (use 0=Silverman, 1=Scott, 2=Manual)",
+                );
             }
         };
 
@@ -2692,22 +2660,17 @@ pub unsafe extern "C" fn insight_kde(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error(
-                    "invalid input (need >= 2 data points and >= 2 grid points, finite values, \
+            None => refuse(
+                INSIGHT_ERR_INVALID_INPUT,
+                "invalid input (need >= 2 data points and >= 2 grid points, finite values, \
                      nonzero variance for automatic bandwidth)",
-                );
-                INSIGHT_ERR_INVALID_INPUT
-            }
+            ),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_kde");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_kde"),
     }
 }
 
@@ -2878,8 +2841,7 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         use u_analytics::spc::ControlChart;
@@ -2891,16 +2853,14 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
         let mut chart = match u_analytics::spc::XBarRChart::new(sg) {
             Ok(chart) => chart,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(INSIGHT_ERR_INVALID_PARAM, e.to_string());
             }
         };
         if let Some(i) = first_non_finite(raw) {
-            set_last_error(&format!(
-                "data[{i}] (subgroup {}) is not a finite number",
-                i / sg
-            ));
-            return INSIGHT_ERR_INVALID_PARAM;
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                format!("data[{i}] (subgroup {}) is not a finite number", i / sg),
+            );
         }
         if let Err(code) = add_rows(ns, |g| chart.add_sample(&raw[g * sg..(g + 1) * sg])) {
             return code;
@@ -2920,20 +2880,13 @@ pub unsafe extern "C" fn insight_xbar_r_chart(
                 }
                 INSIGHT_OK
             }
-            _ => {
-                set_last_error("need at least 1 subgroup");
-
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            _ => refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "need at least 1 subgroup"),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_xbar_r_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_xbar_r_chart"),
     }
 }
 
@@ -2947,8 +2900,10 @@ fn add_rows(
 ) -> Result<(), i32> {
     for i in 0..count {
         if let Err(e) = add(i) {
-            set_last_error(&format!("subgroup {i}: {e}"));
-            return Err(INSIGHT_ERR_INVALID_PARAM);
+            return Err(refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                format!("subgroup {i}: {e}"),
+            ));
         }
     }
     Ok(())
@@ -2979,8 +2934,7 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         use u_analytics::spc::ControlChart;
@@ -2992,16 +2946,14 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
         let mut chart = match u_analytics::spc::XBarSChart::new(sg) {
             Ok(chart) => chart,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(INSIGHT_ERR_INVALID_PARAM, e.to_string());
             }
         };
         if let Some(i) = first_non_finite(raw) {
-            set_last_error(&format!(
-                "data[{i}] (subgroup {}) is not a finite number",
-                i / sg
-            ));
-            return INSIGHT_ERR_INVALID_PARAM;
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                format!("data[{i}] (subgroup {}) is not a finite number", i / sg),
+            );
         }
         if let Err(code) = add_rows(ns, |g| chart.add_sample(&raw[g * sg..(g + 1) * sg])) {
             return code;
@@ -3021,20 +2973,13 @@ pub unsafe extern "C" fn insight_xbar_s_chart(
                 }
                 INSIGHT_OK
             }
-            _ => {
-                set_last_error("need at least 1 subgroup");
-
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            _ => refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "need at least 1 subgroup"),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_xbar_s_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_xbar_s_chart"),
     }
 }
 
@@ -3058,8 +3003,7 @@ pub unsafe extern "C" fn insight_individual_mr_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         use u_analytics::spc::ControlChart;
@@ -3068,8 +3012,10 @@ pub unsafe extern "C" fn insight_individual_mr_chart(
         let raw = unsafe { slice::from_raw_parts(data, len) };
 
         if let Some(i) = first_non_finite(raw) {
-            set_last_error(&format!("data[{i}] is not a finite number"));
-            return INSIGHT_ERR_INVALID_PARAM;
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                format!("data[{i}] is not a finite number"),
+            );
         }
         let mut chart = u_analytics::spc::IndividualMRChart::new();
         if let Err(code) = add_rows(len, |i| chart.add_sample(&raw[i..=i])) {
@@ -3090,19 +3036,16 @@ pub unsafe extern "C" fn insight_individual_mr_chart(
                 }
                 INSIGHT_OK
             }
-            _ => {
-                set_last_error("need at least 2 observations");
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            _ => refuse(
+                INSIGHT_ERR_INSUFFICIENT_DATA,
+                "need at least 2 observations",
+            ),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_individual_mr_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_individual_mr_chart"),
     }
 }
 
@@ -3236,8 +3179,7 @@ pub unsafe extern "C" fn insight_p_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if defectives.is_null() || sample_sizes.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3245,12 +3187,14 @@ pub unsafe extern "C" fn insight_p_chart(
         let sizes = unsafe { slice::from_raw_parts(sample_sizes, len) };
 
         if let Some(i) = first_invalid_proportion(defs, sizes) {
-            set_last_error(&format!(
-                "subgroup {i}: {} defectives out of {} (need sample_size > 0 and \
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                format!(
+                    "subgroup {i}: {} defectives out of {} (need sample_size > 0 and \
                  defectives <= sample_size)",
-                defs[i], sizes[i]
-            ));
-            return INSIGHT_ERR_INVALID_PARAM;
+                    defs[i], sizes[i]
+                ),
+            );
         }
         let mut chart = u_analytics::spc::PChart::new();
         if let Err(code) = add_rows(len, |i| chart.add_sample(defs[i], sizes[i])) {
@@ -3258,9 +3202,7 @@ pub unsafe extern "C" fn insight_p_chart(
         }
 
         if chart.p_bar().is_none() {
-            set_last_error("need at least 1 subgroup");
-
-            return INSIGHT_ERR_INSUFFICIENT_DATA;
+            return refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "need at least 1 subgroup");
         }
 
         unsafe {
@@ -3271,10 +3213,7 @@ pub unsafe extern "C" fn insight_p_chart(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_p_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_p_chart"),
     }
 }
 
@@ -3300,8 +3239,7 @@ pub unsafe extern "C" fn insight_np_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if defective_counts.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3310,24 +3248,24 @@ pub unsafe extern "C" fn insight_np_chart(
         let mut chart = match u_analytics::spc::NPChart::new(sample_size) {
             Ok(chart) => chart,
             Err(e) => {
-                set_last_error(&e.to_string());
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(INSIGHT_ERR_INVALID_PARAM, e.to_string());
             }
         };
         if let Some(i) = counts.iter().position(|&c| c > sample_size) {
-            set_last_error(&format!(
-                "subgroup {i}: {} defectives out of {sample_size}",
-                counts[i]
-            ));
-            return INSIGHT_ERR_INVALID_PARAM;
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                format!(
+                    "subgroup {i}: {} defectives out of {sample_size}",
+                    counts[i]
+                ),
+            );
         }
         if let Err(code) = add_rows(len, |i| chart.add_sample(counts[i])) {
             return code;
         }
 
         if chart.control_limits().is_none() {
-            set_last_error("need at least 1 subgroup");
-            return INSIGHT_ERR_INSUFFICIENT_DATA;
+            return refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "need at least 1 subgroup");
         }
 
         unsafe {
@@ -3338,10 +3276,7 @@ pub unsafe extern "C" fn insight_np_chart(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_np_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_np_chart"),
     }
 }
 
@@ -3363,8 +3298,7 @@ pub unsafe extern "C" fn insight_c_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if defect_counts.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3376,8 +3310,7 @@ pub unsafe extern "C" fn insight_c_chart(
         }
 
         if chart.control_limits().is_none() {
-            set_last_error("no samples provided");
-            return INSIGHT_ERR_INSUFFICIENT_DATA;
+            return refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "no samples provided");
         }
 
         unsafe {
@@ -3388,10 +3321,7 @@ pub unsafe extern "C" fn insight_c_chart(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_c_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_c_chart"),
     }
 }
 
@@ -3417,8 +3347,7 @@ pub unsafe extern "C" fn insight_u_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if defects.is_null() || units_inspected.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3426,11 +3355,13 @@ pub unsafe extern "C" fn insight_u_chart(
         let units = unsafe { slice::from_raw_parts(units_inspected, len) };
 
         if let Some(i) = first_invalid_units(units) {
-            set_last_error(&format!(
-                "subgroup {i}: units_inspected must be a positive number, got {}",
-                units[i]
-            ));
-            return INSIGHT_ERR_INVALID_PARAM;
+            return refuse(
+                INSIGHT_ERR_INVALID_PARAM,
+                format!(
+                    "subgroup {i}: units_inspected must be a positive number, got {}",
+                    units[i]
+                ),
+            );
         }
         let mut chart = u_analytics::spc::UChart::new();
         if let Err(code) = add_rows(len, |i| chart.add_sample(defs[i], units[i])) {
@@ -3438,8 +3369,7 @@ pub unsafe extern "C" fn insight_u_chart(
         }
 
         if chart.u_bar().is_none() {
-            set_last_error("need at least 1 subgroup");
-            return INSIGHT_ERR_INSUFFICIENT_DATA;
+            return refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "need at least 1 subgroup");
         }
 
         unsafe {
@@ -3450,10 +3380,7 @@ pub unsafe extern "C" fn insight_u_chart(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_u_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_u_chart"),
     }
 }
 
@@ -3551,8 +3478,7 @@ pub unsafe extern "C" fn insight_laney_p_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if defectives.is_null() || sample_sizes.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3581,10 +3507,7 @@ pub unsafe extern "C" fn insight_laney_p_chart(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_laney_p_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_laney_p_chart"),
     }
 }
 
@@ -3594,18 +3517,15 @@ pub unsafe extern "C" fn insight_laney_p_chart(
 fn laney_input_error(e: &u_analytics::spc::ChartInputError) -> i32 {
     use u_analytics::spc::ChartInputError as E;
     match e {
-        E::Sample { index, error } => {
-            set_last_error(&format!("subgroup {index}: {error}"));
-            INSIGHT_ERR_INVALID_PARAM
-        }
-        E::TooFewSamples { min, .. } => {
-            set_last_error(&format!("need at least {min} subgroups"));
-            INSIGHT_ERR_INSUFFICIENT_DATA
-        }
-        other => {
-            set_last_error(&other.to_string());
-            INSIGHT_ERR_INVALID_PARAM
-        }
+        E::Sample { index, error } => refuse(
+            INSIGHT_ERR_INVALID_PARAM,
+            format!("subgroup {index}: {error}"),
+        ),
+        E::TooFewSamples { min, .. } => refuse(
+            INSIGHT_ERR_INSUFFICIENT_DATA,
+            format!("need at least {min} subgroups"),
+        ),
+        other => refuse(INSIGHT_ERR_INVALID_PARAM, other.to_string()),
     }
 }
 
@@ -3629,8 +3549,7 @@ pub unsafe extern "C" fn insight_laney_u_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if defects.is_null() || units_inspected.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3659,10 +3578,7 @@ pub unsafe extern "C" fn insight_laney_u_chart(
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_laney_u_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_laney_u_chart"),
     }
 }
 
@@ -3703,8 +3619,7 @@ pub unsafe extern "C" fn insight_g_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if inter_event_counts.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3724,19 +3639,16 @@ pub unsafe extern "C" fn insight_g_chart(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("invalid input (need at least 3 points, all finite and >= 0.0)");
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            None => refuse(
+                INSIGHT_ERR_INSUFFICIENT_DATA,
+                "invalid input (need at least 3 points, all finite and >= 0.0)",
+            ),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_g_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_g_chart"),
     }
 }
 
@@ -3759,8 +3671,7 @@ pub unsafe extern "C" fn insight_t_chart(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if inter_event_times.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -3780,19 +3691,16 @@ pub unsafe extern "C" fn insight_t_chart(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("invalid input (need at least 3 points, all finite and > 0.0)");
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            None => refuse(
+                INSIGHT_ERR_INSUFFICIENT_DATA,
+                "invalid input (need at least 3 points, all finite and > 0.0)",
+            ),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_t_chart");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_t_chart"),
     }
 }
 
@@ -3901,8 +3809,7 @@ pub unsafe extern "C" fn insight_process_capability(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let usl_opt = if usl.is_nan() { None } else { Some(usl) };
@@ -3911,8 +3818,7 @@ pub unsafe extern "C" fn insight_process_capability(
         let mut spec = match u_analytics::capability::ProcessCapability::new(usl_opt, lsl_opt) {
             Ok(s) => s,
             Err(msg) => {
-                set_last_error(msg);
-                return INSIGHT_ERR_INVALID_PARAM;
+                return refuse(INSIGHT_ERR_INVALID_PARAM, msg);
             }
         };
         if !target.is_nan() {
@@ -3935,22 +3841,17 @@ pub unsafe extern "C" fn insight_process_capability(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error(
-                    "invalid input (need >= 2 data points, all finite; sigma_within must be \
+            None => refuse(
+                INSIGHT_ERR_INSUFFICIENT_DATA,
+                "invalid input (need >= 2 data points, all finite; sigma_within must be \
                      positive and finite when provided)",
-                );
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            ),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_process_capability");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_process_capability"),
     }
 }
 
@@ -4022,8 +3923,7 @@ pub unsafe extern "C" fn insight_boxcox_capability(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let usl_opt = if usl.is_nan() { None } else { Some(usl) };
@@ -4058,18 +3958,14 @@ pub unsafe extern "C" fn insight_boxcox_capability(
                     E::NonPositiveData | E::NonFiniteData => INSIGHT_ERR_INVALID_INPUT,
                     E::CapabilityError => INSIGHT_ERR_DEGENERATE_DATA,
                 };
-                set_last_error(&e.to_string());
-                code
+                refuse(code, e.to_string())
             }
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_boxcox_capability");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_boxcox_capability"),
     }
 }
 
@@ -4113,8 +4009,7 @@ pub unsafe extern "C" fn insight_percentile_capability(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let lsl_opt = if lsl.is_nan() { None } else { Some(lsl) };
@@ -4138,19 +4033,13 @@ pub unsafe extern "C" fn insight_percentile_capability(
                 }
                 INSIGHT_OK
             }
-            Err(msg) => {
-                set_last_error(msg);
-                INSIGHT_ERR_INVALID_INPUT
-            }
+            Err(msg) => refuse(INSIGHT_ERR_INVALID_INPUT, msg),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_percentile_capability");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_percentile_capability"),
     }
 }
 
@@ -4202,8 +4091,7 @@ pub unsafe extern "C" fn insight_weibull_mle(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if failure_times.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -4222,20 +4110,16 @@ pub unsafe extern "C" fn insight_weibull_mle(
                 INSIGHT_OK
             }
             None => {
-                set_last_error(
+                refuse(INSIGHT_ERR_INSUFFICIENT_DATA,
                     "invalid input (need >= 2 positive finite values, and Newton-Raphson must converge)",
-                );
-                INSIGHT_ERR_INSUFFICIENT_DATA
+                )
             }
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_weibull_mle");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_weibull_mle"),
     }
 }
 
@@ -4267,8 +4151,7 @@ pub unsafe extern "C" fn insight_weibull_mrr(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if failure_times.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
@@ -4285,19 +4168,16 @@ pub unsafe extern "C" fn insight_weibull_mrr(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("invalid input (need >= 2 positive finite values)");
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            None => refuse(
+                INSIGHT_ERR_INSUFFICIENT_DATA,
+                "invalid input (need >= 2 positive finite values)",
+            ),
         }
     });
 
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_weibull_mrr");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_weibull_mrr"),
     }
 }
 
@@ -4414,8 +4294,7 @@ pub unsafe extern "C" fn insight_estimate_period(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
         let raw = unsafe { slice::from_raw_parts(data, n as usize) };
         match u_analytics::seasonality::estimate_period(raw) {
@@ -4451,18 +4330,15 @@ pub unsafe extern "C" fn insight_estimate_period(
                 }
                 INSIGHT_OK
             }
-            None => {
-                set_last_error("invalid input (need at least 8 finite observations)");
-                INSIGHT_ERR_INSUFFICIENT_DATA
-            }
+            None => refuse(
+                INSIGHT_ERR_INSUFFICIENT_DATA,
+                "invalid input (need at least 8 finite observations)",
+            ),
         }
     });
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_estimate_period");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_estimate_period"),
     }
 }
 
@@ -4566,8 +4442,7 @@ pub unsafe extern "C" fn insight_spectral_residual(
 ) -> i32 {
     let result = panic::catch_unwind(|| {
         if data.is_null() || out.is_null() {
-            set_last_error("null pointer");
-            return INSIGHT_ERR_NULL_PTR;
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
         let raw = unsafe { slice::from_raw_parts(data, n as usize) };
         let mut sr = u_analytics::detection::SpectralResidual::new();
@@ -4621,12 +4496,9 @@ pub unsafe extern "C" fn insight_spectral_residual(
             // that is too short or not finite is a data problem, not an option.
             Err(e) => {
                 use u_analytics::detection::SpectralResidualError as E;
-                set_last_error(&e.to_string());
+                record(Refusal::from(&e));
                 match e {
-                    E::OptionOutOfRange { option, .. } => {
-                        set_last_error_parameter(option);
-                        INSIGHT_ERR_INVALID_PARAM
-                    }
+                    E::OptionOutOfRange { .. } => INSIGHT_ERR_INVALID_PARAM,
                     E::TooFewObservations { .. } => INSIGHT_ERR_INSUFFICIENT_DATA,
                     E::ValueNotFinite { .. } => INSIGHT_ERR_INVALID_INPUT,
                     _ => INSIGHT_ERR_INVALID_PARAM,
@@ -4636,10 +4508,7 @@ pub unsafe extern "C" fn insight_spectral_residual(
     });
     match result {
         Ok(code) => code,
-        Err(_) => {
-            set_last_error("panic in insight_spectral_residual");
-            INSIGHT_ERR_PANIC
-        }
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_spectral_residual"),
     }
 }
 
@@ -4680,14 +4549,29 @@ mod tests {
         insight_clear_error();
         assert!(insight_last_error().is_null());
 
-        set_last_error("test error");
+        assert!(insight_last_error_json().is_null());
+
+        refuse(INSIGHT_ERR_INVALID_INPUT, "test error");
         let msg = unsafe { CStr::from_ptr(insight_last_error()) }
             .to_str()
             .unwrap();
         assert_eq!(msg, "test error");
+        assert_eq!(
+            last_error_body(),
+            Some(serde_json::json!({ "error": "test error", "code": "invalid_input" }))
+        );
 
         insight_clear_error();
         assert!(insight_last_error().is_null());
+        assert!(insight_last_error_json().is_null());
+    }
+
+    fn last_error_body() -> Option<serde_json::Value> {
+        let ptr = insight_last_error_json();
+        (!ptr.is_null()).then(|| {
+            let text = unsafe { CStr::from_ptr(ptr) }.to_string_lossy();
+            serde_json::from_str(&text).expect("the body is JSON")
+        })
     }
 
     #[test]
@@ -5865,6 +5749,15 @@ mod tests {
             .into_owned();
         assert!(message.starts_with("sensitivity"), "{message}");
         assert_eq!(last_error_parameter().as_deref(), Some("sensitivity"));
+        // The body carries the same code and fields as the WebAssembly `Error`.
+        assert_eq!(
+            last_error_body(),
+            Some(serde_json::json!({
+                "error": message,
+                "code": "parameter_out_of_range",
+                "parameter": "sensitivity",
+            }))
+        );
 
         // Too short a series is a data problem, not an option: it used to come
         // back as INSIGHT_ERR_INVALID_PARAM, which C# reports as
@@ -5876,12 +5769,26 @@ mod tests {
             .into_owned();
         assert_eq!(message, "needs at least 12 observations, got 5");
         assert_eq!(last_error_parameter(), None);
+        assert_eq!(
+            last_error_body(),
+            Some(serde_json::json!({
+                "error": message,
+                "code": "insufficient_data",
+                "parameter": "data",
+                "min": 12,
+                "got": 5,
+            }))
+        );
 
         let mut nan = data.clone();
         nan[7] = f64::NAN;
         let rc = unsafe { insight_spectral_residual(nan.as_ptr(), 40, ptr::null(), &mut out) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
         assert_eq!(last_error_parameter(), None);
+        let body = last_error_body().expect("a body");
+        assert_eq!(body["code"], "value_not_finite");
+        assert_eq!(body["parameter"], "data");
+        assert_eq!(body["index"], 7);
     }
 
     fn last_error_parameter() -> Option<String> {
@@ -5908,10 +5815,17 @@ mod tests {
         let rc = unsafe { insight_mahalanobis(data.as_ptr(), 20, 2, 1.5, &mut out) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
         assert_eq!(last_error_parameter().as_deref(), Some("chi2_quantile"));
+        let body = last_error_body().expect("a body");
+        assert_eq!(body["code"], "invalid_option");
+        assert_eq!(body["parameter"], "chi2_quantile");
 
         let rc = unsafe { insight_mahalanobis(ptr::null(), 20, 2, 0.975, &mut out) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
         assert_eq!(last_error_parameter(), None);
+        assert_eq!(
+            last_error_body().expect("a body")["code"],
+            "malformed_input"
+        );
 
         let rc = unsafe { insight_mahalanobis(data.as_ptr(), 20, 2, 1.5, &mut out) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);

@@ -70,6 +70,9 @@ internal static partial class NativeLibrary
     public static partial IntPtr insight_last_error_parameter();
 
     [LibraryImport(LibraryName)]
+    public static partial IntPtr insight_last_error_json();
+
+    [LibraryImport(LibraryName)]
     public static partial void insight_clear_error();
 
     #endregion
@@ -451,7 +454,17 @@ internal static partial class NativeLibrary
     public static void ThrowIfFailed(int code)
     {
         if (code == INSIGHT_OK) return;
-        throw InsightException.FromCode(code, GetLastError(), GetLastErrorParameter());
+        throw InsightException.FromCode(code, GetLastError(), GetLastErrorParameter(), GetLastErrorJson());
+    }
+
+    /// <summary>
+    /// Gets the last native error as its JSON body (<c>error</c>, <c>code</c> and the
+    /// values behind the reason), or null.
+    /// </summary>
+    public static string? GetLastErrorJson()
+    {
+        var ptr = insight_last_error_json();
+        return ptr != IntPtr.Zero ? Marshal.PtrToStringUTF8(ptr) : null;
     }
 
     /// <summary>

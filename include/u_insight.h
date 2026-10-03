@@ -1167,7 +1167,20 @@ INSIGHT_API const char *insight_last_error(void);
 INSIGHT_API const char *insight_last_error_parameter(void);
 
 /**
- * Clears the last error message and parameter name.
+ * Returns the last refusal as a JSON object, or null if no error:
+ * `{"error": <message>, "code": <reason>, ...fields}` -- the same `code` and
+ * fields the WebAssembly binding puts on its `Error` (`index`, `parameter`,
+ * `min`, `got`, `column`, ...), so a caller can say which value was refused
+ * and why without parsing the message.
+ * The returned string is valid until the next FFI call on this thread.
+ *
+ * # Safety
+ * The caller must not free the returned pointer.
+ */
+INSIGHT_API const char *insight_last_error_json(void);
+
+/**
+ * Clears the last error message, parameter name and body.
  */
 INSIGHT_API void insight_clear_error(void);
 

@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace UInsight;
 
 /// <summary>
@@ -42,6 +44,24 @@ public class InsightException : Exception
     /// <see cref="Exception.Message"/>.
     /// </summary>
     public string? Parameter { get; }
+
+    /// <summary>
+    /// Stable, machine-readable reason -- the same <c>code</c> the WebAssembly
+    /// binding puts on its <c>Error</c>: <c>value_not_finite</c>,
+    /// <c>parameter_out_of_range</c>, <c>insufficient_data</c>,
+    /// <c>invalid_option</c>, <c>unknown_option</c>, <c>missing_values</c>,
+    /// <c>degenerate_data</c>, <c>malformed_input</c>, <c>internal</c>, ...
+    /// <c>null</c> when the native library returned no body.
+    /// </summary>
+    public string? Reason { get; }
+
+    /// <summary>
+    /// The whole error body: <c>error</c>, <c>code</c> and the values behind the
+    /// reason (<c>parameter</c>, <c>index</c>, <c>min</c>, <c>got</c>,
+    /// <c>column</c>, ...), so a caller can say which value was refused without
+    /// parsing <see cref="Exception.Message"/>. <c>null</c> when there is no body.
+    /// </summary>
+    public JsonElement? Details { get; }
 
     /// <summary>
     /// Broad error category derived from <see cref="ErrorCode"/>.
@@ -90,16 +110,37 @@ public class InsightException : Exception
     /// We surface that message verbatim and rely on <see cref="Category"/> for typed classification,
     /// avoiding "Degenerate data: degenerate data: ..." prefix duplication.
     /// </remarks>
-    internal static InsightException FromCode(int code, string? nativeError, string? parameter = null)
+    internal static InsightException FromCode(
+        int code, string? nativeError, string? parameter = null, string? body = null)
     {
         var msg = nativeError ?? Interop.NativeLibrary.GetErrorMessage(code);
-        return new InsightException(code, msg, parameter);
+        string? reason = null;
+        JsonElement? details = null;
+        if (body is not null)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String)
+                    reason = c.GetString();
+                details = root.Clone();
+            }
+            catch (JsonException)
+            {
+                // No readable body: the message and category still stand.
+            }
+        }
+        return new InsightException(code, msg, parameter, reason, details);
     }
 
-    private InsightException(int errorCode, string message, string? parameter)
+    private InsightException(
+        int errorCode, string message, string? parameter, string? reason, JsonElement? details)
         : base(message)
     {
         ErrorCode = errorCode;
         Parameter = parameter;
+        Reason = reason;
+        Details = details;
     }
 }

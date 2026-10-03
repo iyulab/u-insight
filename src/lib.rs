@@ -58,6 +58,7 @@ pub mod lof;
 pub mod mahalanobis;
 pub mod pca;
 pub mod profiling;
+mod refusal;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;

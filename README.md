@@ -306,6 +306,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 |----------|-------------|
 | `insight_last_error` | Last error message (thread-local) |
 | `insight_last_error_parameter` | Name of the argument or option the last `INSIGHT_ERR_INVALID_PARAM` is about (`chi2_quantile`, `threshold`, …), or null (thread-local) |
+| `insight_last_error_json` | The last refusal as JSON — `{"error", "code", …fields}`, the same `code` and fields as the WebAssembly `Error` (see *Errors* below), or null (thread-local) |
 | `insight_clear_error` | Clear error state |
 | `insight_version` | Library version string |
 
@@ -332,10 +333,10 @@ Console.WriteLine($"K={result.K}, WCSS={result.Wcss:F2}");
 
 The binding is in `bindings/csharp/UInsight/` with:
 
-- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 67 FFI functions
+- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 73 FFI functions
 - `Interop/NativeStructs.cs` — `[StructLayout]` mappings for all 35 C structs
 - `InsightClient.cs` — High-level managed API (automatic memory management)
-- `InsightException.cs` — Error code to exception conversion; `Category` classifies the error and `Parameter` names the argument or option an invalid-parameter error is about
+- `InsightException.cs` — Error code to exception conversion; `Category` classifies the error, `Parameter` names the argument or option an invalid-parameter error is about, and `Reason` / `Details` carry the same `code` and fields as the WebAssembly `Error`
 
 ## Test Status
 
@@ -343,7 +344,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 474 lib tests + 53 doc-tests = 527 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
-C header: auto-generated via cbindgen (35 structs, 67 functions)
+C header: auto-generated via cbindgen (40 structs, 73 functions)
 ```
 
 ## Scope & Non-Goals
@@ -420,7 +421,9 @@ callers and for values that reach it through a cast.
 
 A refusal throws an `Error` whose `message` is readable text and which carries
 a `code` naming the reason, next to the values behind it — so a program can
-point at what to change without parsing the message:
+point at what to change without parsing the message. The C ABI reports the same
+`code` and fields from `insight_last_error_json`, and .NET as
+`InsightException.Reason` and `InsightException.Details`:
 
 ```js
 import { hierarchical } from '@iyulab/u-insight';

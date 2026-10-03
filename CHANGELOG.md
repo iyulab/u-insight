@@ -8,6 +8,21 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Added
+
+- C ABI `insight_last_error_json`: the last refusal as
+  `{"error", "code", ...fields}` — the same `code` and fields the WebAssembly
+  binding puts on its `Error` (`parameter`, `index`, `min`, `got`, `column`,
+  ...). Every refusal across the C ABI now carries a `code`; the analyses'
+  errors carry their specific one and fields, the rest the code of their
+  category. The two transports read one mapping, so they cannot drift.
+- .NET `InsightException.Reason` and `InsightException.Details` read that body.
+
+### Changed
+
+- C ABI: a CSV or JSON parse failure reports the parser's own message
+  (`CSV parse error at line N: ...`) rather than a second prefix around it.
+
 ### Fixed
 
 - WASM: a NaN or ±Infinity anywhere in an argument is refused with
