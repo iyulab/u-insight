@@ -466,6 +466,20 @@ pub fn describe(
     serde_wasm_bindgen::to_value(&results).map_err(js_err)
 }
 
+/// A count passed as a JS number: a whole number >= 0. wasm-bindgen would
+/// convert it with ToInt32 -- 2.9 to 2, NaN to 0, -1 to 4294967295 -- and the
+/// call would run on a value the caller never gave.
+fn whole(value: f64, parameter: &str) -> Result<usize, WireError> {
+    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= u32::MAX as f64 {
+        Ok(value as usize)
+    } else {
+        Err(WireError::malformed_input(
+            parameter,
+            format!("{parameter} must be a whole number >= 0, got {value}"),
+        ))
+    }
+}
+
 /// A classification target as class labels: whole numbers `>= 0`. A label
 /// such as 1.7 or -2 used to become 1 or 0 by a cast, merging classes the
 /// caller kept apart.
@@ -595,8 +609,9 @@ pub fn correlation_matrix(
 #[wasm_bindgen(unchecked_return_type = "KMeansDto")]
 pub fn kmeans(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
-    k: usize,
+    k: f64,
 ) -> Result<JsValue, JsValue> {
+    let k = whole(k, "k").map_err(js_err)?;
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
 
     use crate::clustering::{kmeans as kmeans_fn, KMeansConfig};
@@ -632,8 +647,9 @@ pub fn kmeans(
 pub fn silhouette(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
     #[wasm_bindgen(unchecked_param_type = "number[]")] labels: JsValue,
-    k: usize,
+    k: f64,
 ) -> Result<JsValue, JsValue> {
+    let k = whole(k, "k").map_err(js_err)?;
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let labels: Vec<usize> = from_js(labels, "labels")?;
 
@@ -2202,6 +2218,16 @@ mod dto_strictness_tests {
             assert_eq!(err.code(), "not_a_class_label");
             assert_eq!(err.fields["index"], index);
             assert_eq!(err.fields["parameter"], "target");
+        }
+    }
+
+    #[test]
+    fn a_count_must_be_a_whole_number() {
+        assert_eq!(super::whole(3.0, "k").expect("whole"), 3);
+        for bad in [2.9, -1.0, f64::NAN] {
+            let err = super::whole(bad, "k").expect_err("not a count");
+            assert_eq!(err.code(), "malformed_input");
+            assert_eq!(err.fields["parameter"], "k");
         }
     }
 }

@@ -38,6 +38,8 @@ Refusals where the analysis used to change the request without a word:
   and -2 used to become classes 1 and 0.
 - WASM `hierarchical` refuses `n_clusters` and `distance_threshold` together
   (`invalid_option`); the threshold used to be dropped.
+- WASM `kmeans` and `silhouette` refuse a `k` that is not a whole number ≥ 0
+  (`malformed_input`); wasm-bindgen converted 2.9 to 2 and -1 to 4294967295.
 
 ## [0.25.0] - 2026-10-03
 
