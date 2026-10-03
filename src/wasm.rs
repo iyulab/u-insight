@@ -466,6 +466,27 @@ pub fn describe(
     serde_wasm_bindgen::to_value(&results).map_err(js_err)
 }
 
+/// A classification target as class labels: whole numbers `>= 0`. A label
+/// such as 1.7 or -2 used to become 1 or 0 by a cast, merging classes the
+/// caller kept apart.
+fn class_labels(target: &[f64]) -> Result<Vec<usize>, WireError> {
+    target
+        .iter()
+        .enumerate()
+        .map(|(index, &v)| {
+            if v >= 0.0 && v.fract() == 0.0 && v <= u32::MAX as f64 {
+                Ok(v as usize)
+            } else {
+                Err(WireError::new(
+                    "not_a_class_label",
+                    format!("target[{index}] is {v}; a class label is a whole number >= 0"),
+                    json!({ "parameter": "target", "index": index, "got": v }),
+                ))
+            }
+        })
+        .collect()
+}
+
 /// Computes a correlation matrix for a column-major dataset.
 ///
 /// # Input
@@ -854,7 +875,16 @@ pub fn hierarchical(
     let linkage = parse_linkage(&cfg.linkage).map_err(js_err)?;
 
     let mut config = match (cfg.n_clusters, cfg.distance_threshold) {
-        (Some(k), _) => HierarchicalConfig::with_k(k).linkage(linkage),
+        (Some(_), Some(_)) => {
+            return Err(js_err(WireError::new(
+                "invalid_option",
+                "config gives both n_clusters and distance_threshold; they are mutually \
+                 exclusive -- give one"
+                    .to_string(),
+                json!({ "parameter": "config" }),
+            )))
+        }
+        (Some(k), None) => HierarchicalConfig::with_k(k).linkage(linkage),
         (None, Some(t)) => HierarchicalConfig::with_threshold(t).linkage(linkage),
         (None, None) => {
             return Err(js_err(WireError::new(
@@ -1472,8 +1502,7 @@ pub fn feature_importance(
         "anova" => {
             use crate::analysis::anova_feature_selection;
 
-            // Convert f64 target to usize class labels
-            let class_target: Vec<usize> = input.target.iter().map(|&v| v as usize).collect();
+            let class_target = class_labels(&input.target).map_err(js_err)?;
 
             let result = anova_feature_selection(
                 &feat_columns,
@@ -1506,7 +1535,7 @@ pub fn feature_importance(
         "mutual_info" => {
             use crate::analysis::mutual_info_classif;
 
-            let class_target: Vec<usize> = input.target.iter().map(|&v| v as usize).collect();
+            let class_target = class_labels(&input.target).map_err(js_err)?;
 
             let result =
                 mutual_info_classif(&feat_columns, &feat_names, &class_target, input.n_bins)
@@ -1751,9 +1780,12 @@ pub fn detect_univariate_outliers(
 
     let r = detect_outliers_slice(&req.data, method).ok_or_else(|| {
         js_err(WireError::new(
-            "computation_failed",
-            "outlier computation returned None".to_string(),
-            json!({ "operation": "outliers" }),
+            "insufficient_data",
+            format!(
+                "outlier detection needs at least 3 values, got {}",
+                req.data.len()
+            ),
+            json!({ "parameter": "data", "min": 3, "got": req.data.len() }),
         ))
     })?;
 
@@ -2153,5 +2185,23 @@ mod dto_strictness_tests {
         assert_rejects_unknown::<super::FeatureImportanceInputDto>(json!({
             "features": { "f": [1.0, 2.0] }, "target": [0.0, 1.0], "repeats": 5
         }));
+    }
+
+    #[test]
+    fn a_class_label_that_is_not_a_whole_number_is_refused() {
+        assert_eq!(
+            super::class_labels(&[0.0, 1.0, 2.0]).expect("labels"),
+            vec![0, 1, 2]
+        );
+        for (target, index) in [
+            (vec![0.0, 1.7], 1),
+            (vec![-2.0], 0),
+            (vec![1.0, f64::NAN], 1),
+        ] {
+            let err = super::class_labels(&target).expect_err("not a label");
+            assert_eq!(err.code(), "not_a_class_label");
+            assert_eq!(err.fields["index"], index);
+            assert_eq!(err.fields["parameter"], "target");
+        }
     }
 }

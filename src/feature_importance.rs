@@ -574,12 +574,35 @@ pub fn permutation_importance(
         });
     }
 
+    if n_repeats == 0 {
+        return Err(InsightError::InvalidParameter {
+            name: "n_repeats".into(),
+            message: "n_repeats must be at least 1".into(),
+        });
+    }
+
     let n = target.len();
     let p = features.len();
     if n < p + 2 {
         return Err(InsightError::InsufficientData {
             min_required: p + 2,
             actual: n,
+        });
+    }
+
+    // A NaN target made R² NaN, which `max(0.0)` below turned into 0 -- every
+    // importance read 0 with nothing saying why.
+    let target_nan = target.iter().filter(|v| v.is_nan()).count();
+    if target_nan > 0 {
+        return Err(InsightError::MissingValues {
+            column: "target".into(),
+            count: target_nan,
+        });
+    }
+    if let Some(index) = target.iter().position(|v| v.is_infinite()) {
+        return Err(InsightError::ValueNotFinite {
+            column: "target".into(),
+            index,
         });
     }
 
@@ -601,13 +624,22 @@ pub fn permutation_importance(
                 count: nan_count,
             });
         }
+        if let Some(index) = f.iter().position(|v| v.is_infinite()) {
+            let name = feature_names
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| format!("feature_{i}"));
+            return Err(InsightError::ValueNotFinite {
+                column: name,
+                index,
+            });
+        }
     }
 
     // Baseline score: R² using all features
     let pred_refs: Vec<&[f64]> = features.iter().map(|f| f.as_slice()).collect();
     let baseline_score = compute_r2_multiple(target, &pred_refs, n).max(0.0);
 
-    let n_repeats = n_repeats.max(1);
     let mut results: Vec<PermutationImportanceFeature> = Vec::with_capacity(p);
 
     for fi in 0..p {
@@ -1059,5 +1091,26 @@ mod tests {
         let features: Vec<Vec<f64>> = vec![];
         let target: Vec<f64> = vec![];
         assert!(permutation_importance(&features, &[], &target, 3, 42).is_err());
+    }
+
+    #[test]
+    fn permutation_importance_refuses_a_bad_target_and_zero_repeats() {
+        let features = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]];
+        let names = vec!["x".to_string()];
+        let mut target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0];
+        assert!(matches!(
+            permutation_importance(&features, &names, &target, 0, 1),
+            Err(InsightError::InvalidParameter { ref name, .. }) if name == "n_repeats"
+        ));
+        target[2] = f64::NAN;
+        assert!(matches!(
+            permutation_importance(&features, &names, &target, 3, 1),
+            Err(InsightError::MissingValues { ref column, count: 1 }) if column == "target"
+        ));
+        target[2] = f64::INFINITY;
+        assert!(matches!(
+            permutation_importance(&features, &names, &target, 3, 1),
+            Err(InsightError::ValueNotFinite { ref column, index: 2 }) if column == "target"
+        ));
     }
 }

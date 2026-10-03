@@ -78,6 +78,7 @@ fn error_to_code(e: &crate::error::InsightError) -> i32 {
     match e {
         InsightError::CsvParse { .. } | InsightError::JsonParse { .. } => INSIGHT_ERR_PARSE_FAILED,
         InsightError::MissingValues { .. }
+        | InsightError::ValueNotFinite { .. }
         | InsightError::ColumnNotFound { .. }
         | InsightError::DimensionMismatch { .. } => INSIGHT_ERR_INVALID_INPUT,
         InsightError::InsufficientData { .. } => INSIGHT_ERR_INSUFFICIENT_DATA,

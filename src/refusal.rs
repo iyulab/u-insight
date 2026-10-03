@@ -117,6 +117,10 @@ impl From<&InsightError> for Refusal {
                 "dimension_mismatch",
                 json!({ "expected": expected, "got": actual }),
             ),
+            InsightError::ValueNotFinite { column, index } => (
+                "value_not_finite",
+                json!({ "parameter": column, "index": index }),
+            ),
             InsightError::Io(_) => ("internal", json!({})),
         };
         Refusal::new(code, message, fields)

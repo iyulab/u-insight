@@ -717,8 +717,8 @@ pub struct OutlierResult {
     /// Percentage of outliers among valid values.
     pub pct: f64,
     /// Lower fence (values strictly below this are outliers).
-    /// `f64::NAN` when the detector cannot establish a fence (zero variance,
-    /// zero MAD, or fewer than 3 valid values).
+    /// `f64::NAN` when the detector cannot establish a fence (zero variance
+    /// or zero MAD). Fewer than 3 valid values give no result at all.
     pub lower_fence: f64,
     /// Upper fence (values strictly above this are outliers).
     /// `f64::NAN` when the detector cannot establish a fence.
@@ -758,18 +758,10 @@ pub fn detect_outliers(col: &Column, method: OutlierMethod) -> Option<OutlierRes
         .filter(|(_, v)| v.is_finite()) // skip NaN/Inf
         .collect();
 
+    // Fewer than 3 values give no fence: say so, rather than report
+    // "0 outliers" against NaN fences.
     if valid.len() < 3 {
-        return Some(OutlierResult {
-            method,
-            indices: Vec::new(),
-            scores: Vec::new(),
-            count: 0,
-            pct: 0.0,
-            lower_fence: f64::NAN,
-            upper_fence: f64::NAN,
-            center: f64::NAN,
-            spread: f64::NAN,
-        });
+        return None;
     }
 
     let vals: Vec<f64> = valid.iter().map(|&(_, v)| v).collect();
@@ -784,7 +776,8 @@ pub fn detect_outliers(col: &Column, method: OutlierMethod) -> Option<OutlierRes
 /// Slice-input convenience over [`detect_outliers`].
 ///
 /// Skips NaN/Inf entries; indices in the result are positions into the
-/// original slice (not the finite subsequence).
+/// original slice (not the finite subsequence). Returns `None` when fewer
+/// than 3 finite values remain.
 ///
 /// ```
 /// use u_insight::profiling::{detect_outliers_slice, OutlierMethod};
@@ -803,18 +796,10 @@ pub fn detect_outliers_slice(data: &[f64], method: OutlierMethod) -> Option<Outl
         .filter(|(_, v)| v.is_finite())
         .collect();
 
+    // Fewer than 3 values give no fence: say so, rather than report
+    // "0 outliers" against NaN fences.
     if valid.len() < 3 {
-        return Some(OutlierResult {
-            method,
-            indices: Vec::new(),
-            scores: Vec::new(),
-            count: 0,
-            pct: 0.0,
-            lower_fence: f64::NAN,
-            upper_fence: f64::NAN,
-            center: f64::NAN,
-            spread: f64::NAN,
-        });
+        return None;
     }
 
     let vals: Vec<f64> = valid.iter().map(|&(_, v)| v).collect();
@@ -1528,10 +1513,9 @@ mod tests {
     }
 
     #[test]
-    fn outlier_too_few_values() {
+    fn outlier_too_few_values_gives_no_result() {
         let col = Column::numeric(vec![1.0, 2.0], ValidityBitmap::all_valid(2));
-        let result = detect_outliers(&col, OutlierMethod::Iqr).unwrap();
-        assert_eq!(result.count, 0);
+        assert!(detect_outliers(&col, OutlierMethod::Iqr).is_none());
     }
 
     #[test]
@@ -1827,11 +1811,9 @@ mod tests {
     }
 
     #[test]
-    fn detect_outliers_too_few_returns_nan_fences() {
-        let data = [1.0, 2.0];
-        let r = detect_outliers_slice(&data, OutlierMethod::Iqr).unwrap();
-        assert_eq!(r.count, 0);
-        assert!(r.lower_fence.is_nan());
-        assert!(r.upper_fence.is_nan());
+    fn detect_outliers_too_few_gives_no_result() {
+        assert!(detect_outliers_slice(&[1.0, 2.0], OutlierMethod::Iqr).is_none());
+        // NaN does not count towards the three.
+        assert!(detect_outliers_slice(&[1.0, f64::NAN, 2.0], OutlierMethod::Iqr).is_none());
     }
 }

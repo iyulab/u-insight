@@ -23,6 +23,9 @@ pub enum InsightError {
     ColumnNotFound { name: String },
     /// Dimension mismatch.
     DimensionMismatch { expected: usize, actual: usize },
+    /// An infinite value (or a NaN where NaN is not read as missing) at
+    /// `index` of the named input.
+    ValueNotFinite { column: String, index: usize },
     /// I/O error during file reading.
     Io(String),
 }
@@ -59,6 +62,9 @@ impl fmt::Display for InsightError {
             }
             Self::DimensionMismatch { expected, actual } => {
                 write!(f, "expected {expected} elements, got {actual}")
+            }
+            Self::ValueNotFinite { column, index } => {
+                write!(f, "{column}[{index}] is not a finite number")
             }
             Self::Io(msg) => write!(f, "I/O error: {msg}"),
         }

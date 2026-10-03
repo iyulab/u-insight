@@ -751,6 +751,12 @@ pub fn mutual_info_classif(
         });
     }
 
+    if n_bins == Some(0) {
+        return Err(InsightError::InvalidParameter {
+            name: "n_bins".into(),
+            message: "n_bins must be at least 1".into(),
+        });
+    }
     // Determine number of bins: Sturges' rule
     let bins = n_bins.unwrap_or_else(|| {
         let k = ((n as f64).ln() / std::f64::consts::LN_2 + 1.0).ceil() as usize;

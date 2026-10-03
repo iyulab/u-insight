@@ -67,7 +67,7 @@ impl Default for LofConfig {
 }
 
 impl LofConfig {
-    /// Sets the number of neighbors.
+    /// Sets the number of neighbors, in `1..=n-1` for `n` points (refused otherwise).
     pub fn k(mut self, k: usize) -> Self {
         self.k = k;
         self
@@ -144,8 +144,19 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
         }
     }
 
-    // Clamp k to n-1
-    let k = config.k.min(n - 1).max(1);
+    // k neighbours need k + 1 points; a k the data cannot supply is refused
+    // rather than lowered.
+    if config.k == 0 || config.k > n - 1 {
+        return Err(InsightError::InvalidParameter {
+            name: "k".into(),
+            message: format!(
+                "k must be in 1..={} for {n} points, got {}",
+                n - 1,
+                config.k
+            ),
+        });
+    }
+    let k = config.k;
 
     // Step 1: Compute pairwise distances and find k-neighbors
     // For each point: sorted list of (neighbor_index, distance)
@@ -351,12 +362,22 @@ mod tests {
     }
 
     #[test]
-    fn lof_k_clamped() {
+    fn a_k_the_data_cannot_supply_is_refused() {
         let data = vec![vec![0.0], vec![1.0], vec![2.0]];
-        // k = 20 should be clamped to n-1 = 2
-        let config = LofConfig::default().k(20);
-        let result = lof(&data, &config).expect("should compute");
-        assert_eq!(result.scores.len(), 3);
+        for k in [0, 3, 20] {
+            let err = lof(&data, &LofConfig::default().k(k)).expect_err("k out of 1..=2");
+            assert!(
+                matches!(&err, InsightError::InvalidParameter { name, .. } if name == "k"),
+                "{err}"
+            );
+        }
+        assert_eq!(
+            lof(&data, &LofConfig::default().k(2))
+                .expect("k = n - 1")
+                .scores
+                .len(),
+            3
+        );
     }
 
     #[test]

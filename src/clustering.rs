@@ -2572,8 +2572,11 @@ pub struct GapStatResult {
 ///
 /// * `data` — Input data points.
 /// * `k_min` — Minimum K to test (>= 1).
-/// * `k_max` — Maximum K to test.
-/// * `n_refs` — Number of reference datasets (default: 10).
+/// * `k_max` — Maximum K to test (<= the number of points).
+/// * `n_refs` — Number of reference datasets (>= 1; 10 is usual).
+///
+/// A k whose clustering fails (non-finite data, for one) fails the call:
+/// the result never reports a k it did not evaluate.
 /// * `seed` — Random seed.
 ///
 /// ```
@@ -2605,6 +2608,18 @@ pub fn gap_statistic(
             message: format!("need 1 <= k_min <= k_max, got k_min={k_min}, k_max={k_max}"),
         });
     }
+    if k_max > n {
+        return Err(InsightError::InvalidParameter {
+            name: "k_max".into(),
+            message: format!("k_max must not exceed the {n} data points, got {k_max}"),
+        });
+    }
+    if n_refs == 0 {
+        return Err(InsightError::InvalidParameter {
+            name: "n_refs".into(),
+            message: "n_refs must be at least 1".into(),
+        });
+    }
 
     let d = data[0].len();
 
@@ -2622,14 +2637,12 @@ pub fn gap_statistic(
         }
     }
 
-    let actual_k_max = k_max.min(n);
-    let n_refs = n_refs.max(1);
     let mut rng_state = seed;
 
     let mut gap_values = Vec::new();
     let mut std_errors = Vec::new();
 
-    for k in k_min..=actual_k_max {
+    for k in k_min..=k_max {
         // WCSS on actual data
         let config = KMeansConfig {
             k,
@@ -2638,10 +2651,7 @@ pub fn gap_statistic(
             n_init: 3,
             seed: Some(seed),
         };
-        let actual_wcss = match kmeans(data, &config) {
-            Ok(r) => r.wcss,
-            Err(_) => continue,
-        };
+        let actual_wcss = kmeans(data, &config)?.wcss;
 
         let log_w = if actual_wcss > 0.0 {
             actual_wcss.ln()
@@ -2661,14 +2671,9 @@ pub fn gap_statistic(
                 n_init: 1,
                 seed: Some(seed.wrapping_add(b as u64 * 1000)),
             };
-            if let Ok(r) = kmeans(&ref_data, &ref_config) {
-                let lw = if r.wcss > 0.0 { r.wcss.ln() } else { 0.0 };
-                ref_log_ws.push(lw);
-            }
-        }
-
-        if ref_log_ws.is_empty() {
-            continue;
+            let r = kmeans(&ref_data, &ref_config)?;
+            let lw = if r.wcss > 0.0 { r.wcss.ln() } else { 0.0 };
+            ref_log_ws.push(lw);
         }
 
         let b_count = ref_log_ws.len() as f64;
@@ -2690,9 +2695,9 @@ pub fn gap_statistic(
 
     // Selection criterion: smallest k where Gap(k) >= Gap(k+1) - s_{k+1}
     let best_k = if gap_values.len() < 2 {
-        gap_values.first().map_or(k_min, |(k, _)| *k)
+        k_min
     } else {
-        let mut selected = gap_values.last().map_or(k_min, |(k, _)| *k);
+        let mut selected = k_max;
         for i in 0..gap_values.len() - 1 {
             let gap_k = gap_values[i].1;
             let gap_next = gap_values[i + 1].1;
@@ -4047,5 +4052,28 @@ mod tests {
     fn gap_error_invalid_range() {
         let data = make_two_clusters();
         assert!(gap_statistic(&data, 3, 1, 5, 42).is_err()); // k_max < k_min
+    }
+
+    /// A k beyond the data, no reference sets, or data a clustering refuses
+    /// fail the call instead of returning a k that was never evaluated.
+    #[test]
+    fn gap_refuses_instead_of_adjusting() {
+        let data = make_two_clusters();
+        let n = data.len();
+        let name = |e: InsightError| match e {
+            InsightError::InvalidParameter { name, .. } => name,
+            other => panic!("unexpected {other}"),
+        };
+        assert_eq!(
+            name(gap_statistic(&data, 1, n + 1, 5, 42).unwrap_err()),
+            "k_max"
+        );
+        assert_eq!(
+            name(gap_statistic(&data, 1, 3, 0, 42).unwrap_err()),
+            "n_refs"
+        );
+        let mut nan = data.clone();
+        nan[0][0] = f64::NAN;
+        assert!(gap_statistic(&nan, 1, 3, 5, 42).is_err());
     }
 }

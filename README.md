@@ -447,6 +447,7 @@ try {
 | `dimension_mismatch` | `expected`, `got` (and `parameter`) | Lengths that have to agree do not (`labels` vs data rows, …) |
 | `empty_input` | `parameter` | An input with no columns |
 | `missing_values` | `column`, `count` | A column with missing values where the analysis needs complete data |
+| `not_a_class_label` | `parameter`, `index`, `got` | A classification `target` (`feature_importance` `anova` / `mutual_info`) value that is not a whole number ≥ 0 |
 | `degenerate_data` | — | Constant columns, a singular matrix, … |
 | `column_not_found` | `column` | A column name the data does not have |
 | `computation_failed` | `operation` | A numerical step that did not converge or produced no result |

@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Added
+
+- `InsightError::ValueNotFinite { column, index }` (code `value_not_finite`).
+
+### Fixed
+
+Refusals where the analysis used to change the request without a word:
+
+- **Breaking:** `gap_statistic` refuses `k_max` above the number of points and
+  `n_refs = 0`, and fails when a clustering fails (non-finite data, for one).
+  It used to lower `k_max`, raise `n_refs` to 1, skip the k that failed and
+  could return a `best_k` it had never evaluated.
+- **Breaking:** `permutation_importance` refuses `n_repeats = 0` and a target
+  with NaN (`MissingValues`, column `target`) or infinity (`ValueNotFinite`).
+  A NaN target made every importance 0; an infinite feature value is refused
+  too.
+- **Breaking:** `lof` refuses `k = 0` and `k` above `n - 1`; it used to lower
+  or raise it.
+- **Breaking:** `detect_outliers` and `detect_outliers_slice` return `None` for
+  fewer than 3 values, as `detect_outliers` was documented to; they returned
+  "0 outliers" with NaN fences. WASM `detect_univariate_outliers` reports it
+  as `insufficient_data` (`min` 3).
+- `isolation_forest` with `contamination = 0` flags nothing; at least one
+  point (and its ties) used to be flagged.
+- `mutual_info_classif` refuses `n_bins = Some(0)`, which used to underflow.
+- WASM `feature_importance` (`anova`, `mutual_info`) refuses a target value
+  that is not a whole number ≥ 0 (`not_a_class_label`, `index`, `got`); 1.7
+  and -2 used to become classes 1 and 0.
+- WASM `hierarchical` refuses `n_clusters` and `distance_threshold` together
+  (`invalid_option`); the threshold used to be dropped.
+
 ## [0.25.0] - 2026-10-03
 
 ### Added

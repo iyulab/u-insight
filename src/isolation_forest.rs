@@ -222,11 +222,13 @@ pub fn isolation_forest(
     // Determine threshold from contamination
     let mut sorted_scores: Vec<f64> = scores.clone();
     sorted_scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-    let threshold_idx = ((n as f64 * config.contamination).ceil() as usize)
-        .min(n)
-        .max(1)
-        - 1;
-    let threshold = sorted_scores[threshold_idx];
+    // contamination 0 flags nothing; the floor of one flagged point used to
+    // mark the highest score (and its ties) anomalous regardless.
+    let flagged = ((n as f64 * config.contamination).ceil() as usize).min(n);
+    let threshold = match flagged {
+        0 => f64::INFINITY,
+        k => sorted_scores[k - 1],
+    };
 
     let anomalies: Vec<bool> = scores.iter().map(|&s| s >= threshold).collect();
     let anomaly_count = anomalies.iter().filter(|&&a| a).count();
@@ -601,5 +603,17 @@ mod tests {
             outlier_score > 0.5,
             "even with 10 trees, outlier score = {outlier_score}"
         );
+    }
+
+    #[test]
+    fn contamination_zero_flags_nothing() {
+        let mut data: Vec<Vec<f64>> = (0..40)
+            .map(|i| vec![(i % 7) as f64, (i % 5) as f64])
+            .collect();
+        data.push(vec![100.0, 100.0]);
+        let config = IsolationForestConfig::default().contamination(0.0);
+        let result = isolation_forest(&data, &config).expect("valid");
+        assert_eq!(result.anomaly_count, 0);
+        assert!(result.anomalies.iter().all(|&a| !a));
     }
 }
