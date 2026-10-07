@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
-## [Unreleased]
+## [0.28.0] - 2026-10-07
+
+Depends on u-analytics 0.19. The .NET client is `UInsight` 0.28.0.
+
+### Changed
+
+- **Breaking:** distribution fitting (`fit_distributions`, `distribution_analysis`
+  with `fit_distributions`) ranks the continuous families that apply -- Normal;
+  Exponential, Gamma, LogNormal and Weibull for positive data; Beta for data in
+  (0, 1) -- and no longer Poisson, whose probability mass is not comparable to a
+  density by AIC (the ranking used to move with the unit of measurement).
 
 ### Fixed
 

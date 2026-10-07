@@ -7,7 +7,7 @@
 //! # Features
 //!
 //! - **Normality testing** — KS, Jarque-Bera, Shapiro-Wilk, and Anderson-Darling tests with combined verdict
-//! - **Distribution fitting** — MLE fitting for Normal, Exponential, Gamma, LogNormal, Poisson with AIC/BIC ranking
+//! - **Distribution fitting** — MLE fitting of the continuous families that apply (Normal; Exponential, Gamma, LogNormal, Weibull for positive data; Beta for (0, 1)) with AIC/BIC ranking
 //! - **Empirical CDF** — sorted values and cumulative probabilities
 //! - **Histogram** — optimal bin computation (Sturges, Scott, Freedman-Diaconis)
 //! - **QQ-plot** — theoretical vs sample quantiles for normal distribution
@@ -60,7 +60,8 @@ pub struct DistributionConfig {
     pub compute_histogram: bool,
     /// Whether to compute QQ-plot. Default: true.
     pub compute_qq_plot: bool,
-    /// Whether to fit distributions (Normal, Exponential, Gamma, LogNormal, Poisson). Default: false.
+    /// Whether to fit distributions (the continuous families that apply: Normal; Exponential,
+    /// Gamma, LogNormal, Weibull for positive data; Beta for (0, 1)). Default: false.
     pub fit_distributions: bool,
 }
 
@@ -450,7 +451,9 @@ pub fn jarque_bera(data: &[f64]) -> Option<NormalityTestResult> {
 
 /// Fits multiple parametric distributions to data and returns results sorted by AIC.
 ///
-/// Fits: Normal, Exponential, Gamma, LogNormal, Poisson.
+/// Fits the continuous families that apply: Normal; Exponential, Gamma, LogNormal and
+/// Weibull for positive data; Beta for data in (0, 1). Poisson is not ranked against
+/// them -- a probability mass and a density are not comparable by AIC.
 /// Returns an empty vector if no distribution can be fitted.
 ///
 /// ```
