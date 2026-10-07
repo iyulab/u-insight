@@ -414,18 +414,18 @@ try {
 |---|---|---|
 | `unknown_option` | `parameter`, `got`, `expected` | A `linkage`, `method`, `bin_method` or `_method` that names none of the supported values |
 | `missing_option` | `parameter`, `expected` | A `hierarchical` config with neither `n_clusters` nor `distance_threshold` |
-| `invalid_option` | `parameter` | An option value the analysis refuses (a non-positive `threshold`, a `_threshold` that is not a number, …) |
+| `invalid_option` | `parameter` | An option value the analysis refuses (a non-positive `threshold`, a `_threshold` that is not a number, `config.distance_threshold` given with `n_clusters`, …) |
 | `parameter_out_of_range` | `parameter` (and `index`, `min`, `max`, `got` where they apply) | A `spectral_residual` option outside its domain, or a `silhouette` label `≥ k` |
 | `insufficient_data` | `min`, `got` (and `parameter`) | Fewer rows or observations than the method needs |
 | `value_not_finite` | `parameter`, `index` | A NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`data.b`), `index` its position in that array, or `null`. `describe` reads NaN as a missing value, like `null` |
-| `dimension_mismatch` | `expected`, `got` (and `parameter`) | Lengths that have to agree do not (`labels` vs data rows, …) |
+| `dimension_mismatch` | `expected`, `got` (and `parameter`, `index`) | Lengths that have to agree do not — a row shorter than the first (`index` is that row), `labels` vs data rows, … |
 | `empty_input` | `parameter` | An input with no columns |
 | `missing_values` | `column`, `count` | A column with missing values where the analysis needs complete data |
 | `not_a_class_label` | `parameter`, `index`, `got` | A classification `target` (`feature_importance` `anova` / `mutual_info`) value that is not a whole number ≥ 0 |
 | `degenerate_data` | — | Constant columns, a singular matrix, … |
 | `column_not_found` | `column` | A column name the data does not have |
 | `computation_failed` | `operation` | A numerical step that did not converge or produced no result |
-| `malformed_input` | `parameter` (and `column`) | An argument of the wrong shape or type, a non-numeric column entry, or a JSON string |
+| `malformed_input` | `parameter` (and `column`, `index`) | An argument of the wrong shape or type, a non-numeric column entry (`index` is its position), or a JSON string |
 
 ### Functions
 

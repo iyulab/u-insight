@@ -21,8 +21,14 @@ pub enum InsightError {
     ComputationFailed { operation: String, detail: String },
     /// Column not found in DataFrame.
     ColumnNotFound { name: String },
-    /// Dimension mismatch.
-    DimensionMismatch { expected: usize, actual: usize },
+    /// An element whose length differs from the others: `expected` and `actual`
+    /// lengths, and its position in its input (`None` when the mismatch is
+    /// between two inputs rather than within one).
+    DimensionMismatch {
+        expected: usize,
+        actual: usize,
+        index: Option<usize>,
+    },
     /// An infinite value (or a NaN where NaN is not read as missing) at
     /// `index` of the named input.
     ValueNotFinite { column: String, index: usize },
@@ -60,7 +66,19 @@ impl fmt::Display for InsightError {
             Self::ColumnNotFound { name } => {
                 write!(f, "column '{name}' not found")
             }
-            Self::DimensionMismatch { expected, actual } => {
+            Self::DimensionMismatch {
+                expected,
+                actual,
+                index: Some(index),
+            } => {
+                write!(
+                    f,
+                    "element {index}: expected {expected} values, got {actual}"
+                )
+            }
+            Self::DimensionMismatch {
+                expected, actual, ..
+            } => {
                 write!(f, "expected {expected} elements, got {actual}")
             }
             Self::ValueNotFinite { column, index } => {

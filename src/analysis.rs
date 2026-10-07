@@ -60,6 +60,7 @@ pub fn validate_clean_data(columns: &[Vec<f64>], names: &[String]) -> Result<(),
             return Err(InsightError::DimensionMismatch {
                 expected: n_rows,
                 actual: col.len(),
+                index: Some(i),
             });
         }
 
@@ -568,6 +569,7 @@ pub fn anova_feature_selection(
         return Err(InsightError::DimensionMismatch {
             expected: n,
             actual: target.len(),
+            index: None,
         });
     }
 
@@ -590,6 +592,7 @@ pub fn anova_feature_selection(
             return Err(InsightError::DimensionMismatch {
                 expected: n,
                 actual: feature.len(),
+                index: Some(i),
             });
         }
 
@@ -748,6 +751,7 @@ pub fn mutual_info_classif(
         return Err(InsightError::DimensionMismatch {
             expected: n,
             actual: target.len(),
+            index: None,
         });
     }
 
@@ -794,6 +798,7 @@ pub fn mutual_info_classif(
             return Err(InsightError::DimensionMismatch {
                 expected: n,
                 actual: feature.len(),
+                index: Some(fi),
             });
         }
 

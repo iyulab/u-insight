@@ -14,6 +14,17 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Changed
 
+- **Breaking:** `InsightError::DimensionMismatch` carries `index` — the position of the
+  row or column whose length differs, `None` when two inputs disagree — and the
+  refusal reports it as `index` beside `expected` and `got`.
+- **Breaking:** a NaN or infinity reaching clustering, PCA, isolation forest, LOF,
+  Mahalanobis or feature importance is `InsightError::ValueNotFinite` at its cell
+  (`data[i]`, index `j`; `features[i]` for feature importance), reported as
+  `value_not_finite` with `parameter` and `index`. It was `DegenerateData` with the
+  position only in the message.
+- A non-numeric entry in a column is refused with its `index`; a `hierarchical` config
+  with both `n_clusters` and `distance_threshold` names `config.distance_threshold` as
+  the `parameter` instead of `config`.
 - `UInsight` is marked `IsAotCompatible`: the trimming and NativeAOT analyzers run on
   every build and any finding fails it, so the package stays usable in trimmed and
   NativeAOT applications.

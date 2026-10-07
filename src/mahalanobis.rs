@@ -135,6 +135,7 @@ pub fn mahalanobis(
         return Err(InsightError::DimensionMismatch {
             expected: 1,
             actual: 0,
+            index: None,
         });
     }
 
@@ -163,11 +164,13 @@ pub fn mahalanobis(
             return Err(InsightError::DimensionMismatch {
                 expected: p,
                 actual: point.len(),
+                index: Some(row_idx),
             });
         }
         if let Some(col_idx) = point.iter().position(|v| !v.is_finite()) {
-            return Err(InsightError::DegenerateData {
-                reason: format!("non-finite value at row {row_idx}, column {col_idx}"),
+            return Err(InsightError::ValueNotFinite {
+                column: format!("data[{row_idx}]"),
+                index: col_idx,
             });
         }
     }
@@ -379,19 +382,18 @@ mod tests {
         ];
         let err = mahalanobis(&data, &MahalanobisConfig::default()).unwrap_err();
         // Must surface as DegenerateData with row/column locator (not Io).
-        match err {
-            InsightError::DegenerateData { reason } => {
-                assert!(
-                    reason.contains("row 1") && reason.contains("column 0"),
-                    "reason should pinpoint the offending cell, got: {reason}"
-                );
-            }
-            other => panic!("expected DegenerateData, got {other:?}"),
-        }
+        assert_eq!(
+            err,
+            InsightError::ValueNotFinite {
+                column: "data[1]".into(),
+                index: 0
+            },
+            "the refusal names the offending cell"
+        );
     }
 
     #[test]
-    fn infinity_rejected_as_degenerate() {
+    fn infinity_rejected_where_it_sits() {
         let data = vec![
             vec![1.0, 2.0],
             vec![3.0, f64::INFINITY],
@@ -399,7 +401,13 @@ mod tests {
             vec![6.0, 7.0],
         ];
         let err = mahalanobis(&data, &MahalanobisConfig::default()).unwrap_err();
-        assert!(matches!(err, InsightError::DegenerateData { .. }));
+        assert_eq!(
+            err,
+            InsightError::ValueNotFinite {
+                column: "data[1]".into(),
+                index: 1
+            }
+        );
     }
 
     #[test]

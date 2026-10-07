@@ -254,25 +254,51 @@ fn from_js_with<T: serde::de::DeserializeOwned>(
 /// WASM is a system boundary — we reject malformed input loudly instead of
 /// silently coercing it to an empty / partial vector. Returns an `InvalidInput`-style
 /// JS error if the value is not a JSON array, or if any element is not a JSON number.
-fn extract_numeric_array(value: &serde_json::Value, name: &str) -> Result<Vec<f64>, JsValue> {
-    let refuse = |message: String| {
-        js_err(WireError::new(
+fn extract_numeric_array(value: &serde_json::Value, name: &str) -> Result<Vec<f64>, WireError> {
+    let arr = value.as_array().ok_or_else(|| {
+        WireError::new(
             "malformed_input",
-            message,
+            format!("column '{name}' must be a numeric array"),
             json!({ "parameter": "data", "column": name }),
-        ))
-    };
-    let arr = value
-        .as_array()
-        .ok_or_else(|| refuse(format!("column '{name}' must be a numeric array")))?;
-    let parsed: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
-    if parsed.len() != arr.len() {
-        return Err(refuse(format!(
-            "column '{name}' contains {} non-numeric value(s)",
-            arr.len() - parsed.len()
-        )));
+        )
+    })?;
+    arr.iter()
+        .enumerate()
+        .map(|(i, v)| {
+            v.as_f64().ok_or_else(|| {
+                WireError::new(
+                    "malformed_input",
+                    format!("column '{name}' value {i} is not a number: {v}"),
+                    json!({ "parameter": "data", "column": name, "index": i }),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Where to cut the dendrogram: a cluster count or a distance, exactly one.
+fn hierarchical_cut(
+    n_clusters: Option<usize>,
+    distance_threshold: Option<f64>,
+) -> Result<crate::clustering::HierarchicalConfig, WireError> {
+    use crate::clustering::HierarchicalConfig;
+    match (n_clusters, distance_threshold) {
+        // Named by the one that cannot stand beside the other.
+        (Some(_), Some(_)) => Err(WireError::new(
+            "invalid_option",
+            "config.distance_threshold cannot be given with config.n_clusters; they are \
+             mutually exclusive -- give one"
+                .to_string(),
+            json!({ "parameter": "config.distance_threshold" }),
+        )),
+        (Some(k), None) => Ok(HierarchicalConfig::with_k(k)),
+        (None, Some(t)) => Ok(HierarchicalConfig::with_threshold(t)),
+        (None, None) => Err(WireError::new(
+            "missing_option",
+            "config must specify either n_clusters or distance_threshold".to_string(),
+            json!({ "parameter": "config", "expected": ["n_clusters", "distance_threshold"] }),
+        )),
     }
-    Ok(parsed)
 }
 
 // ── TypeScript declarations for column-major inputs ─────────────────
@@ -603,7 +629,8 @@ pub fn correlation_matrix(
     let columns: Vec<Vec<f64>> = names
         .iter()
         .map(|n| extract_numeric_array(&raw[n], n))
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, _>>()
+        .map_err(js_err)?;
 
     use crate::analysis::{correlation_analysis, CorrelationConfig, CorrelationMethod};
     let method = match method_str.as_str() {
@@ -943,30 +970,13 @@ pub fn hierarchical(
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let cfg: HierarchicalConfigDto = from_js(config, "config")?;
 
-    use crate::clustering::{hierarchical as hier_fn, HierarchicalConfig};
+    use crate::clustering::hierarchical as hier_fn;
 
     let linkage = parse_linkage(&cfg.linkage).map_err(js_err)?;
 
-    let mut config = match (cfg.n_clusters, cfg.distance_threshold) {
-        (Some(_), Some(_)) => {
-            return Err(js_err(WireError::new(
-                "invalid_option",
-                "config gives both n_clusters and distance_threshold; they are mutually \
-                 exclusive -- give one"
-                    .to_string(),
-                json!({ "parameter": "config" }),
-            )))
-        }
-        (Some(k), None) => HierarchicalConfig::with_k(k).linkage(linkage),
-        (None, Some(t)) => HierarchicalConfig::with_threshold(t).linkage(linkage),
-        (None, None) => {
-            return Err(js_err(WireError::new(
-                "missing_option",
-                "config must specify either n_clusters or distance_threshold".to_string(),
-                json!({ "parameter": "config", "expected": ["n_clusters", "distance_threshold"] }),
-            )))
-        }
-    };
+    let mut config = hierarchical_cut(cfg.n_clusters, cfg.distance_threshold)
+        .map_err(js_err)?
+        .linkage(linkage);
     if let Some(mp) = cfg.max_points {
         config.max_points = mp;
     }
@@ -1723,7 +1733,8 @@ pub fn vif_diagnostic(
     let columns: Vec<Vec<f64>> = names
         .iter()
         .map(|n| extract_numeric_array(&raw[n], n))
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, _>>()
+        .map_err(js_err)?;
 
     let r = crate::analysis::vif_analysis(&columns, &names, threshold).map_err(js_err)?;
 
@@ -2293,6 +2304,49 @@ mod dto_strictness_tests {
 mod path_tests {
     //! A value of the wrong type deep inside an argument is refused where it
     //! sits: `parameter` names the field, `index` its array position.
+
+    #[test]
+    fn a_non_numeric_value_in_a_column_is_refused_at_its_position() {
+        let err = super::extract_numeric_array(&serde_json::json!([1.0, 2.0, "x", 4.0]), "temp")
+            .expect_err("a string is not a number");
+        assert_eq!(err.fields["code"], "malformed_input");
+        assert_eq!(err.fields["parameter"], "data");
+        assert_eq!(err.fields["column"], "temp");
+        assert_eq!(err.fields["index"], 2);
+    }
+
+    #[test]
+    fn a_ragged_row_is_refused_at_its_position() {
+        let data = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0]];
+        let config = crate::clustering::KMeansConfig::new(2);
+        let err = crate::clustering::kmeans(&data, &config).expect_err("row 2 is short");
+        let refusal = crate::refusal::Refusal::from(&err);
+        assert_eq!(refusal.fields["code"], "dimension_mismatch");
+        assert_eq!(refusal.fields["index"], 2);
+        assert_eq!(refusal.fields["expected"], 2);
+        assert_eq!(refusal.fields["got"], 1);
+    }
+
+    #[test]
+    fn a_non_finite_cell_is_refused_where_it_sits() {
+        let data = vec![vec![1.0, 2.0], vec![3.0, f64::INFINITY], vec![5.0, 6.0]];
+        let config = crate::pca::PcaConfig::new(1);
+        let err = crate::pca::pca(&data, &config).expect_err("infinity");
+        let refusal = crate::refusal::Refusal::from(&err);
+        assert_eq!(refusal.fields["code"], "value_not_finite");
+        assert_eq!(refusal.fields["parameter"], "data[1]");
+        assert_eq!(refusal.fields["index"], 1);
+    }
+
+    #[test]
+    fn conflicting_cut_options_name_the_one_at_fault() {
+        let both = super::hierarchical_cut(Some(3), Some(2.5)).expect_err("both given");
+        assert_eq!(both.fields["code"], "invalid_option");
+        assert_eq!(both.fields["parameter"], "config.distance_threshold");
+        let neither = super::hierarchical_cut(None, None).expect_err("neither given");
+        assert_eq!(neither.fields["code"], "missing_option");
+        assert!(super::hierarchical_cut(Some(3), None).is_ok());
+    }
 
     #[test]
     fn a_bad_cell_is_refused_at_its_row() {

@@ -126,6 +126,7 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
         return Err(InsightError::DimensionMismatch {
             expected: 1,
             actual: 0,
+            index: None,
         });
     }
 
@@ -135,11 +136,13 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
             return Err(InsightError::DimensionMismatch {
                 expected: dim,
                 actual: point.len(),
+                index: Some(row_idx),
             });
         }
         if let Some(col_idx) = point.iter().position(|v| !v.is_finite()) {
-            return Err(InsightError::DegenerateData {
-                reason: format!("non-finite value at row {row_idx}, column {col_idx}"),
+            return Err(InsightError::ValueNotFinite {
+                column: format!("data[{row_idx}]"),
+                index: col_idx,
             });
         }
     }
@@ -396,16 +399,14 @@ mod tests {
     fn lof_error_nan() {
         let data = vec![vec![1.0, f64::NAN], vec![3.0, 4.0]];
         let err = lof(&data, &LofConfig::default()).unwrap_err();
-        // Must surface as DegenerateData with row/column locator (not Io).
-        match err {
-            InsightError::DegenerateData { reason } => {
-                assert!(
-                    reason.contains("row 0") && reason.contains("column 1"),
-                    "reason should pinpoint the offending cell, got: {reason}"
-                );
+        // Refused at the offending cell, as the bindings report it (not Io, not degenerate).
+        assert_eq!(
+            err,
+            InsightError::ValueNotFinite {
+                column: "data[0]".into(),
+                index: 1
             }
-            other => panic!("expected DegenerateData, got {other:?}"),
-        }
+        );
     }
 
     #[test]

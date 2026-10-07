@@ -124,6 +124,7 @@ impl JsonParser {
                     return Err(InsightError::DimensionMismatch {
                         expected: n,
                         actual: arr.len(),
+                        index: None,
                     });
                 }
                 _ => {}
@@ -172,6 +173,7 @@ impl JsonParser {
                 return Err(InsightError::DimensionMismatch {
                     expected: n_cols,
                     actual: row.len(),
+                    index: Some(row_idx),
                 });
             }
             for (col_idx, val) in row.iter().enumerate() {

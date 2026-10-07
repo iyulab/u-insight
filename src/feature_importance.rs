@@ -193,6 +193,7 @@ pub fn feature_analysis(
         return Err(InsightError::DimensionMismatch {
             expected: p,
             actual: names.len(),
+            index: None,
         });
     }
 
@@ -210,12 +211,14 @@ pub fn feature_analysis(
             return Err(InsightError::DimensionMismatch {
                 expected: n,
                 actual: feat.len(),
+                index: Some(i),
             });
         }
         for (j, &v) in feat.iter().enumerate() {
             if !v.is_finite() {
-                return Err(InsightError::DegenerateData {
-                    reason: format!("non-finite value at row {j} of feature '{}'", names[i]),
+                return Err(InsightError::ValueNotFinite {
+                    column: format!("features[{i}]"),
+                    index: j,
                 });
             }
         }
@@ -611,6 +614,7 @@ pub fn permutation_importance(
             return Err(InsightError::DimensionMismatch {
                 expected: n,
                 actual: f.len(),
+                index: Some(i),
             });
         }
         let nan_count = f.iter().filter(|v| v.is_nan()).count();

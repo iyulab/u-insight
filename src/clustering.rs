@@ -164,12 +164,14 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
             return Err(InsightError::DimensionMismatch {
                 expected: d,
                 actual: point.len(),
+                index: Some(i),
             });
         }
         for (j, &v) in point.iter().enumerate() {
             if !v.is_finite() {
-                return Err(InsightError::DegenerateData {
-                    reason: format!("non-finite value at point {i}, dimension {j}"),
+                return Err(InsightError::ValueNotFinite {
+                    column: format!("data[{i}]"),
+                    index: j,
                 });
             }
         }
@@ -783,12 +785,14 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
             return Err(InsightError::DimensionMismatch {
                 expected: d,
                 actual: point.len(),
+                index: Some(i),
             });
         }
         for (j, &v) in point.iter().enumerate() {
             if !v.is_finite() {
-                return Err(InsightError::DegenerateData {
-                    reason: format!("non-finite value at point {i}, dimension {j}"),
+                return Err(InsightError::ValueNotFinite {
+                    column: format!("data[{i}]"),
+                    index: j,
                 });
             }
         }
@@ -1097,6 +1101,7 @@ pub fn hierarchical(
         return Err(InsightError::DimensionMismatch {
             expected: 1,
             actual: 0,
+            index: None,
         });
     }
     for (i, point) in data.iter().enumerate() {
@@ -1104,12 +1109,14 @@ pub fn hierarchical(
             return Err(InsightError::DimensionMismatch {
                 expected: d,
                 actual: point.len(),
+                index: Some(i),
             });
         }
         for (j, &v) in point.iter().enumerate() {
             if !v.is_finite() {
-                return Err(InsightError::DegenerateData {
-                    reason: format!("non-finite value at point {i}, dimension {j}"),
+                return Err(InsightError::ValueNotFinite {
+                    column: format!("data[{i}]"),
+                    index: j,
                 });
             }
         }
@@ -1553,6 +1560,7 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
         return Err(InsightError::DimensionMismatch {
             expected: 1,
             actual: 0,
+            index: None,
         });
     }
     for (i, point) in data.iter().enumerate() {
@@ -1560,12 +1568,14 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
             return Err(InsightError::DimensionMismatch {
                 expected: d,
                 actual: point.len(),
+                index: Some(i),
             });
         }
         for (j, &v) in point.iter().enumerate() {
             if !v.is_finite() {
-                return Err(InsightError::DegenerateData {
-                    reason: format!("non-finite value at point {i}, dimension {j}"),
+                return Err(InsightError::ValueNotFinite {
+                    column: format!("data[{i}]"),
+                    index: j,
                 });
             }
         }
@@ -2430,12 +2440,14 @@ pub fn mini_batch_kmeans(
             return Err(InsightError::DimensionMismatch {
                 expected: d,
                 actual: point.len(),
+                index: Some(i),
             });
         }
         for (j, &v) in point.iter().enumerate() {
             if !v.is_finite() {
-                return Err(InsightError::DegenerateData {
-                    reason: format!("non-finite value at point {i}, dimension {j}"),
+                return Err(InsightError::ValueNotFinite {
+                    column: format!("data[{i}]"),
+                    index: j,
                 });
             }
         }

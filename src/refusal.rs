@@ -113,9 +113,16 @@ impl From<&InsightError> for Refusal {
             InsightError::ColumnNotFound { name } => {
                 ("column_not_found", json!({ "column": name }))
             }
-            InsightError::DimensionMismatch { expected, actual } => (
+            InsightError::DimensionMismatch {
+                expected,
+                actual,
+                index,
+            } => (
                 "dimension_mismatch",
-                json!({ "expected": expected, "got": actual }),
+                match index {
+                    Some(i) => json!({ "expected": expected, "got": actual, "index": i }),
+                    None => json!({ "expected": expected, "got": actual }),
+                },
             ),
             InsightError::ValueNotFinite { column, index } => (
                 "value_not_finite",

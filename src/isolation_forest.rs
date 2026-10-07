@@ -157,12 +157,14 @@ pub fn isolation_forest(
             return Err(InsightError::DimensionMismatch {
                 expected: d,
                 actual: point.len(),
+                index: Some(i),
             });
         }
         for (j, &v) in point.iter().enumerate() {
             if !v.is_finite() {
-                return Err(InsightError::DegenerateData {
-                    reason: format!("non-finite value at point {i}, dimension {j}"),
+                return Err(InsightError::ValueNotFinite {
+                    column: format!("data[{i}]"),
+                    index: j,
                 });
             }
         }

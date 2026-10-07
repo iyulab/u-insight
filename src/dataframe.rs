@@ -437,6 +437,7 @@ impl DataFrame {
             return Err(InsightError::DimensionMismatch {
                 expected: self.row_count,
                 actual: col_len,
+                index: None,
             });
         }
         self.names.push(name);
