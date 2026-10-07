@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [0.29.1] - 2026-10-08
+
+The .NET client is `UInsight` 0.29.1.
+
+### Fixed
+
+- `UInsight` no longer ships `build/UInsight.targets`. It copied a native library into
+  the build output chosen by the build machine's operating system, not its
+  architecture: an Intel Mac received the arm64 library, and with 0.29.0 shipping
+  `linux-arm64`, a Linux arm64 machine received the x64 one. NuGet's own
+  `runtimes/<rid>/native` resolution places the right library, including for
+  single-file publishing.
+- `insight_version` (`InsightClient.GetVersion()`) reported `0.1.0` for every release;
+  it reports the crate version.
+
 ## [0.29.0] - 2026-10-07
 
 Depends on u-numflow 0.10 and u-analytics 0.19. The .NET client is `UInsight` 0.29.0.

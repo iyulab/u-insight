@@ -1623,8 +1623,9 @@ pub unsafe extern "C" fn insight_free_anova_features(ptr: *mut CAnovaFeature, co
 /// The returned string is a static string literal. Do not free it.
 #[no_mangle]
 pub extern "C" fn insight_version() -> *const c_char {
-    // "0.1.0\0"
-    c"0.1.0".as_ptr()
+    // The crate's own version: a literal here reported 0.1.0 for every release.
+    static VERSION: &[u8] = concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes();
+    VERSION.as_ptr().cast()
 }
 
 // ── Hierarchical Clustering FFI ──────────────────────────────────────
@@ -2994,7 +2995,7 @@ mod tests {
     fn ffi_version() {
         let v = insight_version();
         let s = unsafe { CStr::from_ptr(v) }.to_str().unwrap();
-        assert_eq!(s, "0.1.0");
+        assert_eq!(s, env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
