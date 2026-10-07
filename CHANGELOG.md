@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- `UInsight` is marked `IsAotCompatible`: the trimming and NativeAOT analyzers run on
+  every build and any finding fails it, so the package stays usable in trimmed and
+  NativeAOT applications.
+
 ## [0.28.0] - 2026-10-07
 
 Depends on u-analytics 0.19. The .NET client is `UInsight` 0.28.0.
