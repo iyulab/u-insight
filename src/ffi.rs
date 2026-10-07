@@ -4606,5 +4606,4 @@ mod tests {
         };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
-
 }
