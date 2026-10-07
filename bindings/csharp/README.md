@@ -127,18 +127,16 @@ public sealed class InsightClient : IDisposable
 }
 ```
 
-## Native Library
+## Trimming and NativeAOT
 
-The native library (`u_insight.dll` / `libu_insight.so` / `libu_insight.dylib`) must be available in your application's runtime directory or system PATH.
+The package is marked `IsAotCompatible`: it calls the native library through
+source-generated interop with no reflection, and runs unchanged in trimmed and
+NativeAOT applications.
 
-### Building Native Library
+## Platforms
 
-```bash
-cd <u-insight-repo>
-cargo build --release
-```
-
-The built library will be in `target/release/`.
+The package carries the native library for `win-x64`, `linux-x64` and `linux-arm64`
+(glibc 2.39 or later), `osx-x64` and `osx-arm64`; no separate install is needed.
 
 ## License
 

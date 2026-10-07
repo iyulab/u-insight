@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace UInsight.Interop;
@@ -34,27 +33,6 @@ internal static partial class NativeLibrary
     public const uint INSIGHT_CORR_SPEARMAN = 1;
     /// <summary>Kendall tau-b rank correlation.</summary>
     public const uint INSIGHT_CORR_KENDALL = 2;
-
-    #endregion
-
-    #region Resolver
-
-    static NativeLibrary()
-    {
-        System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(
-            typeof(NativeLibrary).Assembly, DllImportResolver);
-    }
-
-    private static IntPtr DllImportResolver(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
-    {
-        if (libraryName != LibraryName)
-            return IntPtr.Zero;
-
-        if (System.Runtime.InteropServices.NativeLibrary.TryLoad(libraryName, assembly, searchPath, out var handle))
-            return handle;
-
-        return IntPtr.Zero;
-    }
 
     #endregion
 

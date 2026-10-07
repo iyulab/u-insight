@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Added
+
+- `UInsight` carries the native library for `linux-arm64` (glibc 2.39 or later).
+
 ### Changed
 
 - `UInsight` is marked `IsAotCompatible`: the trimming and NativeAOT analyzers run on
