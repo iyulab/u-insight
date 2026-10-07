@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Removed
+
+- **Breaking:** the SPC control charts, process capability, sigma ↔ PPM and
+  Weibull reliability functions — 27 C ABI functions, their 11 `#[repr(C)]`
+  structs, and the matching `UInsight` methods and result types. They were
+  copies of the `u-analytics` crate's functions over a second set of C
+  structs, and had already fallen behind it (no Phase II limits, no per-point
+  `z`, refusals as bare status codes). Use `UAnalytics` (or `u-analytics`
+  directly, or `@iyulab/u-analytics`):
+
+  | `UInsight` | `UAnalytics` |
+  |---|---|
+  | `XBarRChart` / `XBarSChart` / `IndividualMrChart` | `XbarRChart` / `XbarSChart` / `ImrChart` |
+  | `PChart` · `NpChart` · `CChart` · `UChart` | same names |
+  | `LaneyPChart` · `LaneyUChart` · `GChart` · `TChart` | same names |
+  | `ProcessCapability` · `BoxCoxCapability` · `PercentileCapability` | same names |
+  | `SigmaToPpm` · `PpmToSigma` | same names (`PpmToSigma` throws instead of returning `null`) |
+  | `WeibullMle` · `WeibullMrr` | same names |
+  | `WeibullReliability` · `WeibullHazardRate` · `WeibullMtbf` · `WeibullBLife` · `WeibullTimeToReliability` | `WeibullReliability(shape, scale, times, fractionsFailed)` — `mtbf`, `reliability` and `hazard_rate` at each time, `b_life` at each fraction; the time to reliability `p` is the B-life at `1 − p` |
+
+  `UAnalytics` returns `JsonElement` results in the WebAssembly binding's
+  shape and raises `AnalyticsException` with `Reason`, `Parameter` and
+  `Details`.
+
 ## [0.26.1] - 2026-10-04
 
 ### Changed

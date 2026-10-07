@@ -7,6 +7,15 @@
 
 A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
+## What's New (unreleased)
+
+- **SPC control charts, process capability, sigma ↔ PPM and Weibull reliability
+  are no longer in the C ABI or in `UInsight`.** They are the `u-analytics`
+  crate's own surface, carried to .NET by `UAnalytics` and to JavaScript by
+  `@iyulab/u-analytics`, which already had every function and newer versions of
+  them (Phase II limits, structured refusals). `CHANGELOG.md` lists each removed
+  method with its replacement.
+
 ## What's New in 0.20.0
 
 - **Box-Cox capability reports when its λ search hit a range limit**
@@ -108,7 +117,7 @@ Built on `u-analytics` (statistical algorithms), `u-numflow` (math primitives).
 
 | Module | Description |
 |--------|-------------|
-| `ffi` | C FFI bindings — 32 functions, 20 `#[repr(C)]` structs, auto-generated C header via cbindgen |
+| `ffi` | C FFI bindings — 46 functions, 30 `#[repr(C)]` structs, auto-generated C header via cbindgen |
 
 ## Quick Start
 
@@ -231,48 +240,13 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_mann_kendall` | Mann-Kendall trend test with Sen's slope |
 | `insight_kde` | Gaussian kernel density estimation (Silverman/Scott/manual bandwidth) |
 
-### SPC — Variables Control Charts
+### SPC, process capability and Weibull reliability
 
-| Function | Description |
-|----------|-------------|
-| `insight_xbar_r_chart` | X-bar-R control chart (subgroup mean + range) |
-| `insight_xbar_s_chart` | X-bar-S control chart (subgroup mean + std dev) |
-| `insight_individual_mr_chart` | Individual-MR control chart |
-
-### SPC — Attributes Control Charts
-
-| Function | Description |
-|----------|-------------|
-| `insight_p_chart` | P chart (proportion nonconforming) |
-| `insight_np_chart` | NP chart (count nonconforming, constant sample size) |
-| `insight_c_chart` | C chart (defect count, constant area) |
-| `insight_u_chart` | U chart (defects per unit, variable area) |
-| `insight_laney_p_chart` | Laney P' chart (overdispersion-adjusted) |
-| `insight_laney_u_chart` | Laney U' chart (overdispersion-adjusted) |
-| `insight_g_chart` | G chart (rare-event, geometric distribution) |
-| `insight_t_chart` | T chart (rare-event, exponential distribution) |
-
-### Process Capability
-
-| Function | Description |
-|----------|-------------|
-| `insight_process_capability` | Standard capability indices (Cp/Cpk/Pp/Ppk/Cpm) |
-| `insight_boxcox_capability` | Non-normal capability via Box-Cox transformation |
-| `insight_percentile_capability` | Percentile-based capability (ISO 22514-2) |
-| `insight_sigma_to_ppm` | Sigma quality level → PPM defect rate |
-| `insight_ppm_to_sigma` | PPM defect rate → sigma quality level |
-
-### Weibull Reliability
-
-| Function | Description |
-|----------|-------------|
-| `insight_weibull_mle` | Weibull parameter fitting (Maximum Likelihood Estimation) |
-| `insight_weibull_mrr` | Weibull parameter fitting (Median Rank Regression) |
-| `insight_weibull_reliability` | Reliability (survival) function R(t) |
-| `insight_weibull_hazard_rate` | Hazard (instantaneous failure) rate |
-| `insight_weibull_mtbf` | Mean Time Between Failures |
-| `insight_weibull_time_to_reliability` | Time at which reliability drops to a given level |
-| `insight_weibull_b_life` | B-life (time at which a given fraction has failed) |
+Control charts, process capability (normal, Box-Cox, percentile), sigma ↔ PPM
+and Weibull fitting and reliability are not part of this library's C ABI. They
+come from [u-analytics](https://crates.io/crates/u-analytics) — over its own C
+ABI and the `UAnalytics` NuGet package, and over `@iyulab/u-analytics` for
+JavaScript — which is the one place they are implemented and kept current.
 
 ### Feature Importance
 
@@ -310,7 +284,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_clear_error` | Clear error state |
 | `insight_version` | Library version string |
 
-All FFI functions that accept data pointers use `catch_unwind` to prevent panics from crossing the FFI boundary. A handful of pure closed-form scalar conversions (e.g. `insight_sigma_to_ppm`, `insight_weibull_reliability`) skip the `catch_unwind`/error-code ceremony and return the value directly, since they cannot panic and have no data to validate.
+All FFI functions that accept data pointers use `catch_unwind` to prevent panics from crossing the FFI boundary.
 
 ## C# Binding (UInsight)
 
@@ -333,8 +307,8 @@ Console.WriteLine($"K={result.K}, WCSS={result.Wcss:F2}");
 
 The binding is in `bindings/csharp/UInsight/` with:
 
-- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for all 73 FFI functions
-- `Interop/NativeStructs.cs` — `[StructLayout]` mappings for all 35 C structs
+- `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for the FFI functions the client calls
+- `Interop/NativeStructs.cs` — `[StructLayout]` mappings for the C structs they exchange
 - `InsightClient.cs` — High-level managed API (automatic memory management)
 - `InsightException.cs` — Error code to exception conversion; `Category` classifies the error, `Parameter` names the argument or option an invalid-parameter error is about, and `Reason` / `Details` carry the same `code` and fields as the WebAssembly `Error`
 

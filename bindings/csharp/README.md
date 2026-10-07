@@ -81,6 +81,9 @@ Console.WriteLine($"Normal: {dist.IsNormal}, SW p={dist.SwPValue:F4}");
 
 ## API Reference
 
+SPC control charts, process capability, sigma ↔ PPM and Weibull reliability are
+in the `UAnalytics` package, not here.
+
 ### InsightClient
 
 ```csharp
