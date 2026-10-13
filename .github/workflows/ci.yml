@@ -201,17 +201,26 @@ jobs:
   csharp:
     name: C# Binding
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-      # The client is otherwise compiled only by the NuGet release. Building it
-      # here runs the trimming and NativeAOT analyzers, whose findings fail the
-      # build, on every change.
-      - name: Build the C# binding
-        run: dotnet build bindings/csharp/UInsight/UInsight.csproj -c Release
+      # The client reads results by laying its structs over memory the engine
+      # filled, so each struct must match the C header field by field; and every
+      # method is run against the real library. Build it first; the client's own
+      # build fails on any trim or AOT analyzer warning.
+      - name: Build the native library
+        run: cargo build
+      - name: Client tests (struct layouts against the header, every method)
+        run: dotnet test bindings/csharp/UInsight.Tests/UInsight.Tests.csproj
 
   changelog-gate:
     name: Wire-schema CHANGELOG gate
