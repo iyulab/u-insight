@@ -59,6 +59,8 @@ pub mod mahalanobis;
 pub mod pca;
 pub mod profiling;
 mod refusal;
+#[cfg(test)]
+mod header_contract;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;

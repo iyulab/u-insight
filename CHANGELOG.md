@@ -8,6 +8,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- Building the crate no longer writes `include/u_insight.h` into its own
+  source directory (a read-only or vendored copy of the crate included); the
+  generated header goes to `OUT_DIR` only, and a test compares it with the
+  committed header.
+
 ### Changed
 
 - **Breaking (.NET `UInsight`):** `InsightException` names its members the way the other
