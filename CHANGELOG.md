@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
-## [Unreleased]
+## [0.30.0] - 2026-10-13
+
+Depends on u-numflow 0.11 and u-analytics 0.20. The .NET client is `UInsight` 0.30.0.
 
 ### Changed
 
