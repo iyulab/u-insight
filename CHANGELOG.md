@@ -8,6 +8,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-13
+
 ### Changed
 
 - **Breaking:** options that reached the analysis without a check are refused
