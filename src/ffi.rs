@@ -29,6 +29,7 @@ use crate::clustering::{
 };
 use crate::csv_parser::CsvParser;
 use crate::distribution::{distribution_analysis, DistributionConfig};
+use crate::error::{Bound, InsightError};
 use crate::feature_importance::{feature_analysis, permutation_importance, FeatureConfig};
 use crate::json_parser::JsonParser;
 use crate::pca::{pca, PcaConfig};
@@ -73,16 +74,19 @@ fn code_name(rc: i32) -> &'static str {
     }
 }
 
-fn error_to_code(e: &crate::error::InsightError) -> i32 {
-    use crate::error::InsightError;
+fn error_to_code(e: &InsightError) -> i32 {
     match e {
         InsightError::CsvParse { .. } | InsightError::JsonParse { .. } => INSIGHT_ERR_PARSE_FAILED,
         InsightError::MissingValues { .. }
         | InsightError::ValueNotFinite { .. }
+        | InsightError::EmptyInput { .. }
         | InsightError::ColumnNotFound { .. }
         | InsightError::DimensionMismatch { .. } => INSIGHT_ERR_INVALID_INPUT,
         InsightError::InsufficientData { .. } => INSIGHT_ERR_INSUFFICIENT_DATA,
-        InsightError::InvalidParameter { .. } => INSIGHT_ERR_INVALID_PARAM,
+        // A NaN or infinite option is a refused value of that option.
+        InsightError::ParameterOutOfRange { .. } | InsightError::InvalidParameter { .. } => {
+            INSIGHT_ERR_INVALID_PARAM
+        }
         InsightError::DegenerateData { .. } => INSIGHT_ERR_DEGENERATE_DATA,
         InsightError::ComputationFailed { .. } => INSIGHT_ERR_COMPUTATION_FAILED,
         InsightError::Io(_) => INSIGHT_ERR_ANALYSIS_FAILED,
@@ -128,9 +132,20 @@ fn store_body(body: serde_json::Value) {
 
 /// Records an analysis error with its own code and fields, and returns its
 /// `INSIGHT_ERR_*` category.
-fn fail(e: &crate::error::InsightError) -> i32 {
+fn fail(e: &InsightError) -> i32 {
     record(Refusal::from(e));
     error_to_code(e)
+}
+
+/// Records an integer selector (`method`, `cost`) that is none of the values
+/// the function knows, and returns `INSIGHT_ERR_INVALID_PARAM`.
+fn unknown_selector(parameter: &str, got: u32, expected: &[u32], message: String) -> i32 {
+    record(Refusal::new(
+        "unknown_option",
+        message,
+        serde_json::json!({ "parameter": parameter, "got": got, "expected": expected }),
+    ));
+    INSIGHT_ERR_INVALID_PARAM
 }
 
 /// Records a refusal known only by its category and text, and returns `rc`.
@@ -693,7 +708,7 @@ pub unsafe extern "C" fn insight_silhouette(
         let n = n_rows as usize;
         let d = n_cols as usize;
         if n == 0 || d == 0 {
-            return refuse(INSIGHT_ERR_INVALID_INPUT, "empty input");
+            return fail(&InsightError::empty("data"));
         }
 
         let raw = unsafe { slice::from_raw_parts(data, n * d) };
@@ -704,11 +719,19 @@ pub unsafe extern "C" fn insight_silhouette(
 
         // Validate label range
         let k_usize = k as usize;
-        if let Some(&bad) = labels_usize.iter().find(|&&l| l >= k_usize) {
-            return refuse(
-                INSIGHT_ERR_INVALID_INPUT,
+        if let Some((index, &bad)) = labels_usize.iter().enumerate().find(|(_, &l)| l >= k_usize) {
+            record(Refusal::new(
+                "parameter_out_of_range",
                 format!("label {bad} out of range for k={k_usize}"),
-            );
+                serde_json::json!({
+                    "parameter": "labels",
+                    "index": index,
+                    "min": 0,
+                    "max": k_usize.saturating_sub(1),
+                    "got": bad,
+                }),
+            ));
+            return INSIGHT_ERR_INVALID_INPUT;
         }
 
         let analysis = silhouette_samples(&points, &labels_usize, k_usize);
@@ -1214,7 +1237,11 @@ pub const INSIGHT_CORR_KENDALL: u32 = 2;
 /// `out`: pointer to a `CCorrelationResult`.
 ///
 /// Returns 0 on success, negative on error. Unknown `method` values
-/// return `INSIGHT_ERR_INVALID_PARAM`.
+/// return `INSIGHT_ERR_INVALID_PARAM` (`unknown_option`). Fewer than 3 rows
+/// is `insufficient_data` (`parameter: "data"`, `min: 3`); a constant column
+/// is `degenerate_data` naming it by position (`parameter: "data.1"` for the
+/// second); no columns is `empty_input`. One column gives the 1 x 1 matrix
+/// `[1]`.
 ///
 /// # Safety
 /// `data` must point to `n_rows * n_cols` f64s. `out` must be valid.
@@ -1233,21 +1260,21 @@ pub unsafe extern "C" fn insight_correlation(
 
         let nr = n_rows as usize;
         let nc = n_cols as usize;
-        if nr < 2 || nc < 2 {
-            return refuse(
-                INSIGHT_ERR_INVALID_INPUT,
-                "need at least 2 rows and 2 columns",
-            );
-        }
 
         let corr_method = match method {
             INSIGHT_CORR_PEARSON => crate::analysis::CorrelationMethod::Pearson,
             INSIGHT_CORR_SPEARMAN => crate::analysis::CorrelationMethod::Spearman,
             INSIGHT_CORR_KENDALL => crate::analysis::CorrelationMethod::Kendall,
-            _ => {
-                return refuse(
-                    INSIGHT_ERR_INVALID_PARAM,
-                    "invalid correlation method (use 0=Pearson, 1=Spearman, 2=Kendall)",
+            other => {
+                return unknown_selector(
+                    "method",
+                    other,
+                    &[
+                        INSIGHT_CORR_PEARSON,
+                        INSIGHT_CORR_SPEARMAN,
+                        INSIGHT_CORR_KENDALL,
+                    ],
+                    format!("method must be 0 (Pearson), 1 (Spearman) or 2 (Kendall), got {other}"),
                 );
             }
         };
@@ -1262,7 +1289,9 @@ pub unsafe extern "C" fn insight_correlation(
             }
         }
 
-        let names: Vec<String> = (0..nc).map(|i| format!("c{i}")).collect();
+        // Columns have no names here: a refusal names one by its position,
+        // `data.1` for the second.
+        let names: Vec<String> = (0..nc).map(|i| i.to_string()).collect();
         let config = crate::analysis::CorrelationConfig {
             method: corr_method,
             high_threshold: 0.7,
@@ -1337,10 +1366,6 @@ pub unsafe extern "C" fn insight_regression(
         }
 
         let len = n as usize;
-        if len < 3 {
-            return refuse(INSIGHT_ERR_INVALID_INPUT, "need at least 3 data points");
-        }
-
         let x_slice = unsafe { slice::from_raw_parts(x, len) };
         let y_slice = unsafe { slice::from_raw_parts(y, len) };
 
@@ -2268,6 +2293,30 @@ pub const INSIGHT_PELT_COST_L2: u32 = 0;
 /// Gaussian cost with unknown variance — detects changes in mean and variance.
 pub const INSIGHT_PELT_COST_NORMAL: u32 = 1;
 
+/// A PELT penalty: `0` asks for BIC, anything else is the penalty itself and
+/// must be > 0 -- together, any finite number `>= 0`.
+fn pelt_penalty(penalty: f64) -> Result<u_analytics::detection::Penalty, i32> {
+    InsightError::check_range("penalty", penalty, Bound::Closed(0.0), Bound::Unbounded)
+        .map_err(|e| fail(&e))?;
+    Ok(if penalty == 0.0 {
+        u_analytics::detection::Penalty::Bic
+    } else {
+        u_analytics::detection::Penalty::Custom(penalty)
+    })
+}
+
+/// A PELT detector, its minimum segment length at least 2.
+fn pelt_detector(
+    cost: u_analytics::detection::CostFunction,
+    penalty: u_analytics::detection::Penalty,
+    min_segment_len: u32,
+) -> Result<u_analytics::detection::Pelt, i32> {
+    let min_seg = min_segment_len as usize;
+    InsightError::check_count("min_segment_len", min_seg, 2).map_err(|e| fail(&e))?;
+    u_analytics::detection::Pelt::with_min_segment_len(cost, penalty, min_seg)
+        .ok_or_else(|| refuse(INSIGHT_ERR_INVALID_PARAM, "PELT refused its options"))
+}
+
 /// Runs PELT changepoint detection on a univariate time series.
 ///
 /// # Parameters
@@ -2314,26 +2363,13 @@ pub unsafe extern "C" fn insight_pelt(
             }
         };
 
-        let pen = if penalty == 0.0 {
-            u_analytics::detection::Penalty::Bic
-        } else if penalty > 0.0 && penalty.is_finite() {
-            u_analytics::detection::Penalty::Custom(penalty)
-        } else {
-            return refuse(
-                INSIGHT_ERR_INVALID_PARAM,
-                "penalty must be 0.0 (BIC) or a positive finite number",
-            );
+        let pen = match pelt_penalty(penalty) {
+            Ok(pen) => pen,
+            Err(rc) => return rc,
         };
-
-        let min_seg = min_segment_len as usize;
-        let pelt = match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
-            Some(p) => p,
-            None => {
-                return refuse(
-                    INSIGHT_ERR_INVALID_PARAM,
-                    "invalid parameters (min_segment_len must be >= 2)",
-                );
-            }
+        let pelt = match pelt_detector(cost_fn, pen, min_segment_len) {
+            Ok(pelt) => pelt,
+            Err(rc) => return rc,
         };
 
         let pelt_result = pelt.detect(raw);
@@ -2424,23 +2460,13 @@ pub unsafe extern "C" fn insight_pelt_multi(
             }
         };
 
-        let pen = if penalty == 0.0 {
-            u_analytics::detection::Penalty::Bic
-        } else if penalty > 0.0 && penalty.is_finite() {
-            u_analytics::detection::Penalty::Custom(penalty)
-        } else {
-            return refuse(
-                INSIGHT_ERR_INVALID_PARAM,
-                "penalty must be 0.0 (BIC) or positive finite",
-            );
+        let pen = match pelt_penalty(penalty) {
+            Ok(pen) => pen,
+            Err(rc) => return rc,
         };
-
-        let min_seg = min_segment_len as usize;
-        let pelt = match u_analytics::detection::Pelt::with_min_segment_len(cost_fn, pen, min_seg) {
-            Some(p) => p,
-            None => {
-                return refuse(INSIGHT_ERR_INVALID_PARAM, "invalid parameters");
-            }
+        let pelt = match pelt_detector(cost_fn, pen, min_segment_len) {
+            Ok(pelt) => pelt,
+            Err(rc) => return rc,
         };
 
         let pelt_result = match pelt.detect_multi(&refs) {
@@ -2547,10 +2573,16 @@ pub unsafe extern "C" fn insight_mann_kendall(
 
         let len = n as usize;
         if len < 4 {
-            return refuse(INSIGHT_ERR_INSUFFICIENT_DATA, "need at least 4 data points");
+            return fail(&InsightError::too_few("data", 4, len));
         }
 
         let raw = unsafe { slice::from_raw_parts(data, len) };
+        if let Some(index) = raw.iter().position(|v| !v.is_finite()) {
+            return fail(&InsightError::ValueNotFinite {
+                column: "data".into(),
+                index,
+            });
+        }
 
         match u_analytics::testing::mann_kendall_test(raw) {
             Some(r) => {
@@ -2566,10 +2598,9 @@ pub unsafe extern "C" fn insight_mann_kendall(
                 }
                 INSIGHT_OK
             }
-            None => refuse(
-                INSIGHT_ERR_INVALID_INPUT,
-                "invalid input (non-finite values or zero variance)",
-            ),
+            None => fail(&InsightError::degenerate(
+                "Mann-Kendall test undefined (every value tied)",
+            )),
         }
     });
 
@@ -2632,16 +2663,40 @@ pub unsafe extern "C" fn insight_kde(
             INSIGHT_KDE_SILVERMAN => u_analytics::distribution::BandwidthMethod::Silverman,
             INSIGHT_KDE_SCOTT => u_analytics::distribution::BandwidthMethod::Scott,
             INSIGHT_KDE_MANUAL => u_analytics::distribution::BandwidthMethod::Manual(bandwidth),
-            _ => {
-                return refuse(
-                    INSIGHT_ERR_INVALID_PARAM,
-                    "invalid method (use 0=Silverman, 1=Scott, 2=Manual)",
+            other => {
+                return unknown_selector(
+                    "method",
+                    other,
+                    &[INSIGHT_KDE_SILVERMAN, INSIGHT_KDE_SCOTT, INSIGHT_KDE_MANUAL],
+                    format!("method must be 0 (Silverman), 1 (Scott) or 2 (Manual), got {other}"),
                 );
             }
         };
+        if method == INSIGHT_KDE_MANUAL {
+            if let Err(e) = InsightError::check_range(
+                "bandwidth",
+                bandwidth,
+                Bound::Open(0.0),
+                Bound::Unbounded,
+            ) {
+                return fail(&e);
+            }
+        }
+        if let Err(e) = InsightError::check_count("n_points", n_points as usize, 2) {
+            return fail(&e);
+        }
 
         let len = n as usize;
+        if len < 2 {
+            return fail(&InsightError::too_few("data", 2, len));
+        }
         let raw = unsafe { slice::from_raw_parts(data, len) };
+        if let Some(index) = raw.iter().position(|v| !v.is_finite()) {
+            return fail(&InsightError::ValueNotFinite {
+                column: "data".into(),
+                index,
+            });
+        }
 
         match u_analytics::distribution::kde(raw, bw_method, n_points as usize) {
             Some(r) => {
@@ -2662,11 +2717,9 @@ pub unsafe extern "C" fn insight_kde(
                 }
                 INSIGHT_OK
             }
-            None => refuse(
-                INSIGHT_ERR_INVALID_INPUT,
-                "invalid input (need >= 2 data points and >= 2 grid points, finite values, \
-                     nonzero variance for automatic bandwidth)",
-            ),
+            None => fail(&InsightError::degenerate(
+                "every value is the same: an automatic bandwidth is undefined",
+            )),
         }
     });
 
@@ -2751,6 +2804,12 @@ pub unsafe extern "C" fn insight_estimate_period(
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
         let raw = unsafe { slice::from_raw_parts(data, n as usize) };
+        if let Some(index) = raw.iter().position(|v| !v.is_finite()) {
+            return fail(&InsightError::ValueNotFinite {
+                column: "data".into(),
+                index,
+            });
+        }
         match u_analytics::seasonality::estimate_period(raw) {
             Some(r) => {
                 let mut candidates: Vec<CPeriodCandidate> = r
@@ -2784,10 +2843,7 @@ pub unsafe extern "C" fn insight_estimate_period(
                 }
                 INSIGHT_OK
             }
-            None => refuse(
-                INSIGHT_ERR_INSUFFICIENT_DATA,
-                "invalid input (need at least 8 finite observations)",
-            ),
+            None => fail(&InsightError::too_few("data", 8, raw.len())),
         }
     });
     match result {
@@ -3269,6 +3325,17 @@ mod tests {
         let rc =
             unsafe { insight_silhouette(data.as_ptr(), 2, 2, labels.as_ptr(), 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+        let body = last_error_body().expect("a body");
+        assert_eq!(body["code"], "parameter_out_of_range");
+        assert_eq!(body["parameter"], "labels");
+        assert_eq!(
+            (&body["index"], &body["max"], &body["got"]),
+            (
+                &serde_json::json!(1),
+                &serde_json::json!(1),
+                &serde_json::json!(5)
+            )
+        );
     }
 
     #[test]
@@ -3710,17 +3777,53 @@ mod tests {
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
     }
 
+    /// Two rows give no p-value: refused as too few rows, with the counts,
+    /// before anything is computed -- for every method.
     #[test]
     fn ffi_correlation_too_few() {
-        let data: Vec<f64> = vec![1.0, 2.0]; // 1 row, 2 cols
+        let data: Vec<f64> = vec![1.0, 2.0, 3.0, 5.0]; // 2 rows, 2 cols
+        for method in [
+            INSIGHT_CORR_PEARSON,
+            INSIGHT_CORR_SPEARMAN,
+            INSIGHT_CORR_KENDALL,
+        ] {
+            let mut result = CCorrelationResult {
+                n_vars: 0,
+                matrix: ptr::null_mut(),
+                n_high_pairs: 0,
+            };
+            let rc = unsafe { insight_correlation(data.as_ptr(), 2, 2, method, &mut result) };
+            assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+            let body = last_error_body().expect("a body");
+            assert_eq!(
+                body,
+                serde_json::json!({
+                    "error": body["error"],
+                    "code": "insufficient_data",
+                    "parameter": "data",
+                    "min": 3,
+                    "got": 2,
+                })
+            );
+        }
+    }
+
+    /// A constant column is named by its position.
+    #[test]
+    fn ffi_correlation_names_a_constant_column() {
+        // 4 rows x 2 cols; the second column is constant.
+        let data: Vec<f64> = vec![1.0, 7.0, 2.0, 7.0, 3.0, 7.0, 4.0, 7.0];
         let mut result = CCorrelationResult {
             n_vars: 0,
             matrix: ptr::null_mut(),
             n_high_pairs: 0,
         };
         let rc =
-            unsafe { insight_correlation(data.as_ptr(), 1, 2, INSIGHT_CORR_PEARSON, &mut result) };
-        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+            unsafe { insight_correlation(data.as_ptr(), 4, 2, INSIGHT_CORR_PEARSON, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_DEGENERATE_DATA);
+        let body = last_error_body().expect("a body");
+        assert_eq!(body["code"], "degenerate_data");
+        assert_eq!(body["parameter"], "data.1");
     }
 
     #[test]
@@ -3733,6 +3836,10 @@ mod tests {
         };
         let rc = unsafe { insight_correlation(data.as_ptr(), 5, 3, 99, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(body["code"], "unknown_option");
+        assert_eq!(body["parameter"], "method");
+        assert_eq!(body["expected"], serde_json::json!([0, 1, 2]));
     }
 
     #[test]
@@ -3824,7 +3931,12 @@ mod tests {
             f_p_value: 0.0,
         };
         let rc = unsafe { insight_regression(x.as_ptr(), y.as_ptr(), 2, &mut result) };
-        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["min"], &body["got"]),
+            (&serde_json::json!(3), &serde_json::json!(2))
+        );
     }
 
     // ── Mahalanobis FFI tests ─────────────────────────────────────
@@ -4268,8 +4380,9 @@ mod tests {
         })
     }
 
-    /// An `InvalidParameter` from the core names its parameter across the C
-    /// ABI; the next error that is not about one clears it.
+    /// An option the core refuses names its parameter across the C ABI, and
+    /// the body carries the interval; the next error that is not about one
+    /// clears it.
     #[test]
     fn ffi_last_error_parameter_follows_invalid_parameter() {
         let data: Vec<f64> = (0..40).map(|i| ((i * 37) % 11) as f64).collect();
@@ -4284,8 +4397,17 @@ mod tests {
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
         assert_eq!(last_error_parameter().as_deref(), Some("chi2_quantile"));
         let body = last_error_body().expect("a body");
-        assert_eq!(body["code"], "invalid_option");
-        assert_eq!(body["parameter"], "chi2_quantile");
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "error": body["error"],
+                "code": "parameter_out_of_range",
+                "parameter": "chi2_quantile",
+                "exclusive_min": 0.0,
+                "exclusive_max": 1.0,
+                "got": 1.5,
+            })
+        );
 
         let rc = unsafe { insight_mahalanobis(ptr::null(), 20, 2, 0.975, &mut out) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
@@ -4517,6 +4639,11 @@ mod tests {
 
         let rc = unsafe { insight_mann_kendall(data.as_ptr(), 3, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["min"], &body["got"]),
+            (&serde_json::json!(4), &serde_json::json!(3))
+        );
     }
 
     #[test]
@@ -4599,6 +4726,14 @@ mod tests {
         };
         let rc = unsafe { insight_kde(data.as_ptr(), 3, 99, 0.0, 256, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_body().expect("a body")["code"], "unknown_option");
+        // A manual bandwidth is > 0.
+        let rc =
+            unsafe { insight_kde(data.as_ptr(), 3, INSIGHT_KDE_MANUAL, 0.0, 256, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(body["code"], "parameter_out_of_range");
+        assert_eq!(body["exclusive_min"], 0.0);
     }
 
     #[test]

@@ -114,11 +114,9 @@ pub struct LofResult {
 /// - Points contain non-finite values
 pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightError> {
     let n = data.len();
+    InsightError::check_count("k", config.k, 1)?;
     if n == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: 0,
-        });
+        return Err(InsightError::empty("data"));
     }
 
     let dim = data[0].len();
@@ -149,15 +147,8 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
 
     // k neighbours need k + 1 points; a k the data cannot supply is refused
     // rather than lowered.
-    if config.k == 0 || config.k > n - 1 {
-        return Err(InsightError::InvalidParameter {
-            name: "k".into(),
-            message: format!(
-                "k must be in 1..={} for {n} points, got {}",
-                n - 1,
-                config.k
-            ),
-        });
+    if config.k >= n {
+        return Err(InsightError::too_few("data", config.k + 1, n));
     }
     let k = config.k;
 
@@ -367,13 +358,27 @@ mod tests {
     #[test]
     fn a_k_the_data_cannot_supply_is_refused() {
         let data = vec![vec![0.0], vec![1.0], vec![2.0]];
-        for k in [0, 3, 20] {
-            let err = lof(&data, &LofConfig::default().k(k)).expect_err("k out of 1..=2");
-            assert!(
-                matches!(&err, InsightError::InvalidParameter { name, .. } if name == "k"),
-                "{err}"
+        // No neighbours is an option out of range; more than the data holds
+        // is too few points for that k.
+        assert!(matches!(
+            lof(&data, &LofConfig::default().k(0)).unwrap_err(),
+            InsightError::ParameterOutOfRange { ref name, .. } if name == "k"
+        ));
+        for k in [3, 20] {
+            assert_eq!(
+                lof(&data, &LofConfig::default().k(k)).unwrap_err(),
+                InsightError::too_few("data", k + 1, 3)
             );
         }
+        // One point and one neighbour: two points needed, one given.
+        assert_eq!(
+            lof(&[vec![1.0]], &LofConfig::default().k(1)).unwrap_err(),
+            InsightError::too_few("data", 2, 1)
+        );
+        assert_eq!(
+            lof(&[], &LofConfig::default()).unwrap_err(),
+            InsightError::empty("data")
+        );
         assert_eq!(
             lof(&data, &LofConfig::default().k(2))
                 .expect("k = n - 1")

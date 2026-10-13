@@ -692,16 +692,6 @@ fn cluster_labels(labels: &[Whole], k: usize) -> Result<Vec<usize>, WireError> {
         .collect()
 }
 
-/// An explicit histogram bin count: at least 1. Nothing downstream refuses
-/// `0` -- it yields no histogram at all -- so this is the check, for `0` and a
-/// negative count alike.
-fn bin_count(value: Whole, parameter: &str) -> Result<usize, WireError> {
-    match value.count(parameter, 1)? {
-        0 => Err(WireError::count_out_of_range(parameter, 1, None, 0.0)),
-        n => Ok(n),
-    }
-}
-
 /// A spectral residual refusal of an option [`Whole::sr_count`] handed on as
 /// `0`, with `got` the negative value the caller sent. A run that `0` did not
 /// stop is refused as the count it is: below `min: 0`.
@@ -763,6 +753,11 @@ fn class_labels(target: &[f64]) -> Result<Vec<usize>, WireError> {
 /// to `"pearson"`. Reserved key (prefix `_`) so it never collides with a
 /// column name.
 ///
+/// Every column needs at least 3 values -- the fewest a pair's p-value is
+/// defined for -- refused as `insufficient_data` before anything is computed.
+/// A constant column is `degenerate_data` with `parameter: "data.<column>"`.
+/// One column gives the 1 × 1 matrix `[1]`.
+///
 /// # Output
 /// `{ names, matrix (flattened n×n), n, high_pairs }`
 #[wasm_bindgen(unchecked_return_type = "CorrelationResult")]
@@ -775,10 +770,10 @@ pub fn correlation_matrix(
         .remove("_method")
         .map(|v| match v.as_str() {
             Some(s) => Ok(s.to_string()),
-            None => Err(js_err(crate::error::InsightError::InvalidParameter {
-                name: "_method".into(),
-                message: format!("expected a string, got {v}"),
-            })),
+            None => Err(js_err(WireError::malformed_input(
+                "_method",
+                format!("_method: expected a string, got {v}"),
+            ))),
         })
         .transpose()?
         .unwrap_or_else(|| "pearson".to_string());
@@ -1497,9 +1492,10 @@ pub fn distribution_analysis(
 
     use crate::distribution::{distribution_analysis as dist_fn, DistributionConfig};
 
+    // `distribution_analysis` refuses fewer than one bin.
     let bins = cfg
         .bins
-        .map(|b| bin_count(b, "bins"))
+        .map(|b| b.count("bins", 1))
         .transpose()
         .map_err(js_err)?;
     let bin_method = resolve_bin_method(&cfg.bin_method, bins).map_err(js_err)?;
@@ -1903,10 +1899,10 @@ pub fn vif_diagnostic(
         .remove("_threshold")
         .map(|v| {
             v.as_f64().ok_or_else(|| {
-                js_err(crate::error::InsightError::InvalidParameter {
-                    name: "_threshold".into(),
-                    message: format!("expected a number, got {v}"),
-                })
+                js_err(WireError::malformed_input(
+                    "_threshold",
+                    format!("_threshold: expected a number, got {v}"),
+                ))
             })
         })
         .transpose()?
@@ -2324,21 +2320,34 @@ mod tests {
     /// The crate's own errors keep their reason and the values behind it.
     #[test]
     fn crate_errors_become_codes_with_their_values() {
-        let e = WireError::from(InsightError::InsufficientData {
-            min_required: 3,
-            actual: 1,
-        });
+        let e = WireError::from(InsightError::too_few("data", 3, 1));
         assert_eq!(
             e.fields,
-            json!({ "code": "insufficient_data", "min": 3, "got": 1 })
+            json!({ "code": "insufficient_data", "parameter": "data", "min": 3, "got": 1 })
+        );
+        let e = WireError::from(InsightError::empty("data"));
+        assert_eq!(
+            e.fields,
+            json!({ "code": "empty_input", "parameter": "data" })
         );
         let e = WireError::from(InsightError::InvalidParameter {
-            name: "threshold".into(),
-            message: "must be positive".into(),
+            name: "k_max".into(),
+            message: "must not be less than k_min (3), got 2".into(),
         });
         assert_eq!(
             e.fields,
-            json!({ "code": "invalid_option", "parameter": "threshold" })
+            json!({ "code": "invalid_option", "parameter": "k_max" })
+        );
+        // A NaN option is not a value in any interval.
+        let e = WireError::from(InsightError::ParameterOutOfRange {
+            name: "epsilon".into(),
+            low: crate::error::Bound::Open(0.0),
+            high: crate::error::Bound::Unbounded,
+            got: f64::NAN,
+        });
+        assert_eq!(
+            e.fields,
+            json!({ "code": "value_not_finite", "parameter": "epsilon" })
         );
         let e = WireError::from(
             u_analytics::detection::SpectralResidualError::ValueNotFinite { index: 4 },
@@ -2536,7 +2545,7 @@ mod dto_strictness_tests {
         let err = super::whole(-1.0, "k", 1).expect_err("negative");
         assert_eq!(
             err.fields,
-            json!({ "code": "parameter_out_of_range", "parameter": "k", "min": 1, "got": -1.0 })
+            json!({ "code": "parameter_out_of_range", "parameter": "k", "min": 1.0, "got": -1.0 })
         );
         let err = super::whole(5e9, "k", 1).expect_err("past a wasm32 usize");
         assert_eq!(err.fields["max"], json!(u32::MAX as f64));
@@ -2559,7 +2568,7 @@ mod dto_strictness_tests {
         let k = lof(json!({ "k": -1 })).expect("negative reads").k;
         assert_eq!(
             k.count("k", 1).expect_err("negative").fields,
-            json!({ "code": "parameter_out_of_range", "parameter": "k", "min": 1, "got": -1.0 })
+            json!({ "code": "parameter_out_of_range", "parameter": "k", "min": 1.0, "got": -1.0 })
         );
         let err = lof(json!({ "k": 2.5 })).err().expect("a fraction");
         assert_eq!(
@@ -2581,7 +2590,7 @@ mod dto_strictness_tests {
             json!({
                 "code": "parameter_out_of_range",
                 "parameter": "n_components",
-                "min": 1,
+                "min": 1.0,
                 "got": -1.0,
             })
         );
@@ -2593,7 +2602,7 @@ mod dto_strictness_tests {
             json!({
                 "code": "parameter_out_of_range",
                 "parameter": "seed",
-                "min": 0,
+                "min": 0.0,
                 "max": u64::MAX as f64,
                 "got": -1.0,
             })
@@ -2602,22 +2611,114 @@ mod dto_strictness_tests {
         assert_eq!(cfg.seed.expect("default").seed("seed").expect("valid"), 42);
     }
 
-    /// `bins: 0` used to give no histogram at all; it and a negative count are
-    /// one refusal.
+    /// A count option the binding refuses below zero is refused at zero by
+    /// the analysis with the same code, parameter and bounds: `-1` and `0`
+    /// differ only in `got`.
     #[test]
-    fn a_bin_count_is_at_least_one() {
-        for got in [0.0, -1.0] {
-            assert_eq!(
-                super::bin_count(super::Whole(got), "bins")
-                    .expect_err("below 1")
-                    .fields,
-                json!({ "code": "parameter_out_of_range", "parameter": "bins", "min": 1, "got": got })
-            );
+    fn a_negative_count_and_zero_are_one_refusal() {
+        use crate::clustering::{
+            dbscan, hierarchical, kmeans, DbscanConfig, HierarchicalConfig, KMeansConfig,
+        };
+        use crate::distribution::{distribution_analysis, BinMethod, DistributionConfig};
+        use crate::isolation_forest::{isolation_forest, IsolationForestConfig};
+        use crate::lof::{lof, LofConfig};
+        use crate::pca::{pca, PcaConfig};
+
+        let points: Vec<Vec<f64>> = (0..8).map(|i| vec![i as f64, (i * i) as f64]).collect();
+        let series: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let zero = |e: crate::error::InsightError| super::WireError::from(e).fields;
+        let cases: Vec<(&str, usize, serde_json::Value)> = vec![
+            (
+                "k",
+                1,
+                zero(kmeans(&points, &KMeansConfig::new(0)).unwrap_err()),
+            ),
+            (
+                "n_components",
+                1,
+                zero(pca(&points, &PcaConfig::new(0)).unwrap_err()),
+            ),
+            (
+                "min_samples",
+                2,
+                zero(dbscan(&points, &DbscanConfig::new(1.0, 0)).unwrap_err()),
+            ),
+            (
+                "n_clusters",
+                1,
+                zero(hierarchical(&points, &HierarchicalConfig::with_k(0)).unwrap_err()),
+            ),
+            (
+                "n_estimators",
+                1,
+                zero(
+                    isolation_forest(
+                        &points,
+                        &IsolationForestConfig {
+                            n_estimators: 0,
+                            ..IsolationForestConfig::default()
+                        },
+                    )
+                    .unwrap_err(),
+                ),
+            ),
+            (
+                "k",
+                1,
+                zero(lof(&points, &LofConfig::default().k(0)).unwrap_err()),
+            ),
+            (
+                "bins",
+                1,
+                zero(
+                    distribution_analysis(
+                        &series,
+                        &DistributionConfig {
+                            bin_method: BinMethod::Fixed(0),
+                            ..DistributionConfig::default()
+                        },
+                    )
+                    .unwrap_err(),
+                ),
+            ),
+            (
+                "n_repeats",
+                1,
+                zero(
+                    crate::feature_importance::permutation_importance(
+                        std::slice::from_ref(&series),
+                        &["x".into()],
+                        &series,
+                        0,
+                        1,
+                    )
+                    .unwrap_err(),
+                ),
+            ),
+            (
+                "n_bins",
+                1,
+                zero(
+                    crate::analysis::mutual_info_classif(
+                        std::slice::from_ref(&series),
+                        &["x".into()],
+                        &[0; 20],
+                        Some(0),
+                    )
+                    .unwrap_err(),
+                ),
+            ),
+        ];
+        for (parameter, min, at_zero) in cases {
+            assert_eq!(at_zero["code"], "parameter_out_of_range", "{parameter}");
+            assert_eq!(at_zero["got"], json!(0.0), "{parameter}");
+            let mut negative = super::Whole(-1.0)
+                .count(parameter, min)
+                .expect_err("negative")
+                .fields;
+            negative["got"] = json!(0.0);
+            assert_eq!(negative, at_zero, "{parameter}");
         }
-        assert_eq!(
-            super::bin_count(super::Whole(4.0), "bins").expect("valid"),
-            4
-        );
     }
 
     /// A negative spectral residual count is refused by the check u-analytics

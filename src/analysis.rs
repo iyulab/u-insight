@@ -42,17 +42,12 @@ use crate::error::InsightError;
 /// ```
 pub fn validate_clean_data(columns: &[Vec<f64>], names: &[String]) -> Result<(), InsightError> {
     if columns.is_empty() {
-        return Err(InsightError::DegenerateData {
-            reason: "no columns provided".into(),
-        });
+        return Err(InsightError::empty("data"));
     }
 
     let n_rows = columns[0].len();
     if n_rows < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n_rows,
-        });
+        return Err(InsightError::too_few("data", 2, n_rows));
     }
 
     for (i, col) in columns.iter().enumerate() {
@@ -75,12 +70,10 @@ pub fn validate_clean_data(columns: &[Vec<f64>], names: &[String]) -> Result<(),
             });
         }
 
-        let inf_count = col.iter().filter(|v| v.is_infinite()).count();
-        if inf_count > 0 {
-            return Err(InsightError::DegenerateData {
-                reason: format!(
-                    "column '{name}' contains {inf_count} non-finite (infinite) value(s)"
-                ),
+        if let Some(index) = col.iter().position(|v| v.is_infinite()) {
+            return Err(InsightError::ValueNotFinite {
+                column: format!("data.{name}"),
+                index,
             });
         }
     }
@@ -164,7 +157,39 @@ pub fn correlation_analysis(
     names: &[String],
     config: &CorrelationConfig,
 ) -> Result<CorrelationAnalysis, InsightError> {
+    if columns.is_empty() {
+        return Err(InsightError::empty("data"));
+    }
+    // A pair's p-value is a t-test on n - 2 degrees of freedom: three rows
+    // are the fewest it is defined for, for every method.
+    let n_rows = columns[0].len();
+    if n_rows < 3 {
+        return Err(InsightError::too_few("data", 3, n_rows));
+    }
     validate_clean_data(columns, names)?;
+
+    // A constant column has no correlation with anything (its variance, or
+    // every rank, is tied); name it rather than refuse the whole matrix.
+    for (i, col) in columns.iter().enumerate() {
+        if col.iter().all(|&v| v == col[0]) {
+            let name = names.get(i).cloned().unwrap_or_else(|| format!("col_{i}"));
+            return Err(InsightError::DegenerateData {
+                parameter: Some(format!("data.{name}")),
+                reason: format!("column '{name}' is constant; its correlation is undefined"),
+            });
+        }
+    }
+
+    // One column correlates only with itself.
+    if columns.len() == 1 {
+        return Ok(CorrelationAnalysis {
+            method: config.method,
+            matrix: u_numflow::matrix::Matrix::new(1, 1, vec![1.0])
+                .expect("a 1 x 1 matrix holds one value"),
+            high_pairs: Vec::new(),
+            names: names.to_vec(),
+        });
+    }
 
     let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
 
@@ -173,8 +198,8 @@ pub fn correlation_analysis(
         CorrelationMethod::Spearman => u_analytics::correlation::spearman_matrix(&refs),
         CorrelationMethod::Kendall => u_analytics::correlation::kendall_matrix(&refs),
     }
-    .ok_or_else(|| InsightError::DegenerateData {
-        reason: "correlation matrix computation failed (possible constant columns or zero-variance data)".into(),
+    .ok_or_else(|| {
+        InsightError::degenerate("correlation matrix computation failed (near-zero variance)")
     })?;
 
     // Extract high-correlation pairs
@@ -269,18 +294,12 @@ pub fn regression_analysis(
     target_name: &str,
 ) -> Result<RegressionAnalysis, InsightError> {
     if predictors.is_empty() {
-        return Err(InsightError::InvalidParameter {
-            name: "predictors".into(),
-            message: "at least 1 predictor required".into(),
-        });
+        return Err(InsightError::empty("predictors"));
     }
 
     let n = target.len();
     if n < 3 {
-        return Err(InsightError::InsufficientData {
-            min_required: 3,
-            actual: n,
-        });
+        return Err(InsightError::too_few("target", 3, n));
     }
 
     // Validate target
@@ -364,8 +383,9 @@ pub struct VifAnalysis {
 /// # Errors
 /// - [`InsightError::DimensionMismatch`] if column lengths differ
 /// - [`InsightError::MissingValues`] if any column contains NaN
-/// - [`InsightError::DegenerateData`] if any column contains Inf or VIF
-///   computation fails (insufficient rows / near-zero variance)
+/// - [`InsightError::ValueNotFinite`] if any column contains Inf
+/// - [`InsightError::DegenerateData`] if the VIF computation fails
+///   (insufficient rows / near-zero variance)
 ///
 /// # References
 /// Marquardt (1970); Belsley/Kuh/Welsch (1980).
@@ -376,10 +396,10 @@ pub fn vif_analysis(
 ) -> Result<VifAnalysis, InsightError> {
     validate_clean_data(columns, names)?;
     let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
-    let v = u_analytics::regression::vif(&refs).ok_or_else(|| InsightError::DegenerateData {
-        reason:
-            "VIF computation failed (insufficient data, length mismatch, or near-zero variance)"
-                .into(),
+    let v = u_analytics::regression::vif(&refs).ok_or_else(|| {
+        InsightError::degenerate(
+            "VIF computation failed (insufficient data, length mismatch, or near-zero variance)",
+        )
     })?;
     let high_vif_columns: Vec<u32> = v
         .iter()
@@ -406,10 +426,10 @@ pub fn vif_analysis(
 pub fn condition_number(columns: &[Vec<f64>], names: &[String]) -> Result<f64, InsightError> {
     validate_clean_data(columns, names)?;
     let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
-    u_analytics::regression::condition_number(&refs).ok_or_else(|| InsightError::DegenerateData {
-        reason:
-            "condition number computation failed (insufficient data or eigendecomposition failed)"
-                .into(),
+    u_analytics::regression::condition_number(&refs).ok_or_else(|| {
+        InsightError::degenerate(
+            "condition number computation failed (insufficient data or eigendecomposition failed)",
+        )
     })
 }
 
@@ -551,18 +571,12 @@ pub fn anova_feature_selection(
     significance_level: f64,
 ) -> Result<AnovaSelectionResult, InsightError> {
     if features.is_empty() {
-        return Err(InsightError::InvalidParameter {
-            name: "features".into(),
-            message: "at least 1 feature required".into(),
-        });
+        return Err(InsightError::empty("features"));
     }
 
     let n = features[0].len();
     if n < 4 {
-        return Err(InsightError::InsufficientData {
-            min_required: 4,
-            actual: n,
-        });
+        return Err(InsightError::too_few("features", 4, n));
     }
 
     if target.len() != n {
@@ -580,6 +594,7 @@ pub fn anova_feature_selection(
 
     if classes.len() < 2 {
         return Err(InsightError::DegenerateData {
+            parameter: Some("target".into()),
             reason: format!("ANOVA requires at least 2 classes, got {}", classes.len()),
         });
     }
@@ -732,19 +747,16 @@ pub fn mutual_info_classif(
     target: &[usize],
     n_bins: Option<usize>,
 ) -> Result<MutualInfoResult, InsightError> {
+    if let Some(bins) = n_bins {
+        InsightError::check_count("n_bins", bins, 1)?;
+    }
     if features.is_empty() {
-        return Err(InsightError::InvalidParameter {
-            name: "features".into(),
-            message: "at least 1 feature required".into(),
-        });
+        return Err(InsightError::empty("features"));
     }
 
     let n = features[0].len();
     if n < 4 {
-        return Err(InsightError::InsufficientData {
-            min_required: 4,
-            actual: n,
-        });
+        return Err(InsightError::too_few("features", 4, n));
     }
 
     if target.len() != n {
@@ -755,12 +767,6 @@ pub fn mutual_info_classif(
         });
     }
 
-    if n_bins == Some(0) {
-        return Err(InsightError::InvalidParameter {
-            name: "n_bins".into(),
-            message: "n_bins must be at least 1".into(),
-        });
-    }
     // Determine number of bins: Sturges' rule
     let bins = n_bins.unwrap_or_else(|| {
         let k = ((n as f64).ln() / std::f64::consts::LN_2 + 1.0).ceil() as usize;
@@ -775,6 +781,7 @@ pub fn mutual_info_classif(
 
     if n_classes < 2 {
         return Err(InsightError::DegenerateData {
+            parameter: Some("target".into()),
             reason: format!("mutual information requires at least 2 classes, got {n_classes}"),
         });
     }
@@ -904,12 +911,13 @@ mod tests {
         let data = vec![vec![1.0, f64::INFINITY, 3.0]];
         let names = vec!["a".into()];
         let err = validate_clean_data(&data, &names).unwrap_err();
-        match err {
-            InsightError::DegenerateData { reason } => {
-                assert!(reason.contains("non-finite") || reason.contains("infinite"));
+        assert_eq!(
+            err,
+            InsightError::ValueNotFinite {
+                column: "data.a".into(),
+                index: 1
             }
-            other => panic!("expected DegenerateData, got {other:?}"),
-        }
+        );
     }
 
     #[test]
@@ -1098,6 +1106,66 @@ mod tests {
         let names = vec!["a".into(), "b".into()];
         let config = CorrelationConfig::default();
         assert!(correlation_analysis(&data, &names, &config).is_err());
+    }
+
+    /// Two rows give no p-value under any method: refused before anything
+    /// is computed, as too few rows.
+    #[test]
+    fn correlation_needs_three_rows() {
+        let data = vec![vec![1.0, 2.0], vec![3.0, 5.0]];
+        let names = vec!["a".into(), "b".into()];
+        for method in [
+            CorrelationMethod::Pearson,
+            CorrelationMethod::Spearman,
+            CorrelationMethod::Kendall,
+        ] {
+            let config = CorrelationConfig {
+                method,
+                ..CorrelationConfig::default()
+            };
+            assert_eq!(
+                correlation_analysis(&data, &names, &config).unwrap_err(),
+                InsightError::too_few("data", 3, 2),
+                "{method:?}"
+            );
+        }
+    }
+
+    /// A constant column is named; the other columns are not blamed.
+    #[test]
+    fn a_constant_column_is_named() {
+        let data = vec![vec![1.0, 2.0, 3.0, 4.0], vec![7.0, 7.0, 7.0, 7.0]];
+        let names = vec!["a".into(), "col2".into()];
+        for method in [
+            CorrelationMethod::Pearson,
+            CorrelationMethod::Spearman,
+            CorrelationMethod::Kendall,
+        ] {
+            let config = CorrelationConfig {
+                method,
+                ..CorrelationConfig::default()
+            };
+            match correlation_analysis(&data, &names, &config).unwrap_err() {
+                InsightError::DegenerateData { parameter, .. } => {
+                    assert_eq!(parameter.as_deref(), Some("data.col2"), "{method:?}")
+                }
+                other => panic!("expected DegenerateData, got {other:?}"),
+            }
+        }
+    }
+
+    /// No columns is an empty input; one column correlates with itself.
+    #[test]
+    fn correlation_of_no_columns_and_of_one() {
+        let config = CorrelationConfig::default();
+        assert_eq!(
+            correlation_analysis(&[], &[], &config).unwrap_err(),
+            InsightError::empty("data")
+        );
+        let one = correlation_analysis(&[vec![1.0, 2.0, 4.0]], &["a".into()], &config)
+            .expect("one column");
+        assert_eq!((one.matrix.rows(), one.matrix.get(0, 0)), (1, 1.0));
+        assert!(one.high_pairs.is_empty());
     }
 
     // ── Regression analysis ──────────────────────────────────────

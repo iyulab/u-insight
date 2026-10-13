@@ -1074,7 +1074,11 @@ int32_t insight_lof(const double *data,
  * `out`: pointer to a `CCorrelationResult`.
  *
  * Returns 0 on success, negative on error. Unknown `method` values
- * return `INSIGHT_ERR_INVALID_PARAM`.
+ * return `INSIGHT_ERR_INVALID_PARAM` (`unknown_option`). Fewer than 3 rows
+ * is `insufficient_data` (`parameter: "data"`, `min: 3`); a constant column
+ * is `degenerate_data` naming it by position (`parameter: "data.1"` for the
+ * second); no columns is `empty_input`. One column gives the 1 x 1 matrix
+ * `[1]`.
  *
  * # Safety
  * `data` must point to `n_rows * n_cols` f64s. `out` must be valid.

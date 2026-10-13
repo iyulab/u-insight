@@ -36,7 +36,7 @@
 //! assert!(result.distances[6] > result.distances[0]);
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 use u_numflow::matrix::Matrix;
 
 // ── Configuration ─────────────────────────────────────────────────────
@@ -123,11 +123,17 @@ pub fn mahalanobis(
     config: &MahalanobisConfig,
 ) -> Result<MahalanobisResult, InsightError> {
     let n = data.len();
+    // A probability outside (0, 1) has no chi-squared quantile; left unchecked
+    // the threshold is NaN, no distance exceeds it, and the result reports no
+    // outliers as if the data had none.
+    InsightError::check_range(
+        "chi2_quantile",
+        config.chi2_quantile,
+        Bound::Open(0.0),
+        Bound::Open(1.0),
+    )?;
     if n == 0 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: 0,
-        });
+        return Err(InsightError::empty("data"));
     }
 
     let p = data[0].len();
@@ -141,22 +147,9 @@ pub fn mahalanobis(
 
     // Need at least p+1 observations for a non-singular covariance matrix
     if n <= p {
-        return Err(InsightError::InsufficientData {
-            min_required: p + 1,
-            actual: n,
-        });
+        return Err(InsightError::too_few("data", p + 1, n));
     }
-
-    // A probability outside (0, 1) has no chi-squared quantile; left unchecked
-    // the threshold is NaN, no distance exceeds it, and the result reports no
-    // outliers as if the data had none.
     let q = config.chi2_quantile;
-    if !(q > 0.0 && q < 1.0) {
-        return Err(InsightError::InvalidParameter {
-            name: "chi2_quantile".into(),
-            message: format!("must be strictly between 0 and 1, got {q}"),
-        });
-    }
 
     // Validate dimensions and values
     for (row_idx, point) in data.iter().enumerate() {
@@ -214,6 +207,7 @@ pub fn mahalanobis(
         .collect();
     if !zero_var_cols.is_empty() {
         return Err(InsightError::DegenerateData {
+            parameter: None,
             reason: format!(
                 "near-zero variance in column(s) {zero_var_cols:?}; covariance matrix would be singular"
             ),
@@ -225,12 +219,11 @@ pub fn mahalanobis(
         operation: "covariance matrix construction".into(),
         detail: e.to_string(),
     })?;
-    let inv_cov = cov_mat
-        .inverse()
-        .map_err(|_| InsightError::DegenerateData {
-            reason: "covariance matrix is singular or near-singular (likely collinear columns)"
-                .into(),
-        })?;
+    let inv_cov = cov_mat.inverse().map_err(|_| {
+        InsightError::degenerate(
+            "covariance matrix is singular or near-singular (likely collinear columns)",
+        )
+    })?;
 
     // Compute squared Mahalanobis distance for each point
     let mut distances = Vec::with_capacity(n);
@@ -422,7 +415,7 @@ mod tests {
             .collect();
         let err = mahalanobis(&data, &MahalanobisConfig::default()).unwrap_err();
         match err {
-            InsightError::DegenerateData { reason } => {
+            InsightError::DegenerateData { reason, .. } => {
                 assert!(
                     reason.contains('0'),
                     "reason should mention column 0, got: {reason}"
@@ -547,8 +540,11 @@ mod tests {
         let data = make_cluster(&[0.0, 0.0], 30, 1.0);
         for q in [0.0, 1.0, 1.5, -0.1, f64::NAN] {
             match mahalanobis(&data, &MahalanobisConfig::default().chi2_quantile(q)) {
-                Err(InsightError::InvalidParameter { name, .. }) => {
-                    assert_eq!(name, "chi2_quantile")
+                Err(InsightError::ParameterOutOfRange {
+                    name, low, high, ..
+                }) => {
+                    assert_eq!(name, "chi2_quantile");
+                    assert_eq!((low, high), (Bound::Open(0.0), Bound::Open(1.0)));
                 }
                 other => panic!("q = {q}: {other:?}"),
             }

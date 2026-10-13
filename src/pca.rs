@@ -29,7 +29,7 @@
 //! assert_eq!(result.scores.len(), 6); // one score vector per point
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 use u_numflow::matrix::Matrix;
 
 // ── Configuration ─────────────────────────────────────────────────────
@@ -106,28 +106,26 @@ pub struct PcaResult {
 /// ```
 pub fn pca(data: &[Vec<f64>], config: &PcaConfig) -> Result<PcaResult, InsightError> {
     let n = data.len();
+    InsightError::check_count("n_components", config.n_components, 1)?;
+    if n == 0 {
+        return Err(InsightError::empty("data"));
+    }
     if n < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n,
-        });
+        return Err(InsightError::too_few("data", 2, n));
     }
 
     let d = data[0].len();
     if d == 0 {
-        return Err(InsightError::DegenerateData {
-            reason: "data has 0 features".into(),
-        });
+        return Err(InsightError::degenerate("data has 0 features"));
     }
-    if config.n_components == 0 || config.n_components > d {
-        return Err(InsightError::InvalidParameter {
-            name: "n_components".into(),
-            message: format!(
-                "must be between 1 and {d} (number of features), got {}",
-                config.n_components
-            ),
-        });
-    }
+    // There are as many components as features: the bound is the data's
+    // width, not a lack of rows.
+    InsightError::check_range(
+        "n_components",
+        config.n_components as f64,
+        Bound::Closed(1.0),
+        Bound::Closed(d as f64),
+    )?;
 
     // Validate dimensions and data
     for (i, point) in data.iter().enumerate() {
@@ -496,6 +494,35 @@ mod tests {
     fn pca_too_many_components() {
         let data = make_two_dim();
         assert!(pca(&data, &PcaConfig::new(3)).is_err());
+    }
+
+    /// Zero components is below the option's floor; more than the features
+    /// is above the data's width, stated as the interval `[1, d]`.
+    #[test]
+    fn pca_component_count_refusals_carry_their_interval() {
+        let data = make_two_dim();
+        assert_eq!(
+            pca(&data, &PcaConfig::new(0)).unwrap_err(),
+            InsightError::ParameterOutOfRange {
+                name: "n_components".into(),
+                low: Bound::Closed(1.0),
+                high: Bound::Unbounded,
+                got: 0.0,
+            }
+        );
+        assert_eq!(
+            pca(&data, &PcaConfig::new(3)).unwrap_err(),
+            InsightError::ParameterOutOfRange {
+                name: "n_components".into(),
+                low: Bound::Closed(1.0),
+                high: Bound::Closed(2.0),
+                got: 3.0,
+            }
+        );
+        assert_eq!(
+            pca(&[], &PcaConfig::new(1)).unwrap_err(),
+            InsightError::empty("data")
+        );
     }
 
     #[test]

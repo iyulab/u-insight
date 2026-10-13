@@ -18,6 +18,7 @@ use u_insight::clustering::{
     dbscan, hdbscan, hierarchical, kmeans, DbscanConfig, HdbscanConfig, HierarchicalConfig,
     KMeansConfig, Linkage,
 };
+use u_insight::error::InsightError;
 use u_insight::pca::{pca, PcaConfig};
 
 const EPS: f64 = 1e-9;
@@ -234,9 +235,13 @@ proptest! {
         let hd = hdbscan(&data, &HdbscanConfig::new(min_samples));
         if min_samples > n {
             // A core distance is the distance to the min_samples-th neighbour,
-            // which fewer points do not have: refused, naming the parameter.
+            // which fewer points do not have: refused as too few points.
             prop_assert!(
-                matches!(&hd, Err(e) if e.to_string().contains("min_samples")),
+                matches!(
+                    &hd,
+                    Err(InsightError::InsufficientData { min_required, actual, .. })
+                        if *min_required == min_samples && *actual == n
+                ),
                 "min_samples {} over {} points was not refused: {:?}",
                 min_samples,
                 n,

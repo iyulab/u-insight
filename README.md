@@ -414,15 +414,15 @@ try {
 |---|---|---|
 | `unknown_option` | `parameter`, `got`, `expected` | A `linkage`, `method`, `bin_method` or `_method` that names none of the supported values |
 | `missing_option` | `parameter`, `expected` | A `hierarchical` config with neither `n_clusters` nor `distance_threshold` |
-| `invalid_option` | `parameter` | An option value the analysis refuses (a non-positive `threshold`, a `_threshold` that is not a number, `config.distance_threshold` given with `n_clusters`, …) |
-| `parameter_out_of_range` | `parameter`, `got` (and `index`, `min`, `max`, `exclusive_min`, `exclusive_max` where they apply) | A `spectral_residual` option outside its domain, a `silhouette` label `≥ k` or negative, a count that is negative (`min` is the least the option takes — `kmeans` `k` and PCA `n_components` 1, DBSCAN `min_samples` 2, a seed 0 —, the same bound a too-small positive count is held to) or above what the option holds (`max`), or a histogram `bins` below 1. `min` / `max` are inclusive bounds and `exclusive_min` / `exclusive_max` exclusive ones; each is present only on the side it applies to — `threshold` (`> 0`) carries `exclusive_min: 0`, `sensitivity` (strictly between 0 and 100) `exclusive_min: 0, exclusive_max: 100`, `min_zscore` (`≥ 0`) `min: 0` |
-| `insufficient_data` | `min`, `got` (and `parameter`) | Fewer rows or observations than the method needs |
+| `invalid_option` | `parameter` | Options that contradict each other (`config.distance_threshold` given with `n_clusters`) or a limit the data exceeds (more points than `max_points`). An option that is simply outside an interval is `parameter_out_of_range` instead |
+| `parameter_out_of_range` | `parameter`, `got` (and `index`, `min`, `max`, `exclusive_min`, `exclusive_max` where they apply) | A numeric option outside the interval it takes: `kmeans` `k`, PCA `n_components`, LOF `k`, hierarchical `n_clusters`, isolation forest `n_estimators` and histogram `bins` (`min: 1`), DBSCAN `min_samples` (`min: 2`) and `epsilon` (`exclusive_min: 0`), hierarchical `distance_threshold` (`min: 0`), isolation forest `contamination` (`min: 0, max: 1`), the `spectral_residual` options, a seed (`min: 0`). PCA `n_components` above the number of features carries `max` — that number. A negative count is refused with the same fields as `0`, `got` aside, and one too large for the platform with `max`. A `silhouette` label `≥ k` or negative is refused at its `index` with `min: 0, max: k - 1`. `min` / `max` are inclusive bounds and `exclusive_min` / `exclusive_max` exclusive ones; each is present only on the side it applies to — `threshold` (`> 0`) carries `exclusive_min: 0`, `sensitivity` (strictly between 0 and 100) `exclusive_min: 0, exclusive_max: 100`, `min_zscore` (`≥ 0`) `min: 0` |
+| `insufficient_data` | `parameter`, `min`, `got` | Fewer rows than the method needs (`correlation_matrix` 3, the fewest a pair's p-value is defined for), or an option that asks for more than the data holds: `kmeans` `k` or hierarchical `n_clusters` above the number of points, LOF `k` without `k + 1` points (`min` is the rows that option needs) |
 | `value_not_finite` | `parameter`, `index` | A NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`data.b`), `index` its position in that array, or `null`. `describe` reads NaN as a missing value, like `null` |
 | `dimension_mismatch` | `expected`, `got` (and `parameter`, `index`) | Lengths that have to agree do not — a row shorter than the first (`index` is that row), `labels` vs data rows, … |
-| `empty_input` | `parameter` | An input with no columns |
+| `empty_input` | `parameter` | An input with nothing in it: no columns, no points (`kmeans([], 2)`, `dbscan([], …)`), no features |
 | `missing_values` | `column`, `count` | A column with missing values where the analysis needs complete data |
 | `not_a_class_label` | `parameter`, `index`, `got` | A classification `target` (`feature_importance` `anova` / `mutual_info`) value that is not a whole number ≥ 0 |
-| `degenerate_data` | — | Constant columns, a singular matrix, … |
+| `degenerate_data` | `parameter` where one input is to blame | Constant columns, a singular matrix, … — `correlation_matrix` names a constant column as `data.<column>` (the C ABI by position: `data.1` for the second) |
 | `column_not_found` | `column` | A column name the data does not have |
 | `computation_failed` | `operation` | A numerical step that did not converge or produced no result |
 | `malformed_input` | `parameter` (and `column`, `index`) | An argument of the wrong shape or type, a non-numeric column entry (`index` is its position), a count with a fraction (`k: 2.5`, "expected a whole number"), or a JSON string |
@@ -439,6 +439,10 @@ Descriptive statistics per column. Input: column-major `{ "col1": [1,2,3] }`.
 #### `correlation_matrix(data) -> CorrelationResult`
 
 Pearson correlation matrix. Input: column-major `{ "col1": [1,2,3], "col2": [4,5,6] }`.
+Each column needs at least 3 values — the fewest a pair's p-value is defined for —
+or the call is refused as `insufficient_data` (`min: 3`) before anything is computed.
+A constant column is `degenerate_data` with `parameter: "data.<column>"`. One column
+gives the 1 × 1 matrix `[1]`.
 
 **Output:**
 ```json

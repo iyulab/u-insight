@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 
 /// A refusal as both transports report it: readable text, and the fields --
 /// `code` first among them -- a program branches on. WebAssembly copies the
@@ -62,8 +62,10 @@ impl Refusal {
         )
     }
 
-    /// A count outside the range the option takes: `min`, `max` when there
-    /// is an upper bound (an unbounded side is left out), and `got`.
+    /// A count below `min` -- or, with `max`, above it -- that the binding
+    /// refuses before the analysis sees it (a negative count, one past what
+    /// the platform's `usize` holds). The same shape the analysis gives a
+    /// count it refuses itself.
     #[cfg(feature = "wasm")]
     pub(crate) fn count_out_of_range(
         parameter: &str,
@@ -71,20 +73,12 @@ impl Refusal {
         max: Option<f64>,
         got: f64,
     ) -> Self {
-        let mut fields = json!({ "parameter": parameter, "min": min });
-        let range = match max {
-            Some(max) => {
-                fields["max"] = json!(max);
-                format!("in {min}..={max}")
-            }
-            None => format!("at least {min}"),
-        };
-        fields["got"] = json!(got);
-        Self::new(
-            "parameter_out_of_range",
-            format!("{parameter} must be {range}, got {got}"),
-            fields,
-        )
+        Refusal::from(InsightError::ParameterOutOfRange {
+            name: parameter.into(),
+            low: Bound::Closed(min as f64),
+            high: max.map_or(Bound::Unbounded, Bound::Closed),
+            got,
+        })
     }
 
     /// A NaN or infinity at `index` of `parameter`.
@@ -121,16 +115,49 @@ impl From<&InsightError> for Refusal {
                 "missing_values",
                 json!({ "column": column, "count": count }),
             ),
+            InsightError::EmptyInput { parameter } => {
+                ("empty_input", json!({ "parameter": parameter }))
+            }
             InsightError::InsufficientData {
+                parameter,
                 min_required,
                 actual,
             } => (
                 "insufficient_data",
-                json!({ "min": min_required, "got": actual }),
+                json!({ "parameter": parameter, "min": min_required, "got": actual }),
             ),
+            InsightError::ParameterOutOfRange { name, got, .. } if !got.is_finite() => {
+                ("value_not_finite", json!({ "parameter": name }))
+            }
+            InsightError::ParameterOutOfRange {
+                name,
+                low,
+                high,
+                got,
+            } => {
+                // Each bound is sent only on the side it applies to: `min` /
+                // `max` inclusive, `exclusive_min` / `exclusive_max` exclusive.
+                let mut fields = json!({ "parameter": name });
+                for (end, closed, open) in [
+                    (low, "min", "exclusive_min"),
+                    (high, "max", "exclusive_max"),
+                ] {
+                    match end {
+                        Bound::Closed(v) => fields[closed] = json!(v),
+                        Bound::Open(v) => fields[open] = json!(v),
+                        Bound::Unbounded => {}
+                    }
+                }
+                fields["got"] = json!(got);
+                ("parameter_out_of_range", fields)
+            }
             InsightError::InvalidParameter { name, .. } => {
                 ("invalid_option", json!({ "parameter": name }))
             }
+            InsightError::DegenerateData {
+                parameter: Some(parameter),
+                ..
+            } => ("degenerate_data", json!({ "parameter": parameter })),
             InsightError::DegenerateData { .. } => ("degenerate_data", json!({})),
             InsightError::ComputationFailed { operation, .. } => {
                 ("computation_failed", json!({ "operation": operation }))

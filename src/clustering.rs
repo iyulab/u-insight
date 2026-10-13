@@ -30,7 +30,7 @@
 //! assert!(result.wcss < 10.0); // tight clusters
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 
 // ── Configuration ─────────────────────────────────────────────────────
 
@@ -146,16 +146,14 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
     let n = data.len();
     let k = config.k;
 
+    InsightError::check_count("k", k, 1)?;
+    InsightError::check_count("n_init", config.n_init, 1)?;
     if n == 0 {
-        return Err(InsightError::DegenerateData {
-            reason: "no data points provided".into(),
-        });
+        return Err(InsightError::empty("data"));
     }
-    if k == 0 || k > n {
-        return Err(InsightError::InvalidParameter {
-            name: "k".into(),
-            message: format!("must be between 1 and {n} (number of data points), got {k}"),
-        });
+    // k clusters need k points.
+    if k > n {
+        return Err(InsightError::too_few("data", k, n));
     }
 
     let d = data[0].len();
@@ -246,16 +244,11 @@ pub fn auto_kmeans(
     k_max: usize,
     base_config: &KMeansConfig,
 ) -> Result<AutoKResult, InsightError> {
-    if k_min < 2 {
-        return Err(InsightError::InvalidParameter {
-            name: "k_min".into(),
-            message: format!("must be at least 2, got {k_min}"),
-        });
-    }
+    InsightError::check_count("k_min", k_min, 2)?;
     if k_max < k_min {
         return Err(InsightError::InvalidParameter {
             name: "k_max".into(),
-            message: format!("must be >= k_min ({k_min}), got {k_max}"),
+            message: format!("must not be less than k_min ({k_min}), got {k_max}"),
         });
     }
 
@@ -736,8 +729,9 @@ pub struct DbscanResult {
 ///
 /// # Errors
 ///
-/// - [`InsightError::DegenerateData`] if data is empty or contains NaN/infinite values
-/// - [`InsightError::InvalidParameter`] if min_samples < 2 or epsilon <= 0
+/// - [`InsightError::ParameterOutOfRange`] if min_samples < 2 or epsilon is not > 0
+/// - [`InsightError::EmptyInput`] if data is empty
+/// - [`InsightError::ValueNotFinite`] if a point holds a NaN or infinite value
 /// - [`InsightError::DimensionMismatch`] if points have different dimensions
 ///
 /// # Example
@@ -759,24 +753,15 @@ pub struct DbscanResult {
 pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, InsightError> {
     let n = data.len();
 
+    InsightError::check_count("min_samples", config.min_samples, 2)?;
+    InsightError::check_range(
+        "epsilon",
+        config.epsilon,
+        Bound::Open(0.0),
+        Bound::Unbounded,
+    )?;
     if n == 0 {
-        return Err(InsightError::DegenerateData {
-            reason: "no data points provided".into(),
-        });
-    }
-
-    if config.min_samples < 2 {
-        return Err(InsightError::InvalidParameter {
-            name: "min_samples".into(),
-            message: format!("must be at least 2, got {}", config.min_samples),
-        });
-    }
-
-    if !config.epsilon.is_finite() || config.epsilon <= 0.0 {
-        return Err(InsightError::InvalidParameter {
-            name: "epsilon".to_string(),
-            message: format!("must be finite and > 0, got {}", config.epsilon),
-        });
+        return Err(InsightError::empty("data"));
     }
 
     let d = data[0].len();
@@ -1055,11 +1040,22 @@ pub fn hierarchical(
 ) -> Result<HierarchicalResult, InsightError> {
     let n = data.len();
 
+    if let Some(k) = config.n_clusters {
+        InsightError::check_count("n_clusters", k, 1)?;
+    }
+    if let Some(t) = config.distance_threshold {
+        InsightError::check_range(
+            "distance_threshold",
+            t,
+            Bound::Closed(0.0),
+            Bound::Unbounded,
+        )?;
+    }
+    if n == 0 {
+        return Err(InsightError::empty("data"));
+    }
     if n < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n,
-        });
+        return Err(InsightError::too_few("data", 2, n));
     }
 
     // Memory guard: the condensed distance matrix is O(n²), so reject oversized
@@ -1077,21 +1073,10 @@ pub fn hierarchical(
         });
     }
 
+    // n_clusters flat clusters need as many points.
     if let Some(k) = config.n_clusters {
-        if k == 0 || k > n {
-            return Err(InsightError::InvalidParameter {
-                name: "n_clusters".into(),
-                message: format!("must be between 1 and {n} (number of data points), got {k}"),
-            });
-        }
-    }
-
-    if let Some(t) = config.distance_threshold {
-        if !t.is_finite() || t < 0.0 {
-            return Err(InsightError::InvalidParameter {
-                name: "distance_threshold".into(),
-                message: format!("must be a non-negative finite number, got {t}"),
-            });
+        if k > n {
+            return Err(InsightError::too_few("data", k, n));
         }
     }
 
@@ -1520,38 +1505,21 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
     let min_cluster_size = config.min_cluster_size;
     let min_samples = config.min_samples.unwrap_or(min_cluster_size);
 
+    InsightError::check_count("min_cluster_size", min_cluster_size, 2)?;
+    if let Some(m) = config.min_samples {
+        InsightError::check_count("min_samples", m, 1)?;
+    }
+    if n == 0 {
+        return Err(InsightError::empty("data"));
+    }
     if n < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n,
-        });
+        return Err(InsightError::too_few("data", 2, n));
     }
-    if min_cluster_size < 2 {
-        return Err(InsightError::InvalidParameter {
-            name: "min_cluster_size".into(),
-            message: format!("must be at least 2, got {min_cluster_size}"),
-        });
-    }
-    if min_samples < 1 {
-        return Err(InsightError::InvalidParameter {
-            name: "min_samples".into(),
-            message: format!("must be at least 1, got {min_samples}"),
-        });
-    }
-    // A core distance is the distance to the min_samples-th neighbour; with
-    // fewer points there is none to take (scikit-learn refuses this too).
+    // A core distance is the distance to the min_samples-th neighbour (which
+    // defaults to min_cluster_size); with fewer points there is none to take
+    // (scikit-learn refuses this too).
     if min_samples > n {
-        return Err(InsightError::InvalidParameter {
-            name: "min_samples".into(),
-            message: format!(
-                "must be at most the number of points ({n}), got {min_samples}{}",
-                if config.min_samples.is_none() {
-                    " (it defaults to min_cluster_size)"
-                } else {
-                    ""
-                }
-            ),
-        });
+        return Err(InsightError::too_few("data", min_samples, n));
     }
 
     // Validate dimensions and values
@@ -2422,16 +2390,14 @@ pub fn mini_batch_kmeans(
     let n = data.len();
     let k = config.k;
 
+    InsightError::check_count("k", k, 1)?;
+    // An empty batch would never move a centroid.
+    InsightError::check_count("batch_size", config.batch_size, 1)?;
     if n == 0 {
-        return Err(InsightError::DegenerateData {
-            reason: "no data points provided".into(),
-        });
+        return Err(InsightError::empty("data"));
     }
-    if k == 0 || k > n {
-        return Err(InsightError::InvalidParameter {
-            name: "k".into(),
-            message: format!("must be between 1 and {n} (number of data points), got {k}"),
-        });
+    if k > n {
+        return Err(InsightError::too_few("data", k, n));
     }
 
     let d = data[0].len();
@@ -2609,28 +2575,20 @@ pub fn gap_statistic(
     seed: u64,
 ) -> Result<GapStatResult, InsightError> {
     let n = data.len();
-    if n == 0 {
-        return Err(InsightError::DegenerateData {
-            reason: "no data points provided".into(),
-        });
-    }
-    if k_min < 1 || k_max < k_min {
-        return Err(InsightError::InvalidParameter {
-            name: "k_min/k_max".into(),
-            message: format!("need 1 <= k_min <= k_max, got k_min={k_min}, k_max={k_max}"),
-        });
-    }
-    if k_max > n {
+    InsightError::check_count("k_min", k_min, 1)?;
+    if k_max < k_min {
         return Err(InsightError::InvalidParameter {
             name: "k_max".into(),
-            message: format!("k_max must not exceed the {n} data points, got {k_max}"),
+            message: format!("must not be less than k_min ({k_min}), got {k_max}"),
         });
     }
-    if n_refs == 0 {
-        return Err(InsightError::InvalidParameter {
-            name: "n_refs".into(),
-            message: "n_refs must be at least 1".into(),
-        });
+    InsightError::check_count("n_refs", n_refs, 1)?;
+    if n == 0 {
+        return Err(InsightError::empty("data"));
+    }
+    // Clustering into k_max groups needs k_max points.
+    if k_max > n {
+        return Err(InsightError::too_few("data", k_max, n));
     }
 
     let d = data[0].len();
@@ -2782,14 +2740,14 @@ mod tests {
         let data: Vec<Vec<f64>> = (0..30)
             .map(|i| vec![(i % 3) as f64 * 10.0 + i as f64 * 0.01])
             .collect();
-        match hdbscan(&data, &HdbscanConfig::new(5).min_samples(31)) {
-            Err(InsightError::InvalidParameter { name, .. }) => assert_eq!(name, "min_samples"),
-            other => panic!("expected min_samples refusal, got {other:?}"),
-        }
-        match hdbscan(&data, &HdbscanConfig::new(1000)) {
-            Err(InsightError::InvalidParameter { name, .. }) => assert_eq!(name, "min_samples"),
-            other => panic!("expected min_samples refusal, got {other:?}"),
-        }
+        assert_eq!(
+            hdbscan(&data, &HdbscanConfig::new(5).min_samples(31)).unwrap_err(),
+            InsightError::too_few("data", 31, 30)
+        );
+        assert_eq!(
+            hdbscan(&data, &HdbscanConfig::new(1000)).unwrap_err(),
+            InsightError::too_few("data", 1000, 30)
+        );
     }
 
     /// No cluster can reach a `min_cluster_size` larger than the data: every
@@ -3016,6 +2974,80 @@ mod tests {
     fn kmeans_k_exceeds_n() {
         let data = vec![vec![1.0], vec![2.0]];
         assert!(kmeans(&data, &KMeansConfig::new(3)).is_err());
+    }
+
+    /// An option outside the interval it takes is out of range, with the
+    /// interval; a count the data cannot supply is too few points; no points
+    /// is an empty input.
+    #[test]
+    fn refusals_say_which_bound_or_how_much_data() {
+        let out_of_range = |e: InsightError| match e {
+            InsightError::ParameterOutOfRange {
+                name, low, high, ..
+            } => (name, low, high),
+            other => panic!("expected ParameterOutOfRange, got {other:?}"),
+        };
+        let at_least = |min: f64| (Bound::Closed(min), Bound::Unbounded);
+        let points = vec![vec![1.0], vec![2.0], vec![3.0]];
+
+        let (name, low, high) = out_of_range(kmeans(&points, &KMeansConfig::new(0)).unwrap_err());
+        assert_eq!((name.as_str(), (low, high)), ("k", at_least(1.0)));
+        let (name, ..) =
+            out_of_range(kmeans(&points, &KMeansConfig::new(2).n_init(0)).unwrap_err());
+        assert_eq!(name, "n_init");
+        assert_eq!(
+            kmeans(&points, &KMeansConfig::new(5)).unwrap_err(),
+            InsightError::too_few("data", 5, 3)
+        );
+        assert_eq!(
+            kmeans(&[], &KMeansConfig::new(2)).unwrap_err(),
+            InsightError::empty("data")
+        );
+        assert_eq!(
+            mini_batch_kmeans(&points, &MiniBatchKMeansConfig::new(5)).unwrap_err(),
+            InsightError::too_few("data", 5, 3)
+        );
+        let (name, ..) = out_of_range(
+            mini_batch_kmeans(&points, &MiniBatchKMeansConfig::new(2).batch_size(0)).unwrap_err(),
+        );
+        assert_eq!(name, "batch_size");
+
+        let (name, low, high) =
+            out_of_range(dbscan(&points, &DbscanConfig::new(0.0, 2)).unwrap_err());
+        assert_eq!(
+            (name.as_str(), low, high),
+            ("epsilon", Bound::Open(0.0), Bound::Unbounded)
+        );
+        let (name, low, high) =
+            out_of_range(dbscan(&points, &DbscanConfig::new(1.0, 1)).unwrap_err());
+        assert_eq!((name.as_str(), (low, high)), ("min_samples", at_least(2.0)));
+        assert_eq!(
+            dbscan(&[], &DbscanConfig::new(1.0, 2)).unwrap_err(),
+            InsightError::empty("data")
+        );
+
+        let (name, low, high) =
+            out_of_range(hierarchical(&points, &HierarchicalConfig::with_k(0)).unwrap_err());
+        assert_eq!((name.as_str(), (low, high)), ("n_clusters", at_least(1.0)));
+        assert_eq!(
+            hierarchical(&points, &HierarchicalConfig::with_k(4)).unwrap_err(),
+            InsightError::too_few("data", 4, 3)
+        );
+        let (name, low, high) = out_of_range(
+            hierarchical(&points, &HierarchicalConfig::with_threshold(-1.0)).unwrap_err(),
+        );
+        assert_eq!(
+            (name.as_str(), (low, high)),
+            ("distance_threshold", at_least(0.0))
+        );
+
+        let (name, low, high) = out_of_range(hdbscan(&points, &HdbscanConfig::new(1)).unwrap_err());
+        assert_eq!(
+            (name.as_str(), (low, high)),
+            ("min_cluster_size", at_least(2.0))
+        );
+        let (name, ..) = out_of_range(gap_statistic(&points, 0, 2, 5, 1).unwrap_err());
+        assert_eq!(name, "k_min");
     }
 
     #[test]
@@ -4072,18 +4104,14 @@ mod tests {
     fn gap_refuses_instead_of_adjusting() {
         let data = make_two_clusters();
         let n = data.len();
-        let name = |e: InsightError| match e {
-            InsightError::InvalidParameter { name, .. } => name,
-            other => panic!("unexpected {other}"),
-        };
         assert_eq!(
-            name(gap_statistic(&data, 1, n + 1, 5, 42).unwrap_err()),
-            "k_max"
+            gap_statistic(&data, 1, n + 1, 5, 42).unwrap_err(),
+            InsightError::too_few("data", n + 1, n)
         );
-        assert_eq!(
-            name(gap_statistic(&data, 1, 3, 0, 42).unwrap_err()),
-            "n_refs"
-        );
+        assert!(matches!(
+            gap_statistic(&data, 1, 3, 0, 42).unwrap_err(),
+            InsightError::ParameterOutOfRange { ref name, .. } if name == "n_refs"
+        ));
         let mut nan = data.clone();
         nan[0][0] = f64::NAN;
         assert!(gap_statistic(&nan, 1, 3, 5, 42).is_err());

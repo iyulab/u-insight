@@ -39,7 +39,7 @@
 //! assert_eq!(max_idx, 50);
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 
 // ── Configuration ─────────────────────────────────────────────────────
 
@@ -137,18 +137,23 @@ pub fn isolation_forest(
     config: &IsolationForestConfig,
 ) -> Result<IsolationForestResult, InsightError> {
     let n = data.len();
+    InsightError::check_count("n_estimators", config.n_estimators, 1)?;
+    InsightError::check_range(
+        "contamination",
+        config.contamination,
+        Bound::Closed(0.0),
+        Bound::Closed(1.0),
+    )?;
+    if n == 0 {
+        return Err(InsightError::empty("data"));
+    }
     if n < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n,
-        });
+        return Err(InsightError::too_few("data", 2, n));
     }
 
     let d = data[0].len();
     if d == 0 {
-        return Err(InsightError::DegenerateData {
-            reason: "data has 0 features".into(),
-        });
+        return Err(InsightError::degenerate("data has 0 features"));
     }
 
     // Validate
@@ -168,19 +173,6 @@ pub fn isolation_forest(
                 });
             }
         }
-    }
-
-    if config.n_estimators == 0 {
-        return Err(InsightError::InvalidParameter {
-            name: "n_estimators".into(),
-            message: "must be at least 1".into(),
-        });
-    }
-    if !(0.0..=1.0).contains(&config.contamination) {
-        return Err(InsightError::InvalidParameter {
-            name: "contamination".into(),
-            message: format!("must be in [0.0, 1.0], got {}", config.contamination),
-        });
     }
 
     let max_samples = if config.max_samples == 0 {

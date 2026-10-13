@@ -213,11 +213,15 @@ pub fn distribution_analysis(
 ) -> Result<DistributionAnalysis, InsightError> {
     // ── Input validation ────────────────────────────────────────
     let n = data.len();
+    // A fixed count of no bins used to give no histogram, and no reason.
+    if let BinMethod::Fixed(bins) = config.bin_method {
+        InsightError::check_count("bins", bins, 1)?;
+    }
+    if n == 0 {
+        return Err(InsightError::empty("data"));
+    }
     if n < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n,
-        });
+        return Err(InsightError::too_few("data", 2, n));
     }
 
     let nan_count = data.iter().filter(|v| v.is_nan()).count();
@@ -228,10 +232,10 @@ pub fn distribution_analysis(
         });
     }
 
-    let inf_count = data.iter().filter(|v| v.is_infinite()).count();
-    if inf_count > 0 {
-        return Err(InsightError::DegenerateData {
-            reason: format!("input contains {inf_count} non-finite (infinite) value(s)"),
+    if let Some(index) = data.iter().position(|v| v.is_infinite()) {
+        return Err(InsightError::ValueNotFinite {
+            column: "data".into(),
+            index,
         });
     }
 
@@ -682,12 +686,13 @@ mod tests {
         let data = vec![1.0, f64::INFINITY, 3.0];
         let config = DistributionConfig::default();
         let err = distribution_analysis(&data, &config).unwrap_err();
-        match err {
-            InsightError::DegenerateData { reason } => {
-                assert!(reason.contains("non-finite") || reason.contains("infinite"));
+        assert_eq!(
+            err,
+            InsightError::ValueNotFinite {
+                column: "data".into(),
+                index: 1
             }
-            other => panic!("expected DegenerateData, got {other:?}"),
-        }
+        );
     }
 
     #[test]

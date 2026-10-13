@@ -49,10 +49,19 @@ public class InsightException : Exception
     /// Stable, machine-readable reason -- the same <c>code</c> the WebAssembly
     /// binding puts on its <c>Error</c>: <c>value_not_finite</c>,
     /// <c>parameter_out_of_range</c>, <c>insufficient_data</c>,
-    /// <c>invalid_option</c>, <c>unknown_option</c>, <c>missing_values</c>,
-    /// <c>degenerate_data</c>, <c>malformed_input</c>, <c>internal</c>, ...
-    /// <c>null</c> when the native library returned no body.
+    /// <c>empty_input</c>, <c>invalid_option</c>, <c>unknown_option</c>,
+    /// <c>missing_values</c>, <c>degenerate_data</c>, <c>malformed_input</c>,
+    /// <c>internal</c>, ... <c>null</c> when the native library returned no body.
     /// </summary>
+    /// <remarks>
+    /// A numeric option outside the interval it takes (<c>k = 0</c>, a
+    /// non-positive DBSCAN <c>epsilon</c>, a <c>chi2_quantile</c> outside (0, 1))
+    /// is <c>parameter_out_of_range</c>, with the interval in
+    /// <see cref="Details"/>; an option asking for more than the data holds (more
+    /// clusters than points) is <c>insufficient_data</c>, with the rows needed as
+    /// <c>min</c> and the rows given as <c>got</c>. <c>invalid_option</c> is left
+    /// for options that contradict each other.
+    /// </remarks>
     public string? Reason { get; }
 
     /// <summary>

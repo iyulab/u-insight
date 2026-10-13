@@ -184,10 +184,7 @@ pub fn feature_analysis(
 ) -> Result<FeatureAnalysisResult, InsightError> {
     let p = features.len();
     if p == 0 {
-        return Err(InsightError::InvalidParameter {
-            name: "features".into(),
-            message: "at least 1 feature required".into(),
-        });
+        return Err(InsightError::empty("features"));
     }
     if names.len() != p {
         return Err(InsightError::DimensionMismatch {
@@ -199,10 +196,7 @@ pub fn feature_analysis(
 
     let n = features[0].len();
     if n < 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: 2,
-            actual: n,
-        });
+        return Err(InsightError::too_few("features", 2, n));
     }
 
     // Validate dimensions and data
@@ -570,27 +564,17 @@ pub fn permutation_importance(
     n_repeats: usize,
     seed: u64,
 ) -> Result<PermutationImportanceResult, InsightError> {
+    InsightError::check_count("n_repeats", n_repeats, 1)?;
     if features.is_empty() {
-        return Err(InsightError::InvalidParameter {
-            name: "features".into(),
-            message: "at least 1 feature required".into(),
-        });
+        return Err(InsightError::empty("features"));
     }
 
-    if n_repeats == 0 {
-        return Err(InsightError::InvalidParameter {
-            name: "n_repeats".into(),
-            message: "n_repeats must be at least 1".into(),
-        });
-    }
-
+    // A least-squares fit of p features and an intercept needs p + 2 rows
+    // to leave a residual degree of freedom.
     let n = target.len();
     let p = features.len();
     if n < p + 2 {
-        return Err(InsightError::InsufficientData {
-            min_required: p + 2,
-            actual: n,
-        });
+        return Err(InsightError::too_few("target", p + 2, n));
     }
 
     // A NaN target made R² NaN, which `max(0.0)` below turned into 0 -- every
@@ -1104,7 +1088,7 @@ mod tests {
         let mut target = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0];
         assert!(matches!(
             permutation_importance(&features, &names, &target, 0, 1),
-            Err(InsightError::InvalidParameter { ref name, .. }) if name == "n_repeats"
+            Err(InsightError::ParameterOutOfRange { ref name, .. }) if name == "n_repeats"
         ));
         target[2] = f64::NAN;
         assert!(matches!(

@@ -10,6 +10,53 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Changed
 
+- **Breaking:** a numeric option outside the interval it takes is
+  `parameter_out_of_range` with its bounds and `got` (`InsightError::ParameterOutOfRange`
+  in Rust, with `Bound` ends), on every transport — it was `invalid_option` with the
+  interval only in the message. `kmeans` / mini-batch `k`, PCA `n_components`, LOF
+  `k`, hierarchical `n_clusters`, isolation forest `n_estimators`, `n_bins`,
+  `n_repeats`, `n_init`, `n_refs`, HDBSCAN `min_samples` (`min: 1`); DBSCAN `min_samples`, HDBSCAN
+  `min_cluster_size`, `k_min` of `auto_kmeans` (`min: 2`); DBSCAN `epsilon`
+  (`exclusive_min: 0`); hierarchical `distance_threshold` (`min: 0`); isolation
+  forest `contamination` (`min: 0, max: 1`); Mahalanobis `chi2_quantile`
+  (`exclusive_min: 0, exclusive_max: 1`); PCA `n_components` above the number of
+  features (`min: 1, max: <features>`). In the C ABI, `insight_pelt` /
+  `insight_pelt_multi` `penalty` (`min: 0`) and `min_segment_len` (`min: 2`), and
+  `insight_kde` `bandwidth` (`exclusive_min: 0`, manual method) and `n_points`
+  (`min: 2`). A NaN or infinite option is `value_not_finite`. Bounds and `got` are
+  numbers with a fraction part in JSON (`1.0`), as the binding's own count refusals
+  now are too: a negative count and `0` give the same `code`, `parameter` and
+  bounds, `got` aside. `invalid_option` remains for options that contradict each
+  other and for a limit the data exceeds (`max_points`).
+- **Breaking:** an option that asks for more than the data holds is
+  `insufficient_data` with `min` (the rows it needs) and `got` (the rows given):
+  `kmeans` / mini-batch `k` or hierarchical `n_clusters` above the number of points,
+  LOF `k` without `k + 1` points (`lof([[1]], { k: 1 })` was "k must be in 1..=0"),
+  HDBSCAN `min_samples` above the number of points, a gap statistic `k_max` above
+  it. `InsightError::InsufficientData` carries `parameter`, sent with `min` and
+  `got`.
+- **Breaking:** no points, no columns or no features is `empty_input`
+  (`InsightError::EmptyInput`) with `parameter` — `kmeans([])` and `dbscan([])` were
+  `degenerate_data`, LOF and Mahalanobis `insufficient_data`, `regression` with no
+  predictors and the feature analyses with no features `invalid_option`. In the C
+  ABI it is `INSIGHT_ERR_INVALID_INPUT`.
+- **Breaking:** `correlation_matrix` (and `insight_correlation`) refuses fewer than
+  3 rows as `insufficient_data` (`parameter: "data"`, `min: 3`, `got`) before
+  computing anything — 2 rows came back as `degenerate_data` blaming constant
+  columns, and the C ABI refused them as `invalid_input` with no fields. A constant
+  column is `degenerate_data` naming it: `parameter: "data.<column>"`, in the C ABI
+  by position (`data.1` for the second). `InsightError::DegenerateData` carries
+  `parameter`. One column gives the 1 × 1 matrix `[1]` instead of a refusal.
+- **Breaking:** an infinite value in a column given to the correlation, VIF,
+  condition-number, regression or distribution analyses is `value_not_finite` at
+  its `index`, not `degenerate_data`.
+- **Breaking (C ABI):** an unknown `insight_correlation` or `insight_kde` `method` is
+  `unknown_option` with `parameter: "method"`, `got` and `expected`; a `silhouette`
+  label `≥ k` is `parameter_out_of_range` at its `index` (`min: 0, max: k - 1`);
+  `insight_regression` with fewer than 3 points, `insight_mann_kendall` with fewer
+  than 4 and `insight_estimate_period` with fewer than 8 are `insufficient_data`
+  with `min` and `got`, a non-finite value in the last two `value_not_finite`.
+
 - **Breaking:** a `spectral_residual` option outside its domain
   (`parameter_out_of_range`, on the WebAssembly `Error` and in the C error body)
   carries `got` and the bounds of the domain, which it previously left to the
@@ -34,8 +81,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Fixed
 
-- WebAssembly `distribution_analysis` refuses `bins: 0` as `parameter_out_of_range`
-  (`min: 1`); it returned no histogram.
+- `distribution_analysis` refuses a fixed bin count of 0 as `parameter_out_of_range`
+  (`parameter: "bins"`, `min: 1`), in Rust as through WebAssembly; it returned no
+  histogram.
+- `kmeans` with `n_init: 0` panicked; mini-batch k-means with `batch_size: 0` never
+  moved a centroid. Both are refused as `parameter_out_of_range` (`min: 1`).
+- A `_method` (`correlation_matrix`) or `_threshold` (`vif_diagnostic`) of the wrong
+  type is `malformed_input`, as other type errors are, not `invalid_option`.
 
 ## [0.29.1] - 2026-10-08
 
