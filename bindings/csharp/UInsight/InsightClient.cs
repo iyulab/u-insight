@@ -915,7 +915,7 @@ public sealed class InsightClient : IDisposable
                         throw InsightException.FromCode(Native.INSIGHT_ERR_INVALID_PARAM,
                             "batch_size = 0 cannot be passed; leave it null for a single batch",
                             "batch_size",
-                            """{"error":"batch_size = 0 cannot be passed; leave it null for a single batch","code":"parameter_out_of_range","parameter":"batch_size"}""");
+                            """{"error":"batch_size = 0 cannot be passed; leave it null for a single batch","code":"parameter_out_of_range","parameter":"batch_size","min":12,"got":0}""");
                     var o = new NativeStructs.CSpectralResidualOptions
                     {
                         AveragingWindow = options.AveragingWindow,

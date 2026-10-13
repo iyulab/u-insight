@@ -2148,6 +2148,32 @@ mod tests {
             e.fields,
             json!({ "code": "value_not_finite", "parameter": "data", "index": 4 })
         );
+
+        // A spectral residual option carries its bounds: exclusive ones as
+        // `exclusive_min` / `exclusive_max`, inclusive ones as `min` / `max`,
+        // each only on the side it applies to.
+        let series = [1.0; 20];
+        let sr = u_analytics::detection::SpectralResidual::new;
+        let e = WireError::from(sr().with_threshold(0.0).analyze(&series).unwrap_err());
+        assert_eq!(
+            e.fields,
+            json!({
+                "code": "parameter_out_of_range",
+                "parameter": "threshold",
+                "exclusive_min": 0.0,
+                "got": 0.0,
+            })
+        );
+        let e = WireError::from(sr().with_min_zscore(-1.0).analyze(&series).unwrap_err());
+        assert_eq!(
+            e.fields,
+            json!({
+                "code": "parameter_out_of_range",
+                "parameter": "min_zscore",
+                "min": 0.0,
+                "got": -1.0,
+            })
+        );
     }
 
     #[test]

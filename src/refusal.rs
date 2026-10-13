@@ -139,11 +139,31 @@ impl From<&u_analytics::detection::SpectralResidualError> for Refusal {
         use u_analytics::detection::SpectralResidualError as E;
         let message = e.to_string();
         match e {
-            E::OptionOutOfRange { option, .. } => Refusal::new(
-                "parameter_out_of_range",
-                message,
-                json!({ "parameter": option }),
-            ),
+            E::OptionOutOfRange {
+                option,
+                got,
+                min,
+                exclusive_min,
+                max,
+                exclusive_max,
+                ..
+            } => {
+                // Each bound is sent only on the side it applies to: `min` /
+                // `max` inclusive, `exclusive_min` / `exclusive_max` exclusive.
+                let mut fields = json!({ "parameter": option });
+                for (key, bound) in [
+                    ("min", min),
+                    ("exclusive_min", exclusive_min),
+                    ("max", max),
+                    ("exclusive_max", exclusive_max),
+                ] {
+                    if let Some(v) = bound {
+                        fields[key] = json!(v);
+                    }
+                }
+                fields["got"] = json!(got);
+                Refusal::new("parameter_out_of_range", message, fields)
+            }
             E::TooFewObservations { needed, got } => Refusal::new(
                 "insufficient_data",
                 message,

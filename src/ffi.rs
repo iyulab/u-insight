@@ -4183,6 +4183,17 @@ mod tests {
         // ...and hands the option's name out on its own, so a caller mapping it
         // to its own naming does not have to parse the message.
         assert_eq!(last_error_parameter().as_deref(), Some("threshold"));
+        // `threshold > 0`: the exclusive bound and the value, no inclusive one.
+        assert_eq!(
+            last_error_body(),
+            Some(serde_json::json!({
+                "error": message,
+                "code": "parameter_out_of_range",
+                "parameter": "threshold",
+                "exclusive_min": 0.0,
+                "got": 0.0,
+            }))
+        );
         for other in [
             "sensitivity",
             "batch_size",
@@ -4210,6 +4221,9 @@ mod tests {
                 "error": message,
                 "code": "parameter_out_of_range",
                 "parameter": "sensitivity",
+                "exclusive_min": 0.0,
+                "exclusive_max": 100.0,
+                "got": 100.0,
             }))
         );
 

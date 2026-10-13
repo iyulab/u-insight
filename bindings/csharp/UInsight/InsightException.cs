@@ -57,9 +57,13 @@ public class InsightException : Exception
 
     /// <summary>
     /// The whole error body: <c>error</c>, <c>code</c> and the values behind the
-    /// reason (<c>parameter</c>, <c>index</c>, <c>min</c>, <c>got</c>,
-    /// <c>column</c>, ...), so a caller can say which value was refused without
-    /// parsing <see cref="Exception.Message"/>. <c>null</c> when there is no body.
+    /// reason (<c>parameter</c>, <c>index</c>, <c>min</c>, <c>max</c>,
+    /// <c>exclusive_min</c>, <c>exclusive_max</c>, <c>got</c>, <c>column</c>, ...),
+    /// so a caller can say which value was refused without parsing
+    /// <see cref="Exception.Message"/>. For <c>parameter_out_of_range</c>,
+    /// <c>min</c> / <c>max</c> are inclusive bounds and <c>exclusive_min</c> /
+    /// <c>exclusive_max</c> exclusive ones, each present only on the side it applies
+    /// to. <c>null</c> when there is no body.
     /// </summary>
     public JsonElement? Details { get; }
 

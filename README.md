@@ -415,7 +415,7 @@ try {
 | `unknown_option` | `parameter`, `got`, `expected` | A `linkage`, `method`, `bin_method` or `_method` that names none of the supported values |
 | `missing_option` | `parameter`, `expected` | A `hierarchical` config with neither `n_clusters` nor `distance_threshold` |
 | `invalid_option` | `parameter` | An option value the analysis refuses (a non-positive `threshold`, a `_threshold` that is not a number, `config.distance_threshold` given with `n_clusters`, …) |
-| `parameter_out_of_range` | `parameter` (and `index`, `min`, `max`, `got` where they apply) | A `spectral_residual` option outside its domain, or a `silhouette` label `≥ k` |
+| `parameter_out_of_range` | `parameter`, `got` (and `index`, `min`, `max`, `exclusive_min`, `exclusive_max` where they apply) | A `spectral_residual` option outside its domain, or a `silhouette` label `≥ k`. `min` / `max` are inclusive bounds and `exclusive_min` / `exclusive_max` exclusive ones; each is present only on the side it applies to — `threshold` (`> 0`) carries `exclusive_min: 0`, `sensitivity` (strictly between 0 and 100) `exclusive_min: 0, exclusive_max: 100`, `min_zscore` (`≥ 0`) `min: 0` |
 | `insufficient_data` | `min`, `got` (and `parameter`) | Fewer rows or observations than the method needs |
 | `value_not_finite` | `parameter`, `index` | A NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`data.b`), `index` its position in that array, or `null`. `describe` reads NaN as a missing value, like `null` |
 | `dimension_mismatch` | `expected`, `got` (and `parameter`, `index`) | Lengths that have to agree do not — a row shorter than the first (`index` is that row), `labels` vs data rows, … |

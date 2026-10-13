@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** a `spectral_residual` option outside its domain
+  (`parameter_out_of_range`, on the WebAssembly `Error` and in the C error body)
+  carries `got` and the bounds of the domain, which it previously left to the
+  message: `min` / `max` for an inclusive bound and `exclusive_min` /
+  `exclusive_max` for an exclusive one, each only on the side it applies to.
+  `threshold` reports `exclusive_min: 0`, `sensitivity` `exclusive_min: 0,
+  exclusive_max: 100`, `min_zscore` `min: 0`, `batch_size` `min: 12`, the window
+  sizes `min: 1`. The .NET client's own `batch_size = 0` refusal carries `min: 12`
+  and `got: 0` in `Details` likewise.
+
 ## [0.29.1] - 2026-10-08
 
 The .NET client is `UInsight` 0.29.1.
