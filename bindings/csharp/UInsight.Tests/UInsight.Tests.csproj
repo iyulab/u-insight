@@ -14,6 +14,10 @@
 
     <!-- The native library from a `cargo build`. A standalone clone builds into its own
          target/; inside a Cargo workspace it lands in the workspace's. -->
+    <!-- A build told where to put its output (CARGO_TARGET_DIR, as the umbrella's
+         release gate sets it) is the one to test: a library left in the repository's
+         own target/ by an earlier build would otherwise be picked first. -->
+    <UInsightNativeDir Condition="'$(UInsightNativeDir)' == '' and '$(CARGO_TARGET_DIR)' != '' and (Exists('$(CARGO_TARGET_DIR)/debug/u_insight.dll') or Exists('$(CARGO_TARGET_DIR)/debug/libu_insight.so') or Exists('$(CARGO_TARGET_DIR)/debug/libu_insight.dylib'))">$(CARGO_TARGET_DIR)/debug</UInsightNativeDir>
     <UInsightNativeDir Condition="'$(UInsightNativeDir)' == '' and (Exists('$(MSBuildThisFileDirectory)../../../target/debug/u_insight.dll') or Exists('$(MSBuildThisFileDirectory)../../../target/debug/libu_insight.so') or Exists('$(MSBuildThisFileDirectory)../../../target/debug/libu_insight.dylib'))">$(MSBuildThisFileDirectory)../../../target/debug</UInsightNativeDir>
     <UInsightNativeDir Condition="'$(UInsightNativeDir)' == ''">$(MSBuildThisFileDirectory)../../../../../target/debug</UInsightNativeDir>
   </PropertyGroup>
