@@ -62,6 +62,31 @@ impl Refusal {
         )
     }
 
+    /// A count outside the range the option takes: `min`, `max` when there
+    /// is an upper bound (an unbounded side is left out), and `got`.
+    #[cfg(feature = "wasm")]
+    pub(crate) fn count_out_of_range(
+        parameter: &str,
+        min: usize,
+        max: Option<f64>,
+        got: f64,
+    ) -> Self {
+        let mut fields = json!({ "parameter": parameter, "min": min });
+        let range = match max {
+            Some(max) => {
+                fields["max"] = json!(max);
+                format!("in {min}..={max}")
+            }
+            None => format!("at least {min}"),
+        };
+        fields["got"] = json!(got);
+        Self::new(
+            "parameter_out_of_range",
+            format!("{parameter} must be {range}, got {got}"),
+            fields,
+        )
+    }
+
     /// A NaN or infinity at `index` of `parameter`.
     pub(crate) fn value_not_finite(parameter: &str, index: usize) -> Self {
         Self::new(

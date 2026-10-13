@@ -19,6 +19,23 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   exclusive_max: 100`, `min_zscore` `min: 0`, `batch_size` `min: 12`, the window
   sizes `min: 1`. The .NET client's own `batch_size = 0` refusal carries `min: 12`
   and `got: 0` in `Details` likewise.
+- **Breaking:** WebAssembly count options and arguments are read as whole numbers
+  of either sign, so a negative count is `parameter_out_of_range` with `parameter`,
+  `min` and `got` — `min` the least value the option takes, the bound a too-small
+  positive count is held to — instead of `malformed_input`. This covers `kmeans`
+  and `silhouette` `k`, PCA `n_components`, DBSCAN `min_samples`, hierarchical
+  `n_clusters` / `max_points`, isolation forest `n_estimators` / `max_samples` /
+  `seed`, LOF `k`, distribution `bins`, feature importance `n_repeats` / `seed` /
+  `n_bins`, the `spectral_residual` window sizes and `batch_size` (the bounds
+  u-analytics checks them against), and `silhouette` labels (refused at `index`
+  with `min: 0, max: k - 1`, as a label `≥ k` is). A count with a fraction stays
+  `malformed_input`, now naming it in `parameter` ("expected a whole number"); a NaN
+  or ±Infinity `k` is `value_not_finite` (it was `malformed_input`).
+
+### Fixed
+
+- WebAssembly `distribution_analysis` refuses `bins: 0` as `parameter_out_of_range`
+  (`min: 1`); it returned no histogram.
 
 ## [0.29.1] - 2026-10-08
 

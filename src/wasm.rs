@@ -549,17 +549,185 @@ pub fn describe(
     serde_wasm_bindgen::to_value(&results).map_err(js_err)
 }
 
-/// A count passed as a JS number: a whole number >= 0. wasm-bindgen would
-/// convert it with ToInt32 -- 2.9 to 2, NaN to 0, -1 to 4294967295 -- and the
-/// call would run on a value the caller never gave.
-fn whole(value: f64, parameter: &str) -> Result<usize, WireError> {
-    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= u32::MAX as f64 {
-        Ok(value as usize)
-    } else {
-        Err(WireError::malformed_input(
+/// A count passed as a JS number. wasm-bindgen would convert it with ToInt32
+/// -- 2.9 to 2, NaN to 0, -1 to 4294967295 -- and the call would run on a
+/// value the caller never gave.
+///
+/// NaN or ±Infinity is `value_not_finite`, a fraction `malformed_input`; a
+/// whole number is then a count as [`Whole::count`] reads one.
+fn whole(value: f64, parameter: &str, min: usize) -> Result<usize, WireError> {
+    if !value.is_finite() {
+        return Err(WireError::new(
+            "value_not_finite",
+            format!("{parameter} must be a finite number, got {value}"),
+            json!({ "parameter": parameter }),
+        ));
+    }
+    if value.fract() != 0.0 {
+        return Err(WireError::malformed_input(
             parameter,
-            format!("{parameter} must be a whole number >= 0, got {value}"),
-        ))
+            format!("{parameter} must be a whole number, got {value}"),
+        ));
+    }
+    Whole(value).count(parameter, min)
+}
+
+/// A whole number as the caller sent it, inside an object or array: any JSON
+/// integer, or a float with no fractional part (`3.0`).
+///
+/// Count fields are read as this rather than as `usize`, which refuses `-1`
+/// while deserializing -- as a shape error, before any range check runs. A
+/// fraction is still refused while deserializing (`malformed_input` at its
+/// path, "expected a whole number"): whether a value is whole is a matter of
+/// its type, whether it is in range a matter of its value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Whole(f64);
+
+impl<'de> Deserialize<'de> for Whole {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = Whole;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a whole number")
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Whole, E> {
+                Ok(Whole(v as f64))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Whole, E> {
+                Ok(Whole(v as f64))
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Whole, E> {
+                if v.is_finite() && v.fract() == 0.0 {
+                    Ok(Whole(v))
+                } else {
+                    Err(E::invalid_type(serde::de::Unexpected::Float(v), &self))
+                }
+            }
+        }
+        deserializer.deserialize_f64(Visitor)
+    }
+}
+
+impl Whole {
+    /// The value as a count. A negative one is `parameter_out_of_range` with
+    /// `min` the least value the option takes -- the floor the analysis
+    /// checks a too-small count against, `0` where it checks none -- and one
+    /// past what a wasm32 `usize` holds is refused with that `max`.
+    fn count(self, parameter: &str, min: usize) -> Result<usize, WireError> {
+        let cap = u32::MAX as f64;
+        if self.0 < 0.0 {
+            Err(WireError::count_out_of_range(parameter, min, None, self.0))
+        } else if self.0 > cap {
+            Err(WireError::count_out_of_range(
+                parameter,
+                min,
+                Some(cap),
+                self.0,
+            ))
+        } else {
+            Ok(self.0 as usize)
+        }
+    }
+
+    /// The value as a spectral residual count option, which u-analytics checks.
+    ///
+    /// Its builder takes a `usize`, so a negative count cannot reach that
+    /// check; it is handed on as `0`, the count nearest it, and noted in
+    /// `negative` so the refusal the check gives `0` can carry the value the
+    /// caller sent ([`restore_got`]). Every such option refuses `0`.
+    fn sr_count(
+        self,
+        option: &'static str,
+        negative: &mut Vec<(&'static str, f64)>,
+    ) -> Result<usize, WireError> {
+        if self.0 < 0.0 {
+            negative.push((option, self.0));
+            Ok(0)
+        } else {
+            self.count(option, 0)
+        }
+    }
+
+    /// The value as a random seed: a whole number in `[0, 2⁶⁴ − 1]`.
+    fn seed(self, parameter: &str) -> Result<u64, WireError> {
+        let cap = u64::MAX as f64;
+        if (0.0..=cap).contains(&self.0) {
+            // `u64::MAX as f64` rounds up to 2⁶⁴; the cast saturates there.
+            Ok(self.0 as u64)
+        } else {
+            Err(WireError::count_out_of_range(
+                parameter,
+                0,
+                Some(cap),
+                self.0,
+            ))
+        }
+    }
+}
+
+/// Cluster labels for `k` clusters: each in `0..k`, a negative one refused by
+/// the same check as one too large, at its index.
+fn cluster_labels(labels: &[Whole], k: usize) -> Result<Vec<usize>, WireError> {
+    labels
+        .iter()
+        .enumerate()
+        .map(|(index, &Whole(label))| {
+            if (0.0..k as f64).contains(&label) {
+                Ok(label as usize)
+            } else {
+                Err(WireError::new(
+                    "parameter_out_of_range",
+                    format!("label {label} out of range for k={k}"),
+                    json!({
+                        "parameter": "labels",
+                        "index": index,
+                        "min": 0,
+                        "max": k.saturating_sub(1),
+                        "got": label,
+                    }),
+                ))
+            }
+        })
+        .collect()
+}
+
+/// An explicit histogram bin count: at least 1. Nothing downstream refuses
+/// `0` -- it yields no histogram at all -- so this is the check, for `0` and a
+/// negative count alike.
+fn bin_count(value: Whole, parameter: &str) -> Result<usize, WireError> {
+    match value.count(parameter, 1)? {
+        0 => Err(WireError::count_out_of_range(parameter, 1, None, 0.0)),
+        n => Ok(n),
+    }
+}
+
+/// A spectral residual refusal of an option [`Whole::sr_count`] handed on as
+/// `0`, with `got` the negative value the caller sent. A run that `0` did not
+/// stop is refused as the count it is: below `min: 0`.
+fn restore_got(
+    result: Result<
+        Vec<u_analytics::detection::SrPoint>,
+        u_analytics::detection::SpectralResidualError,
+    >,
+    negative: &[(&'static str, f64)],
+) -> Result<Vec<u_analytics::detection::SrPoint>, WireError> {
+    use u_analytics::detection::SpectralResidualError as E;
+    match result {
+        Err(e) => {
+            let mut refusal = WireError::from(&e);
+            if let E::OptionOutOfRange { option, .. } = e {
+                if let Some(&(_, got)) = negative.iter().find(|(name, _)| *name == option) {
+                    refusal.fields["got"] = json!(got);
+                }
+            }
+            Err(refusal)
+        }
+        Ok(_) if !negative.is_empty() => {
+            let (option, got) = negative[0];
+            Err(WireError::count_out_of_range(option, 0, None, got))
+        }
+        Ok(points) => Ok(points),
     }
 }
 
@@ -695,7 +863,8 @@ pub fn kmeans(
     #[wasm_bindgen(unchecked_param_type = "number[][]")] data: JsValue,
     k: f64,
 ) -> Result<JsValue, JsValue> {
-    let k = whole(k, "k").map_err(js_err)?;
+    // `kmeans` refuses fewer than one cluster.
+    let k = whole(k, "k", 1).map_err(js_err)?;
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
 
     use crate::clustering::{kmeans as kmeans_fn, KMeansConfig};
@@ -733,9 +902,11 @@ pub fn silhouette(
     #[wasm_bindgen(unchecked_param_type = "number[]")] labels: JsValue,
     k: f64,
 ) -> Result<JsValue, JsValue> {
-    let k = whole(k, "k").map_err(js_err)?;
+    let k = whole(k, "k", 0).map_err(js_err)?;
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
-    let labels: Vec<usize> = from_js(labels, "labels")?;
+    // Whole numbers of either sign: a negative label is refused below by the
+    // check a label `>= k` is, not as a shape error.
+    let labels: Vec<Whole> = from_js(labels, "labels")?;
 
     if labels.len() != data.len() {
         return Err(js_err(WireError::new(
@@ -748,19 +919,7 @@ pub fn silhouette(
             json!({ "parameter": "labels", "expected": data.len(), "got": labels.len() }),
         )));
     }
-    if let Some((index, &bad)) = labels.iter().enumerate().find(|(_, &l)| l >= k) {
-        return Err(js_err(WireError::new(
-            "parameter_out_of_range",
-            format!("label {bad} out of range for k={k}"),
-            json!({
-                "parameter": "labels",
-                "index": index,
-                "min": 0,
-                "max": k.saturating_sub(1),
-                "got": bad,
-            }),
-        )));
-    }
+    let labels = cluster_labels(&labels, k).map_err(js_err)?;
 
     use crate::clustering::silhouette_samples;
     let analysis = silhouette_samples(&data, &labels, k);
@@ -777,7 +936,8 @@ pub fn silhouette(
 #[serde(deny_unknown_fields)]
 struct PcaConfigDto {
     /// Number of principal components to keep.
-    n_components: usize,
+    #[tsify(type = "number")]
+    n_components: Whole,
     /// Standardise each column to unit variance before the decomposition
     /// (correlation-matrix PCA). Default: `true` — without it a column in
     /// large units takes the leading components. `false` gives
@@ -787,8 +947,10 @@ struct PcaConfigDto {
     auto_scale: bool,
 }
 
-fn pca_config(dto: &PcaConfigDto) -> crate::pca::PcaConfig {
-    crate::pca::PcaConfig::new(dto.n_components).auto_scale(dto.auto_scale)
+fn pca_config(dto: &PcaConfigDto) -> Result<crate::pca::PcaConfig, WireError> {
+    // `pca` refuses fewer than one component.
+    let n_components = dto.n_components.count("n_components", 1)?;
+    Ok(crate::pca::PcaConfig::new(n_components).auto_scale(dto.auto_scale))
 }
 
 /// Runs Principal Component Analysis on row-major data.
@@ -812,7 +974,7 @@ pub fn pca(
     let config: PcaConfigDto = from_js(config, "config")?;
 
     use crate::pca::pca as pca_fn;
-    let config = pca_config(&config);
+    let config = pca_config(&config).map_err(js_err)?;
     let result = pca_fn(&data, &config).map_err(js_err)?;
 
     let dto = PcaDto {
@@ -837,7 +999,8 @@ pub fn pca(
 #[serde(deny_unknown_fields)]
 struct DbscanConfigDto {
     epsilon: f64,
-    min_samples: usize,
+    #[tsify(type = "number")]
+    min_samples: Whole,
 }
 
 /// DBSCAN clustering result.
@@ -871,7 +1034,9 @@ pub fn dbscan(
     let cfg: DbscanConfigDto = from_js(config, "config")?;
 
     use crate::clustering::{dbscan as dbscan_fn, DbscanConfig};
-    let config = DbscanConfig::new(cfg.epsilon, cfg.min_samples);
+    // `dbscan` refuses fewer than two samples per core point.
+    let min_samples = cfg.min_samples.count("min_samples", 2).map_err(js_err)?;
+    let config = DbscanConfig::new(cfg.epsilon, min_samples);
     let result = dbscan_fn(&data, &config).map_err(js_err)?;
 
     let dto = DbscanDto {
@@ -899,7 +1064,7 @@ struct HierarchicalConfigDto {
     /// Number of flat clusters (mutually exclusive with distance_threshold).
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    n_clusters: Option<usize>,
+    n_clusters: Option<Whole>,
     /// Distance threshold for dendrogram cut (mutually exclusive with n_clusters).
     #[tsify(optional)]
     #[tsify(type = "number | null")]
@@ -908,7 +1073,7 @@ struct HierarchicalConfigDto {
     /// Rejects oversized inputs before allocating the O(n²) distance matrix.
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    max_points: Option<usize>,
+    max_points: Option<Whole>,
 }
 
 fn default_linkage() -> String {
@@ -974,11 +1139,18 @@ pub fn hierarchical(
 
     let linkage = parse_linkage(&cfg.linkage).map_err(js_err)?;
 
-    let mut config = hierarchical_cut(cfg.n_clusters, cfg.distance_threshold)
+    // `hierarchical` refuses fewer than one cluster; `max_points: 0` turns
+    // the guard off.
+    let n_clusters = cfg
+        .n_clusters
+        .map(|k| k.count("n_clusters", 1))
+        .transpose()
+        .map_err(js_err)?;
+    let mut config = hierarchical_cut(n_clusters, cfg.distance_threshold)
         .map_err(js_err)?
         .linkage(linkage);
     if let Some(mp) = cfg.max_points {
-        config.max_points = mp;
+        config.max_points = mp.count("max_points", 0).map_err(js_err)?;
     }
 
     let result = hier_fn(&data, &config).map_err(js_err)?;
@@ -1009,12 +1181,12 @@ pub fn hierarchical(
 struct IsolationForestConfigDto {
     /// Number of trees. Default: 100.
     #[serde(default = "default_n_estimators")]
-    #[tsify(optional)]
-    n_estimators: usize,
+    #[tsify(optional, type = "number")]
+    n_estimators: Whole,
     /// Subsample size per tree. 0 = auto (min(256, n)). Default: 0.
-    #[serde(default)]
-    #[tsify(optional)]
-    max_samples: usize,
+    #[serde(default = "default_max_samples")]
+    #[tsify(optional, type = "number")]
+    max_samples: Whole,
     /// Expected contamination rate (0.0–1.0). Default: 0.1.
     #[serde(default = "default_contamination")]
     #[tsify(optional)]
@@ -1023,17 +1195,20 @@ struct IsolationForestConfigDto {
     #[serde(default = "default_seed")]
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    seed: Option<u64>,
+    seed: Option<Whole>,
 }
 
-fn default_n_estimators() -> usize {
-    100
+fn default_n_estimators() -> Whole {
+    Whole(100.0)
+}
+fn default_max_samples() -> Whole {
+    Whole(0.0)
 }
 fn default_contamination() -> f64 {
     0.1
 }
-fn default_seed() -> Option<u64> {
-    Some(42)
+fn default_seed() -> Option<Whole> {
+    Some(Whole(42.0))
 }
 
 /// Isolation Forest anomaly detection result.
@@ -1067,11 +1242,17 @@ pub fn isolation_forest(
 
     use crate::isolation_forest::{isolation_forest as iforest_fn, IsolationForestConfig};
 
+    // `isolation_forest` refuses fewer than one tree; `max_samples: 0` is
+    // the automatic subsample size.
     let config = IsolationForestConfig {
-        n_estimators: cfg.n_estimators,
-        max_samples: cfg.max_samples,
+        n_estimators: cfg.n_estimators.count("n_estimators", 1).map_err(js_err)?,
+        max_samples: cfg.max_samples.count("max_samples", 0).map_err(js_err)?,
         contamination: cfg.contamination,
-        seed: cfg.seed,
+        seed: cfg
+            .seed
+            .map(|s| s.seed("seed"))
+            .transpose()
+            .map_err(js_err)?,
     };
 
     let result = iforest_fn(&data, &config).map_err(js_err)?;
@@ -1095,16 +1276,16 @@ pub fn isolation_forest(
 struct LofConfigDto {
     /// Number of nearest neighbors. Default: 20.
     #[serde(default = "default_lof_k")]
-    #[tsify(optional)]
-    k: usize,
+    #[tsify(optional, type = "number")]
+    k: Whole,
     /// LOF threshold for outlier classification. Default: 1.5.
     #[serde(default = "default_lof_threshold")]
     #[tsify(optional)]
     threshold: f64,
 }
 
-fn default_lof_k() -> usize {
-    20
+fn default_lof_k() -> Whole {
+    Whole(20.0)
 }
 fn default_lof_threshold() -> f64 {
     1.5
@@ -1141,7 +1322,9 @@ pub fn lof(
 
     use crate::lof::{lof as lof_fn, LofConfig};
 
-    let config = LofConfig::default().k(cfg.k).threshold(cfg.threshold);
+    // `lof` refuses fewer than one neighbour.
+    let k = cfg.k.count("k", 1).map_err(js_err)?;
+    let config = LofConfig::default().k(k).threshold(cfg.threshold);
     let result = lof_fn(&data, &config).map_err(js_err)?;
 
     let dto = LofDto {
@@ -1170,7 +1353,7 @@ struct DistributionConfigDto {
     #[serde(default)]
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    bins: Option<usize>,
+    bins: Option<Whole>,
     /// Significance level for normality tests. Default: 0.05.
     #[serde(default = "default_significance")]
     #[tsify(optional)]
@@ -1314,7 +1497,12 @@ pub fn distribution_analysis(
 
     use crate::distribution::{distribution_analysis as dist_fn, DistributionConfig};
 
-    let bin_method = resolve_bin_method(&cfg.bin_method, cfg.bins).map_err(js_err)?;
+    let bins = cfg
+        .bins
+        .map(|b| bin_count(b, "bins"))
+        .transpose()
+        .map_err(js_err)?;
+    let bin_method = resolve_bin_method(&cfg.bin_method, bins).map_err(js_err)?;
 
     let config = DistributionConfig {
         bin_method,
@@ -1489,26 +1677,26 @@ struct FeatureImportanceInputDto {
     significance_level: f64,
     /// Number of permutation repeats. Default: 5.
     #[serde(default = "default_n_repeats")]
-    #[tsify(optional)]
-    n_repeats: usize,
+    #[tsify(optional, type = "number")]
+    n_repeats: Whole,
     /// Random seed for permutation. Default: 42.
     #[serde(default = "default_fi_seed")]
-    #[tsify(optional)]
-    seed: u64,
+    #[tsify(optional, type = "number")]
+    seed: Whole,
     /// Number of bins for mutual information. None = auto (Sturges' rule).
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    n_bins: Option<usize>,
+    n_bins: Option<Whole>,
 }
 
 fn default_fi_method() -> String {
     "permutation".into()
 }
-fn default_n_repeats() -> usize {
-    5
+fn default_n_repeats() -> Whole {
+    Whole(5.0)
 }
-fn default_fi_seed() -> u64 {
-    42
+fn default_fi_seed() -> Whole {
+    Whole(42.0)
 }
 
 /// A single feature's importance result.
@@ -1619,10 +1807,15 @@ pub fn feature_importance(
             use crate::analysis::mutual_info_classif;
 
             let class_target = class_labels(&input.target).map_err(js_err)?;
+            // `mutual_info_classif` refuses fewer than one bin.
+            let n_bins = input
+                .n_bins
+                .map(|b| b.count("n_bins", 1))
+                .transpose()
+                .map_err(js_err)?;
 
-            let result =
-                mutual_info_classif(&feat_columns, &feat_names, &class_target, input.n_bins)
-                    .map_err(js_err)?;
+            let result = mutual_info_classif(&feat_columns, &feat_names, &class_target, n_bins)
+                .map_err(js_err)?;
 
             let dto = FeatureImportanceDto {
                 method: "mutual_info".into(),
@@ -1646,14 +1839,12 @@ pub fn feature_importance(
         "permutation" => {
             use crate::feature_importance::permutation_importance;
 
-            let result = permutation_importance(
-                &feat_columns,
-                &feat_names,
-                &input.target,
-                input.n_repeats,
-                input.seed,
-            )
-            .map_err(js_err)?;
+            // `permutation_importance` refuses fewer than one repeat.
+            let n_repeats = input.n_repeats.count("n_repeats", 1).map_err(js_err)?;
+            let seed = input.seed.seed("seed").map_err(js_err)?;
+            let result =
+                permutation_importance(&feat_columns, &feat_names, &input.target, n_repeats, seed)
+                    .map_err(js_err)?;
 
             let dto = FeatureImportanceDto {
                 method: "permutation".into(),
@@ -1976,11 +2167,11 @@ struct SpectralResidualInputDto {
     #[serde(default)]
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    averaging_window: Option<usize>,
+    averaging_window: Option<Whole>,
     #[serde(default)]
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    judgement_window: Option<usize>,
+    judgement_window: Option<Whole>,
     #[serde(default)]
     #[tsify(optional)]
     #[tsify(type = "number | null")]
@@ -1996,7 +2187,7 @@ struct SpectralResidualInputDto {
     #[serde(default)]
     #[tsify(optional)]
     #[tsify(type = "number | null")]
-    batch_size: Option<usize>,
+    batch_size: Option<Whole>,
 }
 
 #[derive(Serialize, tsify::Tsify)]
@@ -2041,11 +2232,18 @@ pub fn spectral_residual(
     if let Some(i) = req.data.iter().position(|x| !x.is_finite()) {
         return Err(js_err(WireError::value_not_finite("data", i)));
     }
+    let mut negative = Vec::new();
     let mut sr = u_analytics::detection::SpectralResidual::new();
     if let Some(q) = req.averaging_window {
+        let q = q
+            .sr_count("averaging_window", &mut negative)
+            .map_err(js_err)?;
         sr = sr.with_averaging_window(q);
     }
     if let Some(z) = req.judgement_window {
+        let z = z
+            .sr_count("judgement_window", &mut negative)
+            .map_err(js_err)?;
         sr = sr.with_judgement_window(z);
     }
     if let Some(t) = req.threshold {
@@ -2057,12 +2255,13 @@ pub fn spectral_residual(
     if let Some(s) = req.sensitivity {
         sr = sr.with_sensitivity(s);
     }
-    if req.batch_size.is_some() {
-        sr = sr.with_batch_size(req.batch_size);
+    if let Some(b) = req.batch_size {
+        let b = b.sr_count("batch_size", &mut negative).map_err(js_err)?;
+        sr = sr.with_batch_size(Some(b));
     }
     // The crate names the one condition that failed; repeating the whole
     // rulebook here is what left consumers re-validating the options.
-    let points = sr.analyze(&req.data).map_err(js_err)?;
+    let points = restore_got(sr.analyze(&req.data), &negative).map_err(js_err)?;
     let dto = SpectralResidualDto {
         anomalies: points
             .iter()
@@ -2243,12 +2442,12 @@ mod dto_strictness_tests {
     fn pca_config_defaults_to_standardised() {
         let dto: super::PcaConfigDto =
             serde_json::from_value(json!({ "n_components": 2 })).unwrap();
-        let cfg = super::pca_config(&dto);
+        let cfg = super::pca_config(&dto).expect("valid");
         assert_eq!(cfg.n_components, 2);
         assert!(cfg.auto_scale);
         let dto: super::PcaConfigDto =
             serde_json::from_value(json!({ "n_components": 2, "auto_scale": false })).unwrap();
-        assert!(!super::pca_config(&dto).auto_scale);
+        assert!(!super::pca_config(&dto).expect("valid").auto_scale);
         assert_rejects_unknown::<super::PcaConfigDto>(json!({
             "n_components": 2, "scale": true
         }));
@@ -2317,12 +2516,187 @@ mod dto_strictness_tests {
 
     #[test]
     fn a_count_must_be_a_whole_number() {
-        assert_eq!(super::whole(3.0, "k").expect("whole"), 3);
-        for bad in [2.9, -1.0, f64::NAN] {
-            let err = super::whole(bad, "k").expect_err("not a count");
+        assert_eq!(super::whole(3.0, "k", 1).expect("whole"), 3);
+        for bad in [2.9, -0.5] {
+            let err = super::whole(bad, "k", 1).expect_err("a fraction");
             assert_eq!(err.code(), "malformed_input");
             assert_eq!(err.fields["parameter"], "k");
+            assert_eq!(err.message, format!("k must be a whole number, got {bad}"));
         }
+        for bad in [f64::NAN, f64::INFINITY] {
+            let err = super::whole(bad, "k", 1).expect_err("not finite");
+            assert_eq!(err.code(), "value_not_finite");
+            assert_eq!(err.fields["parameter"], "k");
+        }
+    }
+
+    /// A negative count is out of range, with the floor the option has.
+    #[test]
+    fn a_negative_count_is_out_of_range() {
+        let err = super::whole(-1.0, "k", 1).expect_err("negative");
+        assert_eq!(
+            err.fields,
+            json!({ "code": "parameter_out_of_range", "parameter": "k", "min": 1, "got": -1.0 })
+        );
+        let err = super::whole(5e9, "k", 1).expect_err("past a wasm32 usize");
+        assert_eq!(err.fields["max"], json!(u32::MAX as f64));
+    }
+
+    /// Count fields inside an object read as whole numbers of either sign;
+    /// `from_json` is the path `from_js` hands what serde-wasm-bindgen makes of
+    /// a JS value (a safe integer as an integer, `2.5` as a float).
+    #[test]
+    fn a_count_field_reads_as_a_whole_number_of_either_sign() {
+        let lof = |v: serde_json::Value| super::from_json::<super::LofConfigDto>(v, "config");
+        assert_eq!(
+            lof(json!({ "k": 3 })).expect("integer").k,
+            super::Whole(3.0)
+        );
+        assert_eq!(
+            lof(json!({ "k": 3.0 })).expect("whole").k,
+            super::Whole(3.0)
+        );
+        let k = lof(json!({ "k": -1 })).expect("negative reads").k;
+        assert_eq!(
+            k.count("k", 1).expect_err("negative").fields,
+            json!({ "code": "parameter_out_of_range", "parameter": "k", "min": 1, "got": -1.0 })
+        );
+        let err = lof(json!({ "k": 2.5 })).err().expect("a fraction");
+        assert_eq!(
+            (err.code(), &err.fields["parameter"]),
+            ("malformed_input", &json!("k"))
+        );
+        assert!(
+            err.message.contains("expected a whole number"),
+            "{}",
+            err.message
+        );
+        // Defaults are the counts they were.
+        assert_eq!(lof(json!({})).expect("default").k, super::Whole(20.0));
+
+        let pca = super::from_json::<super::PcaConfigDto>(json!({ "n_components": -1 }), "config")
+            .expect("negative reads");
+        assert_eq!(
+            super::pca_config(&pca).expect_err("negative").fields,
+            json!({
+                "code": "parameter_out_of_range",
+                "parameter": "n_components",
+                "min": 1,
+                "got": -1.0,
+            })
+        );
+        let iforest = |v| super::from_json::<super::IsolationForestConfigDto>(v, "config");
+        let cfg = iforest(json!({ "seed": -1 })).expect("negative reads");
+        let seed = cfg.seed.expect("given").seed("seed").expect_err("negative");
+        assert_eq!(
+            seed.fields,
+            json!({
+                "code": "parameter_out_of_range",
+                "parameter": "seed",
+                "min": 0,
+                "max": u64::MAX as f64,
+                "got": -1.0,
+            })
+        );
+        let cfg = iforest(json!({})).expect("defaults");
+        assert_eq!(cfg.seed.expect("default").seed("seed").expect("valid"), 42);
+    }
+
+    /// `bins: 0` used to give no histogram at all; it and a negative count are
+    /// one refusal.
+    #[test]
+    fn a_bin_count_is_at_least_one() {
+        for got in [0.0, -1.0] {
+            assert_eq!(
+                super::bin_count(super::Whole(got), "bins")
+                    .expect_err("below 1")
+                    .fields,
+                json!({ "code": "parameter_out_of_range", "parameter": "bins", "min": 1, "got": got })
+            );
+        }
+        assert_eq!(
+            super::bin_count(super::Whole(4.0), "bins").expect("valid"),
+            4
+        );
+    }
+
+    /// A negative spectral residual count is refused by the check u-analytics
+    /// gives a too-small one, with the value sent.
+    #[test]
+    fn a_negative_spectral_residual_count_has_the_dependency_s_bounds() {
+        use u_analytics::detection::SpectralResidual;
+        let data = vec![1.0; 20];
+        for (option, min) in [
+            ("averaging_window", 1.0),
+            ("judgement_window", 1.0),
+            ("batch_size", 12.0),
+        ] {
+            let mut negative = Vec::new();
+            let n = super::Whole(-1.0)
+                .sr_count(option, &mut negative)
+                .expect("handed on");
+            let sr = match option {
+                "averaging_window" => SpectralResidual::new().with_averaging_window(n),
+                "judgement_window" => SpectralResidual::new().with_judgement_window(n),
+                _ => SpectralResidual::new().with_batch_size(Some(n)),
+            };
+            let err = super::restore_got(sr.analyze(&data), &negative).expect_err("negative");
+            assert_eq!(
+                err.fields,
+                json!({ "code": "parameter_out_of_range", "parameter": option, "min": min, "got": -1.0 }),
+            );
+            // The same check as a too-small positive count, `got` aside.
+            let small = match option {
+                "batch_size" => SpectralResidual::new().with_batch_size(Some(5)),
+                _ => sr,
+            };
+            let mut expected =
+                super::WireError::from(small.analyze(&data).expect_err("small")).fields;
+            expected["got"] = json!(-1.0);
+            assert_eq!(err.fields, expected);
+        }
+        // A whole count passes through.
+        let mut negative = Vec::new();
+        assert_eq!(
+            super::Whole(3.0)
+                .sr_count("averaging_window", &mut negative)
+                .ok(),
+            Some(3)
+        );
+        assert!(negative.is_empty());
+    }
+
+    #[test]
+    fn a_negative_silhouette_label_is_out_of_range_where_it_sits() {
+        let labels = super::from_json::<Vec<super::Whole>>(json!([0, -1, 1]), "labels")
+            .expect("whole numbers read");
+        assert_eq!(labels[1], super::Whole(-1.0));
+        for (got, index) in [(-1.0, 1), (2.0, 1)] {
+            let given = [super::Whole(0.0), super::Whole(got)];
+            assert_eq!(
+                super::cluster_labels(&given, 2)
+                    .expect_err("outside 0..2")
+                    .fields,
+                json!({
+                    "code": "parameter_out_of_range",
+                    "parameter": "labels",
+                    "index": index,
+                    "min": 0,
+                    "max": 1,
+                    "got": got,
+                })
+            );
+        }
+        assert_eq!(
+            super::cluster_labels(&labels[..1], 1).expect("valid"),
+            vec![0]
+        );
+        let err = super::from_json::<Vec<super::Whole>>(json!([0, 1.5]), "labels")
+            .expect_err("a fraction");
+        assert_eq!(
+            (err.code(), &err.fields["parameter"], &err.fields["index"]),
+            ("malformed_input", &json!("labels"), &json!(1))
+        );
     }
 }
 
