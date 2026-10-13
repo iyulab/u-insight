@@ -39,9 +39,10 @@ use crate::error::{Bound, InsightError};
 pub struct KMeansConfig {
     /// Number of clusters.
     pub k: usize,
-    /// Maximum iterations. Default: 300.
+    /// Maximum iterations, at least 1. Default: 300.
     pub max_iter: usize,
-    /// Convergence tolerance (centroid movement). Default: 1e-6.
+    /// Convergence tolerance (centroid movement), a finite number `>= 0`;
+    /// 0 runs every iteration. Default: 1e-6.
     pub tol: f64,
     /// Number of random restarts (best result kept). Default: 10.
     pub n_init: usize,
@@ -148,6 +149,7 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
 
     InsightError::check_count("k", k, 1)?;
     InsightError::check_count("n_init", config.n_init, 1)?;
+    check_iteration_limits(config.max_iter, config.tol)?;
     if n == 0 {
         return Err(InsightError::empty("data"));
     }
@@ -193,6 +195,15 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
     Ok(number_by_first_appearance(
         best_result.expect("n_init > 0 guarantees at least one result"),
     ))
+}
+
+/// Refuses an iteration budget of none -- no assignment would ever be made --
+/// and a tolerance that is negative or not finite: centroid movement is a
+/// distance, so a negative tolerance never stops the loop early and a NaN one
+/// compares false with every movement.
+fn check_iteration_limits(max_iter: usize, tol: f64) -> Result<(), InsightError> {
+    InsightError::check_count("max_iter", max_iter, 1)?;
+    InsightError::check_range("tol", tol, Bound::Closed(0.0), Bound::Unbounded)
 }
 
 /// Renumbers clusters by first appearance: the cluster of point 0 becomes 0,
@@ -2330,9 +2341,10 @@ pub struct MiniBatchKMeansConfig {
     pub k: usize,
     /// Batch size (number of samples per mini-batch). Default: 100.
     pub batch_size: usize,
-    /// Maximum iterations. Default: 100.
+    /// Maximum iterations, at least 1. Default: 100.
     pub max_iter: usize,
-    /// Convergence tolerance. Default: 1e-4.
+    /// Convergence tolerance (centroid movement), a finite number `>= 0`.
+    /// Default: 1e-4.
     pub tol: f64,
     /// Random seed. Default: Some(42).
     pub seed: Option<u64>,
@@ -2393,6 +2405,7 @@ pub fn mini_batch_kmeans(
     InsightError::check_count("k", k, 1)?;
     // An empty batch would never move a centroid.
     InsightError::check_count("batch_size", config.batch_size, 1)?;
+    check_iteration_limits(config.max_iter, config.tol)?;
     if n == 0 {
         return Err(InsightError::empty("data"));
     }

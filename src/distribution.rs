@@ -27,7 +27,7 @@
 //! assert!(result.normality.ks_test.is_some());
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 
 // ── Configuration ───────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ pub enum BinMethod {
 pub struct DistributionConfig {
     /// Histogram bin method. Default: `FreedmanDiaconis`.
     pub bin_method: BinMethod,
-    /// Significance level for normality tests. Default: 0.05.
+    /// Significance level for normality tests, in (0, 1). Default: 0.05.
     pub significance_level: f64,
     /// Whether to compute ECDF. Default: true.
     pub compute_ecdf: bool,
@@ -193,6 +193,8 @@ pub struct DistributionAnalysis {
 ///
 /// # Errors
 ///
+/// - [`InsightError::ParameterOutOfRange`] if `significance_level` is not in
+///   (0, 1), or a fixed bin count is 0
 /// - [`InsightError::InsufficientData`] if fewer than 2 observations
 /// - [`InsightError::MissingValues`] if data contains NaN
 /// - [`InsightError::DegenerateData`] if data contains infinite values
@@ -217,6 +219,7 @@ pub fn distribution_analysis(
     if let BinMethod::Fixed(bins) = config.bin_method {
         InsightError::check_count("bins", bins, 1)?;
     }
+    check_significance_level("significance_level", config.significance_level)?;
     if n == 0 {
         return Err(InsightError::empty("data"));
     }
@@ -556,7 +559,12 @@ pub struct GrubbsResult {
 ///
 /// # Returns
 ///
-/// `None` if n < 3, data contains non-finite values, or zero variance.
+/// The result, or a refusal:
+/// - [`InsightError::ParameterOutOfRange`] (`alpha`) unless `0 < alpha < 1`
+/// - [`InsightError::InsufficientData`] (`data`) for fewer than 3 values
+/// - [`InsightError::ValueNotFinite`] (`data`, `index`) for a NaN or infinity
+/// - [`InsightError::DegenerateData`] (`data`) when every value is the same:
+///   the statistic divides by the standard deviation
 ///
 /// ```
 /// use u_insight::distribution::grubbs_test;
@@ -566,15 +574,17 @@ pub struct GrubbsResult {
 /// assert_eq!(result.outlier_index, 6);
 /// assert!(result.is_outlier);
 /// ```
-pub fn grubbs_test(data: &[f64], alpha: f64) -> Option<GrubbsResult> {
+pub fn grubbs_test(data: &[f64], alpha: f64) -> Result<GrubbsResult, InsightError> {
+    check_significance_level("alpha", alpha)?;
     let n = data.len();
     if n < 3 {
-        return None;
+        return Err(InsightError::too_few("data", 3, n));
     }
-
-    // Validate data
-    if data.iter().any(|v| !v.is_finite()) {
-        return None;
+    if let Some(index) = data.iter().position(|v| !v.is_finite()) {
+        return Err(InsightError::ValueNotFinite {
+            column: "data".into(),
+            index,
+        });
     }
 
     // Compute mean and std
@@ -583,16 +593,23 @@ pub fn grubbs_test(data: &[f64], alpha: f64) -> Option<GrubbsResult> {
     let std_dev = variance.sqrt();
 
     if std_dev < 1e-15 {
-        return None; // zero variance
+        return Err(InsightError::DegenerateData {
+            parameter: Some("data".into()),
+            reason: "every value is the same: the Grubbs statistic is undefined".into(),
+        });
     }
 
     // Find the point with maximum deviation from mean
-    let (outlier_index, outlier_value) = data.iter().enumerate().max_by(|a, b| {
-        (a.1 - mean)
-            .abs()
-            .partial_cmp(&(b.1 - mean).abs())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })?;
+    let (outlier_index, outlier_value) = data
+        .iter()
+        .enumerate()
+        .max_by(|a, b| {
+            (a.1 - mean)
+                .abs()
+                .partial_cmp(&(b.1 - mean).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .expect("n >= 3 values were checked above");
 
     let statistic = (outlier_value - mean).abs() / std_dev;
 
@@ -604,13 +621,19 @@ pub fn grubbs_test(data: &[f64], alpha: f64) -> Option<GrubbsResult> {
     let t2 = t_val * t_val;
     let critical_value = ((n - 1) as f64 / (n as f64).sqrt()) * (t2 / (df + t2)).sqrt();
 
-    Some(GrubbsResult {
+    Ok(GrubbsResult {
         statistic,
         critical_value,
         outlier_index,
         outlier_value: *outlier_value,
         is_outlier: statistic > critical_value,
     })
+}
+
+/// A significance level is a probability strictly between 0 and 1: at 0
+/// nothing is ever significant, at 1 everything is.
+pub(crate) fn check_significance_level(name: &str, value: f64) -> Result<(), InsightError> {
+    InsightError::check_range(name, value, Bound::Open(0.0), Bound::Open(1.0))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -1028,20 +1051,71 @@ mod tests {
 
     #[test]
     fn grubbs_too_few_points() {
-        assert!(grubbs_test(&[1.0, 2.0], 0.05).is_none());
-        assert!(grubbs_test(&[], 0.05).is_none());
+        assert_eq!(
+            grubbs_test(&[1.0, 2.0], 0.05).unwrap_err(),
+            InsightError::too_few("data", 3, 2)
+        );
+        assert_eq!(
+            grubbs_test(&[], 0.05).unwrap_err(),
+            InsightError::too_few("data", 3, 0)
+        );
     }
 
     #[test]
-    fn grubbs_nan_returns_none() {
+    fn grubbs_nan_is_refused_at_its_index() {
         let data = [1.0, f64::NAN, 3.0];
-        assert!(grubbs_test(&data, 0.05).is_none());
+        assert_eq!(
+            grubbs_test(&data, 0.05).unwrap_err(),
+            InsightError::ValueNotFinite {
+                column: "data".into(),
+                index: 1
+            }
+        );
     }
 
     #[test]
-    fn grubbs_constant_data_returns_none() {
+    fn grubbs_constant_data_is_degenerate() {
         let data = [5.0, 5.0, 5.0, 5.0, 5.0];
-        assert!(grubbs_test(&data, 0.05).is_none());
+        assert!(matches!(
+            grubbs_test(&data, 0.05),
+            Err(InsightError::DegenerateData {
+                parameter: Some(p),
+                ..
+            }) if p == "data"
+        ));
+    }
+
+    /// A significance level is in (0, 1): the ends, and anything past them,
+    /// are refused with that interval -- Grubbs' `alpha` and the normality
+    /// tests' `significance_level` alike.
+    #[test]
+    fn a_significance_level_is_in_the_open_unit_interval() {
+        let data = [1.0, 2.0, 3.0, 4.0, 5.0, 10.0];
+        let series: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        for bad in [0.0, 1.0, -0.5, 1.5] {
+            assert_eq!(
+                grubbs_test(&data, bad).unwrap_err(),
+                InsightError::ParameterOutOfRange {
+                    name: "alpha".into(),
+                    low: Bound::Open(0.0),
+                    high: Bound::Open(1.0),
+                    got: bad,
+                }
+            );
+            let config = DistributionConfig {
+                significance_level: bad,
+                ..DistributionConfig::default()
+            };
+            assert_eq!(
+                distribution_analysis(&series, &config).unwrap_err(),
+                InsightError::ParameterOutOfRange {
+                    name: "significance_level".into(),
+                    low: Bound::Open(0.0),
+                    high: Bound::Open(1.0),
+                    got: bad,
+                }
+            );
+        }
     }
 
     #[test]

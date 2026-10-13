@@ -416,8 +416,14 @@ pub unsafe extern "C" fn insight_profile_column(
         let ctx = unsafe { &*ctx };
         let idx = col_idx as usize;
 
-        if idx >= ctx.column_profiles.len() {
-            return refuse(INSIGHT_ERR_INVALID_INPUT, "column index out of range");
+        let n_columns = ctx.column_profiles.len();
+        if idx >= n_columns {
+            return fail(&InsightError::ParameterOutOfRange {
+                name: "col_idx".into(),
+                low: Bound::Closed(0.0),
+                high: Bound::Closed(n_columns as f64 - 1.0),
+                got: idx as f64,
+            });
         }
 
         let profile = &ctx.column_profiles[idx];
@@ -887,6 +893,10 @@ pub struct CDistributionResult {
 
 /// Runs distribution analysis (normality testing) on a data vector.
 ///
+/// `significance_level` is the level the normality tests are read at, in
+/// (0, 1); outside it the call is refused with `INSIGHT_ERR_INVALID_PARAM`
+/// (`parameter_out_of_range`, `parameter` `significance_level`).
+///
 /// # Safety
 /// - `data` must point to `n` contiguous f64 values.
 /// - `out` must point to a valid `CDistributionResult`.
@@ -1145,6 +1155,11 @@ pub unsafe extern "C" fn insight_isolation_forest(
 // ── LOF FFI ─────────────────────────────────────────────────────────
 
 /// Runs Local Outlier Factor anomaly detection on row-major data.
+///
+/// A point is an anomaly when its LOF score exceeds `threshold`, a finite
+/// number `> 0` (LOF scores are positive; about 1 for a point as dense as its
+/// neighbours). A `threshold` at or below 0, or a `k` of 0, is refused with
+/// `INSIGHT_ERR_INVALID_PARAM` (`parameter_out_of_range`).
 ///
 /// # Safety
 /// - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
@@ -1497,6 +1512,13 @@ pub struct CCramersVResult {
 ///
 /// `table`: flat row-major contingency table (observed frequencies).
 ///
+/// Refusals, each with its `code` and `parameter` in `insight_last_error_json`:
+/// `n_rows` or `n_cols` below 2, or a negative frequency (`table[i]`) →
+/// `INSIGHT_ERR_INVALID_PARAM` (`parameter_out_of_range`); a NaN or infinity →
+/// `INSIGHT_ERR_INVALID_INPUT` (`value_not_finite`, `table`, `index`); a table
+/// with no observations, or a row or column that sums to 0 →
+/// `INSIGHT_ERR_DEGENERATE_DATA` (`degenerate_data`, `table`).
+///
 /// # Safety
 /// `table` must point to `n_rows * n_cols` f64s. `out` must be valid.
 #[no_mangle]
@@ -1516,14 +1538,14 @@ pub unsafe extern "C" fn insight_cramers_v(
         let raw = unsafe { slice::from_raw_parts(table, nr * nc) };
 
         match crate::analysis::cramers_v(raw, nr, nc) {
-            Some(r) => {
+            Ok(r) => {
                 let out_ref = unsafe { &mut *out };
                 out_ref.v = r.v;
                 out_ref.chi_squared = r.chi_squared;
                 out_ref.p_value = r.p_value;
                 INSIGHT_OK
             }
-            None => refuse(INSIGHT_ERR_ANALYSIS_FAILED, "Cramér's V computation failed"),
+            Err(e) => fail(&e),
         }
     });
 
@@ -1562,6 +1584,9 @@ pub struct CAnovaSelectionResult {
 ///
 /// `data`: row-major n_rows × n_features.
 /// `target`: class labels (u32), length n_rows.
+/// `significance_level`: a feature is selected when its p-value is at most
+/// this, in (0, 1); outside it the call is refused with
+/// `INSIGHT_ERR_INVALID_PARAM` (`parameter_out_of_range`).
 ///
 /// # Safety
 /// All pointers must be valid. Caller frees output.
@@ -2598,9 +2623,10 @@ pub unsafe extern "C" fn insight_mann_kendall(
                 }
                 INSIGHT_OK
             }
-            None => fail(&InsightError::degenerate(
-                "Mann-Kendall test undefined (every value tied)",
-            )),
+            None => fail(&InsightError::DegenerateData {
+                parameter: Some("data".into()),
+                reason: "Mann-Kendall test undefined (every value tied)".into(),
+            }),
         }
     });
 
@@ -2641,7 +2667,9 @@ pub struct CKdeResult {
 /// `out`: pointer to a `CKdeResult`.
 ///
 /// Returns 0 on success, negative on error. Caller must free `out` with
-/// `insight_free_kde_result`.
+/// `insight_free_kde_result`. Data whose values are all the same has no
+/// automatic bandwidth: `INSIGHT_ERR_DEGENERATE_DATA` (`degenerate_data`,
+/// `parameter` `data`) for Silverman or Scott; a manual bandwidth still works.
 ///
 /// # Safety
 /// `data` must point to `n` f64s. `out` must be valid.
@@ -2717,9 +2745,10 @@ pub unsafe extern "C" fn insight_kde(
                 }
                 INSIGHT_OK
             }
-            None => fail(&InsightError::degenerate(
-                "every value is the same: an automatic bandwidth is undefined",
-            )),
+            None => fail(&InsightError::DegenerateData {
+                parameter: Some("data".into()),
+                reason: "every value is the same: an automatic bandwidth is undefined".into(),
+            }),
         }
     });
 
@@ -4012,6 +4041,190 @@ mod tests {
         assert!(result.v > 0.9, "V = {}", result.v);
     }
 
+    /// Each reason a table cannot be read reaches C with its code and the
+    /// argument it is about -- not one fieldless "computation failed".
+    #[test]
+    fn ffi_cramers_v_refusals_name_their_reason() {
+        let mut result = CCramersVResult {
+            v: 0.0,
+            chi_squared: 0.0,
+            p_value: 0.0,
+        };
+        let table = [10.0_f64, 20.0];
+        let rc = unsafe { insight_cramers_v(table.as_ptr(), 1, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (
+                &body["code"],
+                &body["parameter"],
+                &body["min"],
+                &body["got"]
+            ),
+            (
+                &serde_json::json!("parameter_out_of_range"),
+                &serde_json::json!("n_rows"),
+                &serde_json::json!(2.0),
+                &serde_json::json!(1.0)
+            )
+        );
+
+        let table = [1.0_f64, 2.0, 0.0, 0.0];
+        let rc = unsafe { insight_cramers_v(table.as_ptr(), 2, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_DEGENERATE_DATA);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"]),
+            (
+                &serde_json::json!("degenerate_data"),
+                &serde_json::json!("table")
+            )
+        );
+
+        let table = [1.0_f64, f64::INFINITY, 1.0, 1.0];
+        let rc = unsafe { insight_cramers_v(table.as_ptr(), 2, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"], &body["index"]),
+            (
+                &serde_json::json!("value_not_finite"),
+                &serde_json::json!("table"),
+                &serde_json::json!(1)
+            )
+        );
+
+        let table = [1.0_f64, -1.0, 1.0, 1.0];
+        let rc = unsafe { insight_cramers_v(table.as_ptr(), 2, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"], &body["min"]),
+            (
+                &serde_json::json!("parameter_out_of_range"),
+                &serde_json::json!("table[1]"),
+                &serde_json::json!(0.0)
+            )
+        );
+    }
+
+    /// The options the C ABI passes to the analysis are refused there with
+    /// their interval: a LOF threshold `> 0`, a significance level in (0, 1).
+    #[test]
+    fn ffi_options_out_of_range_carry_their_interval() {
+        let points: Vec<f64> = (0..20).flat_map(|i| [i as f64, (i % 7) as f64]).collect();
+        let mut anomalies = CAnomalyResult {
+            scores: ptr::null_mut(),
+            anomalies: ptr::null_mut(),
+            n: 0,
+            anomaly_count: 0,
+            threshold: 0.0,
+        };
+        let rc = unsafe { insight_lof(points.as_ptr(), 20, 2, 5, 0.0, &mut anomalies) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(
+            last_error_body().expect("a body"),
+            serde_json::json!({
+                "error": "invalid parameter 'threshold': must be > 0, got 0",
+                "code": "parameter_out_of_range",
+                "parameter": "threshold",
+                "exclusive_min": 0.0,
+                "got": 0.0,
+            })
+        );
+
+        let series: Vec<f64> = (0..30).map(|i| ((i * 37) % 11) as f64).collect();
+        for bad in [0.0, 1.0] {
+            let mut dist = CDistributionResult {
+                n: 0,
+                ks_statistic: 0.0,
+                ks_p_value: 0.0,
+                jb_statistic: 0.0,
+                jb_p_value: 0.0,
+                sw_statistic: 0.0,
+                sw_p_value: 0.0,
+                ad_statistic: 0.0,
+                ad_p_value: 0.0,
+                is_normal: 0,
+            };
+            let rc = unsafe { insight_distribution(series.as_ptr(), 30, bad, &mut dist) };
+            assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+            let body = last_error_body().expect("a body");
+            assert_eq!(
+                (
+                    &body["code"],
+                    &body["parameter"],
+                    &body["exclusive_min"],
+                    &body["exclusive_max"]
+                ),
+                (
+                    &serde_json::json!("parameter_out_of_range"),
+                    &serde_json::json!("significance_level"),
+                    &serde_json::json!(0.0),
+                    &serde_json::json!(1.0)
+                )
+            );
+        }
+
+        let target: Vec<u32> = (0..20).map(|i| (i % 2) as u32).collect();
+        let mut anova = CAnovaSelectionResult {
+            features: ptr::null_mut(),
+            n_features: 0,
+            n_selected: 0,
+        };
+        let rc = unsafe {
+            insight_anova_select(points.as_ptr(), 20, 2, target.as_ptr(), 1.5, &mut anova)
+        };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["parameter"], &body["got"]),
+            (
+                &serde_json::json!("significance_level"),
+                &serde_json::json!(1.5)
+            )
+        );
+    }
+
+    /// A column index past the last column is a range refusal with the
+    /// columns there are.
+    #[test]
+    fn ffi_profile_column_index_out_of_range() {
+        let csv = CString::new("a,b\n1,2\n3,4\n").unwrap();
+        let ctx = unsafe { insight_profile_csv(csv.as_ptr()) };
+        assert!(!ctx.is_null());
+        let mut summary = CColumnSummary {
+            index: 0,
+            valid_count: 0,
+            null_count: 0,
+            data_type: 0,
+            mean: 0.0,
+            std_dev: 0.0,
+            min: 0.0,
+            max: 0.0,
+        };
+        let rc = unsafe { insight_profile_column(ctx, 2, &mut summary) };
+        unsafe { insight_profile_free(ctx) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (
+                &body["code"],
+                &body["parameter"],
+                &body["min"],
+                &body["max"],
+                &body["got"]
+            ),
+            (
+                &serde_json::json!("parameter_out_of_range"),
+                &serde_json::json!("col_idx"),
+                &serde_json::json!(0.0),
+                &serde_json::json!(1.0),
+                &serde_json::json!(2.0)
+            )
+        );
+    }
+
     #[test]
     fn ffi_cramers_v_null() {
         let mut result = CCramersVResult {
@@ -4734,6 +4947,41 @@ mod tests {
         let body = last_error_body().expect("a body");
         assert_eq!(body["code"], "parameter_out_of_range");
         assert_eq!(body["exclusive_min"], 0.0);
+    }
+
+    /// Identical values have no automatic bandwidth, and no trend to test:
+    /// the refusal names the data it is about.
+    #[test]
+    fn ffi_zero_variance_names_the_data() {
+        let data = [3.0_f64; 6];
+        let mut kde = CKdeResult {
+            x: ptr::null_mut(),
+            density: ptr::null_mut(),
+            n_points: 0,
+            bandwidth: 0.0,
+        };
+        let rc = unsafe { insight_kde(data.as_ptr(), 6, INSIGHT_KDE_SILVERMAN, 0.0, 64, &mut kde) };
+        assert_eq!(rc, INSIGHT_ERR_DEGENERATE_DATA);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"]),
+            (
+                &serde_json::json!("degenerate_data"),
+                &serde_json::json!("data")
+            )
+        );
+
+        let mut mk = CMannKendallResult {
+            s_statistic: 0,
+            variance: 0.0,
+            z_statistic: 0.0,
+            p_value: 0.0,
+            kendall_tau: 0.0,
+            sen_slope: 0.0,
+        };
+        let rc = unsafe { insight_mann_kendall(data.as_ptr(), 6, &mut mk) };
+        assert_eq!(rc, INSIGHT_ERR_DEGENERATE_DATA);
+        assert_eq!(last_error_body().expect("a body")["parameter"], "data");
     }
 
     #[test]

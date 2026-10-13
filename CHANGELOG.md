@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Maintained from 0.11.0 onward; earlier entries list release dates only (see git history).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** options that reached the analysis without a check are refused
+  outside the interval their comparison reads, as `parameter_out_of_range`
+  (`InsightError::ParameterOutOfRange`) with the bounds and `got`; a NaN or
+  infinite one is `value_not_finite`. Each value refused now used to give a
+  result that could not mean anything:
+  - LOF `threshold` (WebAssembly `lof`, C ABI `insight_lof`): a finite number
+    `> 0` (`exclusive_min: 0`). LOF scores are positive, so a threshold at or
+    below 0 flagged every point.
+  - `significance_level` of `distribution_analysis` (WebAssembly and
+    `insight_distribution`), of ANOVA feature selection (WebAssembly
+    `feature_importance` `anova`, `insight_anova_select`), and Grubbs' `alpha`:
+    in (0, 1) (`exclusive_min: 0, exclusive_max: 1`).
+  - VIF thresholds — `vif_analysis` `threshold` (WebAssembly `vif_diagnostic`
+    `_threshold`) and `FeatureConfig::vif_threshold`: at least 1 (`min: 1`), the
+    smallest VIF there is.
+  - `FeatureConfig::variance_threshold` (`min: 0`) and
+    `FeatureConfig::correlation_threshold` (`min: 0, max: 1`), and
+    `CorrelationConfig::high_threshold` (`min: 0, max: 1`): a variance is never
+    negative and |r| never leaves [0, 1].
+  - K-Means and mini-batch K-Means `max_iter` (`min: 1`) and `tol` (`min: 0`).
+    No iteration made no assignment at all.
+  - `insight_profile_column` `col_idx` past the last column (`min: 0, max:
+    <columns> - 1`); it was `invalid_input` with no fields.
+- **Breaking:** `analysis::cramers_v` returns `Result<CramersVResult,
+  InsightError>` instead of `Option`, so each reason a table cannot be read is
+  its own refusal: `n_rows` / `n_cols` below 2 (`parameter_out_of_range`,
+  `min: 2`), a negative frequency (`parameter_out_of_range`, `parameter`
+  `table[i]`, `min: 0`), a NaN or infinity (`value_not_finite`, `table`,
+  `index`), a table of the wrong length (`dimension_mismatch`), and a table
+  with no observations or a row or column summing to 0 (`degenerate_data`,
+  `table`). `insight_cramers_v` passes them on; it gave `analysis_failed` with
+  no fields for all of them.
+- **Breaking:** `distribution::grubbs_test` returns `Result<GrubbsResult,
+  InsightError>` instead of `Option`: fewer than 3 values is
+  `insufficient_data` (`data`, `min: 3`), a NaN or infinity `value_not_finite`
+  (`data`, `index`), values that are all the same `degenerate_data` (`data`).
+- The C ABI's zero-variance refusals name their input: `insight_kde` with an
+  automatic bandwidth and `insight_mann_kendall`, on values that are all the
+  same, are `degenerate_data` with `parameter: "data"` (they carried no field).
+
 ## [0.30.0] - 2026-10-13
 
 Depends on u-numflow 0.11 and u-analytics 0.20. The .NET client is `UInsight` 0.30.0.

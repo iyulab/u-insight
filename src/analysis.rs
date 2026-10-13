@@ -23,7 +23,7 @@
 //! assert!(result.high_pairs.len() > 0); // x-z should be highly correlated (negatively)
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 
 // ── Input Validation ──────────────────────────────────────────────────
 
@@ -99,7 +99,8 @@ pub enum CorrelationMethod {
 pub struct CorrelationConfig {
     /// Correlation method. Default: Pearson.
     pub method: CorrelationMethod,
-    /// Threshold for filtering high-correlation pairs. Default: 0.7.
+    /// Threshold for filtering high-correlation pairs: a pair is listed when
+    /// |r| exceeds it, so it lies in [0, 1]. Default: 0.7.
     pub high_threshold: f64,
 }
 
@@ -157,6 +158,7 @@ pub fn correlation_analysis(
     names: &[String],
     config: &CorrelationConfig,
 ) -> Result<CorrelationAnalysis, InsightError> {
+    check_correlation_threshold("high_threshold", config.high_threshold)?;
     if columns.is_empty() {
         return Err(InsightError::empty("data"));
     }
@@ -381,6 +383,8 @@ pub struct VifAnalysis {
 /// `high_vif_columns` exceed `threshold` (typical: 5 moderate, 10 severe).
 ///
 /// # Errors
+/// - [`InsightError::ParameterOutOfRange`] if `threshold` is below 1 or not
+///   finite: a VIF is never below 1, so a lower threshold flags every column
 /// - [`InsightError::DimensionMismatch`] if column lengths differ
 /// - [`InsightError::MissingValues`] if any column contains NaN
 /// - [`InsightError::ValueNotFinite`] if any column contains Inf
@@ -394,6 +398,7 @@ pub fn vif_analysis(
     names: &[String],
     threshold: f64,
 ) -> Result<VifAnalysis, InsightError> {
+    check_vif_threshold("threshold", threshold)?;
     validate_clean_data(columns, names)?;
     let refs: Vec<&[f64]> = columns.iter().map(|c| c.as_slice()).collect();
     let v = u_analytics::regression::vif(&refs).ok_or_else(|| {
@@ -413,6 +418,17 @@ pub fn vif_analysis(
         threshold,
         names: names.to_vec(),
     })
+}
+
+/// A threshold on |r|: in [0, 1], since |r| never leaves it (1 lists no pair).
+pub(crate) fn check_correlation_threshold(name: &str, value: f64) -> Result<(), InsightError> {
+    InsightError::check_range(name, value, Bound::Closed(0.0), Bound::Closed(1.0))
+}
+
+/// A threshold on a variance inflation factor: at least 1, the smallest VIF
+/// there is (`1 / (1 - R²)` with `R²` in [0, 1]).
+pub(crate) fn check_vif_threshold(name: &str, value: f64) -> Result<(), InsightError> {
+    InsightError::check_range(name, value, Bound::Closed(1.0), Bound::Unbounded)
 }
 
 /// Computes the 2-norm condition number of the sample covariance matrix.
@@ -465,9 +481,16 @@ pub struct CramersVResult {
 /// * `n_rows` — Number of rows in the table.
 /// * `n_cols` — Number of columns in the table.
 ///
-/// # Returns
+/// # Errors
 ///
-/// `None` if the table is invalid (< 2 rows/cols, zero total, etc.).
+/// - [`InsightError::ParameterOutOfRange`] if `n_rows` or `n_cols` is below 2,
+///   or an entry of `table` is negative (`parameter` `table[i]`)
+/// - [`InsightError::DimensionMismatch`] if `table` does not hold
+///   `n_rows * n_cols` entries
+/// - [`InsightError::ValueNotFinite`] (`table`, `index`) for a NaN or infinity
+/// - [`InsightError::DegenerateData`] (`table`) if the table holds no
+///   observations, or a whole row or column is 0: its expected frequencies are
+///   0 and the chi-squared statistic divides by them
 ///
 /// ```
 /// use u_insight::analysis::cramers_v;
@@ -477,27 +500,66 @@ pub struct CramersVResult {
 /// let result = cramers_v(&table, 2, 2).unwrap();
 /// assert!(result.v > 0.9);
 /// ```
-pub fn cramers_v(table: &[f64], n_rows: usize, n_cols: usize) -> Option<CramersVResult> {
-    let test = u_analytics::testing::chi_squared_independence(table, n_rows, n_cols)?;
+pub fn cramers_v(
+    table: &[f64],
+    n_rows: usize,
+    n_cols: usize,
+) -> Result<CramersVResult, InsightError> {
+    InsightError::check_count("n_rows", n_rows, 2)?;
+    InsightError::check_count("n_cols", n_cols, 2)?;
+    if table.len() != n_rows * n_cols {
+        return Err(InsightError::DimensionMismatch {
+            expected: n_rows * n_cols,
+            actual: table.len(),
+            index: None,
+        });
+    }
+    for (index, &v) in table.iter().enumerate() {
+        if !v.is_finite() {
+            return Err(InsightError::ValueNotFinite {
+                column: "table".into(),
+                index,
+            });
+        }
+        // A frequency is a count of observations.
+        InsightError::check_range(
+            &format!("table[{index}]"),
+            v,
+            Bound::Closed(0.0),
+            Bound::Unbounded,
+        )?;
+    }
+    let empty_line = |what: &str, i: usize| InsightError::DegenerateData {
+        parameter: Some("table".into()),
+        reason: format!(
+            "{what} {i} of the table sums to 0, so its expected frequencies are 0 and \
+             chi-squared is undefined"
+        ),
+    };
+    if let Some(i) =
+        (0..n_rows).find(|&i| table[i * n_cols..(i + 1) * n_cols].iter().sum::<f64>() <= 0.0)
+    {
+        return Err(empty_line("row", i));
+    }
+    if let Some(j) =
+        (0..n_cols).find(|&j| (0..n_rows).map(|i| table[i * n_cols + j]).sum::<f64>() <= 0.0)
+    {
+        return Err(empty_line("column", j));
+    }
+
+    let test =
+        u_analytics::testing::chi_squared_independence(table, n_rows, n_cols).ok_or_else(|| {
+            InsightError::ComputationFailed {
+                operation: "chi-squared independence test".into(),
+                detail: "refused a table every check above accepted".into(),
+            }
+        })?;
 
     let n: f64 = table.iter().sum();
-    if n <= 0.0 {
-        return None;
-    }
-
     let k = n_rows.min(n_cols);
-    if k < 2 {
-        return None;
-    }
+    let v = (test.statistic / (n * (k - 1) as f64)).sqrt();
 
-    let denom = n * (k - 1) as f64;
-    let v = if denom > 0.0 {
-        (test.statistic / denom).sqrt()
-    } else {
-        0.0
-    };
-
-    Some(CramersVResult {
+    Ok(CramersVResult {
         v,
         chi_squared: test.statistic,
         p_value: test.p_value,
@@ -542,11 +604,13 @@ pub struct AnovaSelectionResult {
 /// * `features` — Column-major numeric feature data. Each inner Vec is one feature.
 /// * `feature_names` — Name for each feature.
 /// * `target` — Categorical target labels (integers). Length must equal feature length.
-/// * `significance_level` — Threshold for selecting features (e.g., 0.05).
+/// * `significance_level` — Threshold for selecting features, in (0, 1)
+///   (e.g., 0.05).
 ///
 /// # Returns
 ///
-/// `Err` if data is empty or dimensions mismatch.
+/// `Err` if `significance_level` is not in (0, 1), data is empty or
+/// dimensions mismatch.
 ///
 /// ```
 /// use u_insight::analysis::anova_feature_selection;
@@ -570,6 +634,7 @@ pub fn anova_feature_selection(
     target: &[usize],
     significance_level: f64,
 ) -> Result<AnovaSelectionResult, InsightError> {
+    crate::distribution::check_significance_level("significance_level", significance_level)?;
     if features.is_empty() {
         return Err(InsightError::empty("features"));
     }
@@ -1260,10 +1325,102 @@ mod tests {
         assert!(result.p_value >= 0.0 && result.p_value <= 1.0);
     }
 
+    /// Every reason the table cannot be read is its own refusal, naming the
+    /// argument -- not one `None` for all of them.
     #[test]
-    fn cramers_v_invalid() {
-        assert!(cramers_v(&[10.0, 20.0], 1, 2).is_none()); // 1 row
-        assert!(cramers_v(&[10.0], 2, 2).is_none()); // wrong size
+    fn cramers_v_says_why_it_refuses() {
+        assert_eq!(
+            cramers_v(&[10.0, 20.0], 1, 2).unwrap_err(),
+            InsightError::ParameterOutOfRange {
+                name: "n_rows".into(),
+                low: Bound::Closed(2.0),
+                high: Bound::Unbounded,
+                got: 1.0,
+            }
+        );
+        assert_eq!(
+            cramers_v(&[10.0], 2, 2).unwrap_err(),
+            InsightError::DimensionMismatch {
+                expected: 4,
+                actual: 1,
+                index: None,
+            }
+        );
+        assert_eq!(
+            cramers_v(&[1.0, f64::NAN, 1.0, 1.0], 2, 2).unwrap_err(),
+            InsightError::ValueNotFinite {
+                column: "table".into(),
+                index: 1,
+            }
+        );
+        assert_eq!(
+            cramers_v(&[1.0, 2.0, -3.0, 1.0], 2, 2).unwrap_err(),
+            InsightError::ParameterOutOfRange {
+                name: "table[2]".into(),
+                low: Bound::Closed(0.0),
+                high: Bound::Unbounded,
+                got: -3.0,
+            }
+        );
+        for (table, line) in [
+            ([0.0, 0.0, 0.0, 0.0], "row 0"),
+            ([1.0, 2.0, 0.0, 0.0], "row 1"),
+            ([0.0, 2.0, 0.0, 1.0], "column 0"),
+        ] {
+            match cramers_v(&table, 2, 2).unwrap_err() {
+                InsightError::DegenerateData {
+                    parameter: Some(p),
+                    reason,
+                } => {
+                    assert_eq!(p, "table");
+                    assert!(reason.starts_with(line), "{reason}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    /// The thresholds and the significance level are refused outside the
+    /// interval their comparison reads: |r| in [0, 1], a VIF at least 1, a
+    /// probability in (0, 1).
+    #[test]
+    fn analysis_options_are_refused_outside_their_interval() {
+        let columns = vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+        ];
+        let names: Vec<String> = vec!["a".into(), "b".into()];
+        for bad in [-0.1, 1.5, f64::NAN] {
+            let config = CorrelationConfig {
+                high_threshold: bad,
+                ..CorrelationConfig::default()
+            };
+            assert!(matches!(
+                correlation_analysis(&columns, &names, &config),
+                Err(InsightError::ParameterOutOfRange { name, low: Bound::Closed(l), high: Bound::Closed(h), .. })
+                    if name == "high_threshold" && l == 0.0 && h == 1.0
+            ));
+        }
+        for bad in [0.5, -1.0, f64::INFINITY] {
+            assert!(matches!(
+                vif_analysis(&columns, &names, bad),
+                Err(InsightError::ParameterOutOfRange { name, low: Bound::Closed(l), high: Bound::Unbounded, .. })
+                    if name == "threshold" && l == 1.0
+            ));
+        }
+        assert!(vif_analysis(&columns, &names, 1.0).is_ok());
+        let target = [0, 0, 0, 1, 1, 1];
+        for bad in [0.0, 1.0, 2.0] {
+            assert_eq!(
+                anova_feature_selection(&columns, &names, &target, bad).unwrap_err(),
+                InsightError::ParameterOutOfRange {
+                    name: "significance_level".into(),
+                    low: Bound::Open(0.0),
+                    high: Bound::Open(1.0),
+                    got: bad,
+                }
+            );
+        }
     }
 
     // ── ANOVA feature selection ─────────────────────────────────

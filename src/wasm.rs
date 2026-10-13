@@ -1907,6 +1907,8 @@ pub fn vif_diagnostic(
         })
         .transpose()?
         .unwrap_or(10.0);
+    // The analysis checks it too; here it is named by the key it came in.
+    crate::analysis::check_vif_threshold("_threshold", threshold).map_err(js_err)?;
 
     if raw.is_empty() {
         return Err(js_err(WireError::empty_input(
@@ -2765,6 +2767,108 @@ mod dto_strictness_tests {
             Some(3)
         );
         assert!(negative.is_empty());
+    }
+
+    /// Options that used to reach the analysis unchecked are refused with the
+    /// interval their comparison reads, as JavaScript sees the refusal:
+    /// `parameter`, the bound on each side it applies to, and `got`.
+    #[test]
+    fn unchecked_options_are_refused_with_their_interval() {
+        use crate::clustering::{kmeans, mini_batch_kmeans, KMeansConfig, MiniBatchKMeansConfig};
+        use crate::distribution::{distribution_analysis, grubbs_test, DistributionConfig};
+        use crate::feature_importance::{feature_analysis, FeatureConfig};
+        use crate::lof::{lof, LofConfig};
+
+        let points: Vec<Vec<f64>> = (0..12).map(|i| vec![i as f64, (i % 5) as f64]).collect();
+        let series: Vec<f64> = (0..20).map(|i| ((i * 7) % 13) as f64).collect();
+        let columns = vec![
+            series.clone(),
+            series.iter().map(|v| v * 0.5 + 1.0).collect(),
+        ];
+        let names: Vec<String> = vec!["a".into(), "b".into()];
+        let fields = |e: crate::error::InsightError| super::WireError::from(e).fields;
+        let features = |config: FeatureConfig| {
+            fields(feature_analysis(&columns, &names, &config).unwrap_err())
+        };
+        let cases: Vec<(serde_json::Value, serde_json::Value)> = vec![
+            (
+                fields(lof(&points, &LofConfig::default().k(3).threshold(0.0)).unwrap_err()),
+                json!({ "parameter": "threshold", "exclusive_min": 0.0, "got": 0.0 }),
+            ),
+            (
+                fields(kmeans(&points, &KMeansConfig::new(2).max_iter(0)).unwrap_err()),
+                json!({ "parameter": "max_iter", "min": 1.0, "got": 0.0 }),
+            ),
+            (
+                fields(kmeans(&points, &KMeansConfig::new(2).tol(-1e-3)).unwrap_err()),
+                json!({ "parameter": "tol", "min": 0.0, "got": -1e-3 }),
+            ),
+            (
+                fields(
+                    mini_batch_kmeans(
+                        &points,
+                        &MiniBatchKMeansConfig {
+                            max_iter: 0,
+                            ..MiniBatchKMeansConfig::new(2)
+                        },
+                    )
+                    .unwrap_err(),
+                ),
+                json!({ "parameter": "max_iter", "min": 1.0, "got": 0.0 }),
+            ),
+            (
+                fields(
+                    distribution_analysis(
+                        &series,
+                        &DistributionConfig {
+                            significance_level: 1.0,
+                            ..DistributionConfig::default()
+                        },
+                    )
+                    .unwrap_err(),
+                ),
+                json!({
+                    "parameter": "significance_level",
+                    "exclusive_min": 0.0,
+                    "exclusive_max": 1.0,
+                    "got": 1.0,
+                }),
+            ),
+            (
+                fields(grubbs_test(&series, 0.0).unwrap_err()),
+                json!({ "parameter": "alpha", "exclusive_min": 0.0, "exclusive_max": 1.0, "got": 0.0 }),
+            ),
+            (
+                features(FeatureConfig::default().variance_threshold(-1.0)),
+                json!({ "parameter": "variance_threshold", "min": 0.0, "got": -1.0 }),
+            ),
+            (
+                features(FeatureConfig::default().correlation_threshold(1.2)),
+                json!({ "parameter": "correlation_threshold", "min": 0.0, "max": 1.0, "got": 1.2 }),
+            ),
+            (
+                features(FeatureConfig::default().vif_threshold(0.5)),
+                json!({ "parameter": "vif_threshold", "min": 1.0, "got": 0.5 }),
+            ),
+            (
+                fields(crate::analysis::check_vif_threshold("_threshold", 0.0).unwrap_err()),
+                json!({ "parameter": "_threshold", "min": 1.0, "got": 0.0 }),
+            ),
+        ];
+        for (got, mut want) in cases {
+            want["code"] = json!("parameter_out_of_range");
+            assert_eq!(got, want);
+        }
+        // A NaN setting is a value that is not finite, not a value out of range.
+        let nan = fields(kmeans(&points, &KMeansConfig::new(2).tol(f64::NAN)).unwrap_err());
+        assert_eq!(
+            nan,
+            json!({ "code": "value_not_finite", "parameter": "tol" })
+        );
+        // The defaults are inside every interval.
+        assert!(lof(&points, &LofConfig::default().k(3)).is_ok());
+        assert!(kmeans(&points, &KMeansConfig::new(2).tol(0.0)).is_ok());
+        assert!(feature_analysis(&columns, &names, &FeatureConfig::default()).is_ok());
     }
 
     #[test]

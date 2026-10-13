@@ -42,7 +42,7 @@
 //! assert!(result.scores[30] > 1.5);
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 
 // ── Configuration ─────────────────────────────────────────────────────
 
@@ -52,8 +52,8 @@ pub struct LofConfig {
     /// Number of nearest neighbors (k). Default: 20.
     /// Also known as MinPts in the original paper.
     pub k: usize,
-    /// LOF threshold for outlier classification. Default: 1.5.
-    /// Points with LOF > threshold are classified as outliers.
+    /// LOF threshold for outlier classification, a finite number `> 0`.
+    /// Default: 1.5. Points with LOF > threshold are classified as outliers.
     pub threshold: f64,
 }
 
@@ -109,12 +109,21 @@ pub struct LofResult {
 /// # Errors
 ///
 /// Returns `InsightError` if:
+/// - `k` is 0, or `threshold` is not a finite number `> 0`
+///   ([`InsightError::ParameterOutOfRange`]): a LOF score is a ratio of
+///   densities, always positive, so a threshold at or below 0 flags every point
 /// - `data` is empty or has fewer than `k + 1` points
 /// - Points have inconsistent dimensions
 /// - Points contain non-finite values
 pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightError> {
     let n = data.len();
     InsightError::check_count("k", config.k, 1)?;
+    InsightError::check_range(
+        "threshold",
+        config.threshold,
+        Bound::Open(0.0),
+        Bound::Unbounded,
+    )?;
     if n == 0 {
         return Err(InsightError::empty("data"));
     }

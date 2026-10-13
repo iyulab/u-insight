@@ -28,7 +28,7 @@
 //! assert_eq!(result.low_variance[0].name, "const");
 //! ```
 
-use crate::error::InsightError;
+use crate::error::{Bound, InsightError};
 use u_numflow::matrix::Matrix;
 
 // ── Configuration ─────────────────────────────────────────────────────
@@ -36,14 +36,14 @@ use u_numflow::matrix::Matrix;
 /// Configuration for feature importance analysis.
 #[derive(Debug, Clone)]
 pub struct FeatureConfig {
-    /// Minimum variance threshold. Features with variance below this
-    /// are flagged as low-variance. Default: 1e-10.
+    /// Minimum variance threshold, a finite number `>= 0`. Features with
+    /// variance below this are flagged as low-variance. Default: 1e-10.
     pub variance_threshold: f64,
-    /// Correlation threshold for flagging highly correlated pairs.
-    /// Default: 0.9.
+    /// Correlation threshold for flagging highly correlated pairs (|r| above
+    /// it), in [0, 1]. Default: 0.9.
     pub correlation_threshold: f64,
-    /// VIF threshold for flagging multicollinearity.
-    /// VIF > threshold indicates problematic collinearity.
+    /// VIF threshold for flagging multicollinearity, at least 1 (the smallest
+    /// VIF there is). VIF > threshold indicates problematic collinearity.
     /// Default: 10.0.
     pub vif_threshold: f64,
 }
@@ -182,6 +182,19 @@ pub fn feature_analysis(
     names: &[String],
     config: &FeatureConfig,
 ) -> Result<FeatureAnalysisResult, InsightError> {
+    // A variance is never negative: a threshold below 0 flags nothing, and
+    // one that is not finite flags everything or nothing.
+    InsightError::check_range(
+        "variance_threshold",
+        config.variance_threshold,
+        Bound::Closed(0.0),
+        Bound::Unbounded,
+    )?;
+    crate::analysis::check_correlation_threshold(
+        "correlation_threshold",
+        config.correlation_threshold,
+    )?;
+    crate::analysis::check_vif_threshold("vif_threshold", config.vif_threshold)?;
     let p = features.len();
     if p == 0 {
         return Err(InsightError::empty("features"));

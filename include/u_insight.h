@@ -1007,6 +1007,10 @@ INSIGHT_API void insight_free_i32_array(int32_t *ptr, uint32_t count);
 /**
  * Runs distribution analysis (normality testing) on a data vector.
  *
+ * `significance_level` is the level the normality tests are read at, in
+ * (0, 1); outside it the call is refused with `INSIGHT_ERR_INVALID_PARAM`
+ * (`parameter_out_of_range`, `parameter` `significance_level`).
+ *
  * # Safety
  * - `data` must point to `n` contiguous f64 values.
  * - `out` must point to a valid `CDistributionResult`.
@@ -1051,6 +1055,11 @@ int32_t insight_isolation_forest(const double *data,
 
 /**
  * Runs Local Outlier Factor anomaly detection on row-major data.
+ *
+ * A point is an anomaly when its LOF score exceeds `threshold`, a finite
+ * number `> 0` (LOF scores are positive; about 1 for a point as dense as its
+ * neighbours). A `threshold` at or below 0, or a `k` of 0, is refused with
+ * `INSIGHT_ERR_INVALID_PARAM` (`parameter_out_of_range`).
  *
  * # Safety
  * - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
@@ -1133,6 +1142,13 @@ int32_t insight_mahalanobis(const double *data,
  *
  * `table`: flat row-major contingency table (observed frequencies).
  *
+ * Refusals, each with its `code` and `parameter` in `insight_last_error_json`:
+ * `n_rows` or `n_cols` below 2, or a negative frequency (`table[i]`) →
+ * `INSIGHT_ERR_INVALID_PARAM` (`parameter_out_of_range`); a NaN or infinity →
+ * `INSIGHT_ERR_INVALID_INPUT` (`value_not_finite`, `table`, `index`); a table
+ * with no observations, or a row or column that sums to 0 →
+ * `INSIGHT_ERR_DEGENERATE_DATA` (`degenerate_data`, `table`).
+ *
  * # Safety
  * `table` must point to `n_rows * n_cols` f64s. `out` must be valid.
  */
@@ -1147,6 +1163,9 @@ int32_t insight_cramers_v(const double *table,
  *
  * `data`: row-major n_rows × n_features.
  * `target`: class labels (u32), length n_rows.
+ * `significance_level`: a feature is selected when its p-value is at most
+ * this, in (0, 1); outside it the call is refused with
+ * `INSIGHT_ERR_INVALID_PARAM` (`parameter_out_of_range`).
  *
  * # Safety
  * All pointers must be valid. Caller frees output.
@@ -1406,7 +1425,9 @@ int32_t insight_mann_kendall(const double *data,
  * `out`: pointer to a `CKdeResult`.
  *
  * Returns 0 on success, negative on error. Caller must free `out` with
- * `insight_free_kde_result`.
+ * `insight_free_kde_result`. Data whose values are all the same has no
+ * automatic bandwidth: `INSIGHT_ERR_DEGENERATE_DATA` (`degenerate_data`,
+ * `parameter` `data`) for Silverman or Scott; a manual bandwidth still works.
  *
  * # Safety
  * `data` must point to `n` f64s. `out` must be valid.
