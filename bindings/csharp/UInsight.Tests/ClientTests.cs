@@ -365,6 +365,9 @@ public class ClientTests : IDisposable
         {
             _client.KMeans(data, k: 0);
         });
-        Assert.True(ex.ErrorCode != 0);
+        Assert.Equal(InsightErrorCategory.InvalidParameter, ex.Category);
+        Assert.Equal("parameter_out_of_range", ex.ErrorCode);
+        Assert.Equal("k", ex.Parameter);
+        Assert.Null(ex.Index);
     }
 }

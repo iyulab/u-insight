@@ -310,7 +310,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 - `Interop/NativeLibrary.cs` — `[LibraryImport]` declarations for the FFI functions the client calls
 - `Interop/NativeStructs.cs` — `[StructLayout]` mappings for the C structs they exchange
 - `InsightClient.cs` — High-level managed API (automatic memory management)
-- `InsightException.cs` — Error code to exception conversion; `Category` classifies the error, `Parameter` names the argument or option an invalid-parameter error is about, and `Reason` / `Details` carry the same `code` and fields as the WebAssembly `Error`
+- `InsightException.cs` — Error code to exception conversion; `Category` classifies the error, `ErrorCode` / `Parameter` / `Index` / `Details` carry the same `code` and fields as the WebAssembly `Error`, and `Status` is the native status
 
 ## Test Status
 
@@ -397,7 +397,8 @@ A refusal throws an `Error` whose `message` is readable text and which carries
 a `code` naming the reason, next to the values behind it — so a program can
 point at what to change without parsing the message. The C ABI reports the same
 `code` and fields from `insight_last_error_json`, and .NET as
-`InsightException.Reason` and `InsightException.Details`:
+`InsightException.ErrorCode` (with `Parameter`, `Index` and the whole body in
+`Details`):
 
 ```js
 import { hierarchical } from '@iyulab/u-insight';

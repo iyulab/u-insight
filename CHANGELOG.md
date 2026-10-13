@@ -8,6 +8,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (.NET `UInsight`):** `InsightException` names its members the way the other
+  .NET bindings' exceptions do — `Status` is the native status (was `ErrorCode`),
+  `ErrorCode` the error body's `code` (was `Reason`), and `Parameter` / `Index`
+  come from the body (`Index` is new; `Category` is unchanged). Migrate: `ex.ErrorCode` → `ex.Status`, `ex.Reason` → `ex.ErrorCode`.
+
 ## [0.31.0] - 2026-10-13
 
 ### Changed
