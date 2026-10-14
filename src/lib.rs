@@ -52,6 +52,8 @@ pub mod error;
 pub mod feature_importance;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
+#[cfg(test)]
+mod header_contract;
 pub mod isolation_forest;
 pub mod json_parser;
 pub mod lof;
@@ -59,8 +61,6 @@ pub mod mahalanobis;
 pub mod pca;
 pub mod profiling;
 mod refusal;
-#[cfg(test)]
-mod header_contract;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
