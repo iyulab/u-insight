@@ -8,6 +8,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-14
+
 ### Fixed
 
 - Building the crate no longer writes `include/u_insight.h` into its own
