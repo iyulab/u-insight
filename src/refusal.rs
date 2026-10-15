@@ -4,6 +4,107 @@ use serde_json::json;
 
 use crate::error::{Bound, InsightError};
 
+/// Every reason the crate's transports refuse with: the stable `code` a
+/// refusal carries, and the fields that can stand beside it. A [`Refusal`] is
+/// built from one of these, so the published list ([`Code::ALL`]) is the list
+/// the crate refuses from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Code {
+    MalformedInput,
+    UnknownOption,
+    MissingOption,
+    InvalidOption,
+    ParameterOutOfRange,
+    InsufficientData,
+    ValueNotFinite,
+    DimensionMismatch,
+    EmptyInput,
+    MissingValues,
+    NotAClassLabel,
+    DegenerateData,
+    ColumnNotFound,
+    ComputationFailed,
+    CsvParse,
+    InvalidInput,
+    Internal,
+}
+
+impl Code {
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
+    pub(crate) const ALL: [Code; 17] = [
+        Code::MalformedInput,
+        Code::UnknownOption,
+        Code::MissingOption,
+        Code::InvalidOption,
+        Code::ParameterOutOfRange,
+        Code::InsufficientData,
+        Code::ValueNotFinite,
+        Code::DimensionMismatch,
+        Code::EmptyInput,
+        Code::MissingValues,
+        Code::NotAClassLabel,
+        Code::DegenerateData,
+        Code::ColumnNotFound,
+        Code::ComputationFailed,
+        Code::CsvParse,
+        Code::InvalidInput,
+        Code::Internal,
+    ];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Code::MalformedInput => "malformed_input",
+            Code::UnknownOption => "unknown_option",
+            Code::MissingOption => "missing_option",
+            Code::InvalidOption => "invalid_option",
+            Code::ParameterOutOfRange => "parameter_out_of_range",
+            Code::InsufficientData => "insufficient_data",
+            Code::ValueNotFinite => "value_not_finite",
+            Code::DimensionMismatch => "dimension_mismatch",
+            Code::EmptyInput => "empty_input",
+            Code::MissingValues => "missing_values",
+            Code::NotAClassLabel => "not_a_class_label",
+            Code::DegenerateData => "degenerate_data",
+            Code::ColumnNotFound => "column_not_found",
+            Code::ComputationFailed => "computation_failed",
+            Code::CsvParse => "csv_parse",
+            Code::InvalidInput => "invalid_input",
+            Code::Internal => "internal",
+        }
+    }
+
+    /// The fields a refusal with this code can carry besides `code`.
+    pub(crate) fn fields(self) -> &'static [&'static str] {
+        match self {
+            Code::MalformedInput => &["parameter", "column", "index"],
+            Code::UnknownOption => &["parameter", "got", "expected"],
+            Code::MissingOption => &["parameter", "expected"],
+            Code::InvalidOption => &["parameter"],
+            Code::ParameterOutOfRange => &[
+                "parameter",
+                "index",
+                "min",
+                "max",
+                "exclusive_min",
+                "exclusive_max",
+                "got",
+            ],
+            Code::InsufficientData => &["parameter", "min", "got"],
+            Code::ValueNotFinite => &["parameter", "index"],
+            Code::DimensionMismatch => &["parameter", "index", "expected", "got"],
+            Code::EmptyInput => &["parameter"],
+            Code::MissingValues => &["column", "count"],
+            Code::NotAClassLabel => &["parameter", "index", "got"],
+            Code::DegenerateData => &["parameter"],
+            Code::ColumnNotFound => &["column"],
+            Code::ComputationFailed => &["operation"],
+            Code::CsvParse => &["line"],
+            Code::InvalidInput => &[],
+            Code::Internal => &[],
+        }
+    }
+}
+
 /// A refusal as both transports report it: readable text, and the fields --
 /// `code` first among them -- a program branches on. WebAssembly copies the
 /// fields onto a JS `Error`; the C ABI returns them, next to `"error"`, from
@@ -15,9 +116,17 @@ pub(crate) struct Refusal {
 }
 
 impl Refusal {
-    pub(crate) fn new(code: &str, message: String, mut extra: serde_json::Value) -> Self {
+    pub(crate) fn new(code: Code, message: String, mut extra: serde_json::Value) -> Self {
+        if let Some(given) = extra.as_object() {
+            debug_assert!(
+                given.keys().all(|k| code.fields().contains(&k.as_str())),
+                "{} refusal with undeclared fields: {:?}",
+                code.name(),
+                given.keys().collect::<Vec<_>>()
+            );
+        }
         let mut fields = serde_json::Map::new();
-        fields.insert("code".into(), json!(code));
+        fields.insert("code".into(), json!(code.name()));
         if let Some(extra) = extra.as_object_mut() {
             fields.append(extra);
         }
@@ -32,7 +141,7 @@ impl Refusal {
     #[cfg(feature = "wasm")]
     pub(crate) fn malformed_input(parameter: &str, message: String) -> Self {
         Self::new(
-            "malformed_input",
+            Code::MalformedInput,
             message,
             json!({ "parameter": parameter }),
         )
@@ -43,7 +152,7 @@ impl Refusal {
     pub(crate) fn unknown_option(parameter: &str, got: &str, expected: &[&str]) -> Self {
         let quoted: Vec<String> = expected.iter().map(|e| format!("{e:?}")).collect();
         Self::new(
-            "unknown_option",
+            Code::UnknownOption,
             format!(
                 "unknown {parameter} {got:?}; expected one of {}",
                 quoted.join(", ")
@@ -56,7 +165,7 @@ impl Refusal {
     #[cfg(feature = "wasm")]
     pub(crate) fn empty_input(parameter: &str, message: &str) -> Self {
         Self::new(
-            "empty_input",
+            Code::EmptyInput,
             message.to_string(),
             json!({ "parameter": parameter }),
         )
@@ -84,7 +193,7 @@ impl Refusal {
     /// A NaN or infinity at `index` of `parameter`.
     pub(crate) fn value_not_finite(parameter: &str, index: usize) -> Self {
         Self::new(
-            "value_not_finite",
+            Code::ValueNotFinite,
             format!("{parameter}[{index}] is not a finite number"),
             json!({ "parameter": parameter, "index": index }),
         )
@@ -109,25 +218,27 @@ impl From<&InsightError> for Refusal {
     fn from(e: &InsightError) -> Self {
         let message = e.to_string();
         let (code, fields) = match e {
-            InsightError::CsvParse { line, .. } => ("csv_parse", json!({ "line": line })),
-            InsightError::JsonParse { .. } => ("malformed_input", json!({ "parameter": "data" })),
+            InsightError::CsvParse { line, .. } => (Code::CsvParse, json!({ "line": line })),
+            InsightError::JsonParse { .. } => {
+                (Code::MalformedInput, json!({ "parameter": "data" }))
+            }
             InsightError::MissingValues { column, count } => (
-                "missing_values",
+                Code::MissingValues,
                 json!({ "column": column, "count": count }),
             ),
             InsightError::EmptyInput { parameter } => {
-                ("empty_input", json!({ "parameter": parameter }))
+                (Code::EmptyInput, json!({ "parameter": parameter }))
             }
             InsightError::InsufficientData {
                 parameter,
                 min_required,
                 actual,
             } => (
-                "insufficient_data",
+                Code::InsufficientData,
                 json!({ "parameter": parameter, "min": min_required, "got": actual }),
             ),
             InsightError::ParameterOutOfRange { name, got, .. } if !got.is_finite() => {
-                ("value_not_finite", json!({ "parameter": name }))
+                (Code::ValueNotFinite, json!({ "parameter": name }))
             }
             InsightError::ParameterOutOfRange {
                 name,
@@ -149,38 +260,38 @@ impl From<&InsightError> for Refusal {
                     }
                 }
                 fields["got"] = json!(got);
-                ("parameter_out_of_range", fields)
+                (Code::ParameterOutOfRange, fields)
             }
             InsightError::InvalidParameter { name, .. } => {
-                ("invalid_option", json!({ "parameter": name }))
+                (Code::InvalidOption, json!({ "parameter": name }))
             }
             InsightError::DegenerateData {
                 parameter: Some(parameter),
                 ..
-            } => ("degenerate_data", json!({ "parameter": parameter })),
-            InsightError::DegenerateData { .. } => ("degenerate_data", json!({})),
+            } => (Code::DegenerateData, json!({ "parameter": parameter })),
+            InsightError::DegenerateData { .. } => (Code::DegenerateData, json!({})),
             InsightError::ComputationFailed { operation, .. } => {
-                ("computation_failed", json!({ "operation": operation }))
+                (Code::ComputationFailed, json!({ "operation": operation }))
             }
             InsightError::ColumnNotFound { name } => {
-                ("column_not_found", json!({ "column": name }))
+                (Code::ColumnNotFound, json!({ "column": name }))
             }
             InsightError::DimensionMismatch {
                 expected,
                 actual,
                 index,
             } => (
-                "dimension_mismatch",
+                Code::DimensionMismatch,
                 match index {
                     Some(i) => json!({ "expected": expected, "got": actual, "index": i }),
                     None => json!({ "expected": expected, "got": actual }),
                 },
             ),
             InsightError::ValueNotFinite { column, index } => (
-                "value_not_finite",
+                Code::ValueNotFinite,
                 json!({ "parameter": column, "index": index }),
             ),
-            InsightError::Io(_) => ("internal", json!({})),
+            InsightError::Io(_) => (Code::Internal, json!({})),
         };
         Refusal::new(code, message, fields)
     }
@@ -214,15 +325,15 @@ impl From<&u_analytics::detection::SpectralResidualError> for Refusal {
                     }
                 }
                 fields["got"] = json!(got);
-                Refusal::new("parameter_out_of_range", message, fields)
+                Refusal::new(Code::ParameterOutOfRange, message, fields)
             }
             E::TooFewObservations { needed, got } => Refusal::new(
-                "insufficient_data",
+                Code::InsufficientData,
                 message,
                 json!({ "parameter": "data", "min": needed, "got": got }),
             ),
             E::ValueNotFinite { index } => Refusal::value_not_finite("data", *index),
-            _ => Refusal::new("invalid_input", message, json!({})),
+            _ => Refusal::new(Code::InvalidInput, message, json!({})),
         }
     }
 }

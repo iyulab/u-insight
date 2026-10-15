@@ -34,7 +34,7 @@ use crate::feature_importance::{feature_analysis, permutation_importance, Featur
 use crate::json_parser::JsonParser;
 use crate::pca::{pca, PcaConfig};
 use crate::profiling::profile_dataframe;
-use crate::refusal::Refusal;
+use crate::refusal::{Code, Refusal};
 
 // ── Error handling ────────────────────────────────────────────────────
 
@@ -62,15 +62,15 @@ thread_local! {
 /// The `code` an `INSIGHT_ERR_*` category carries when nothing more specific
 /// is known about the refusal. Errors from the analyses carry their own
 /// (see [`Refusal`]).
-fn code_name(rc: i32) -> &'static str {
+fn code_name(rc: i32) -> Code {
     match rc {
-        INSIGHT_ERR_NULL_PTR | INSIGHT_ERR_PARSE_FAILED => "malformed_input",
-        INSIGHT_ERR_INVALID_INPUT => "invalid_input",
-        INSIGHT_ERR_INSUFFICIENT_DATA => "insufficient_data",
-        INSIGHT_ERR_INVALID_PARAM => "invalid_option",
-        INSIGHT_ERR_DEGENERATE_DATA => "degenerate_data",
-        INSIGHT_ERR_COMPUTATION_FAILED => "computation_failed",
-        _ => "internal",
+        INSIGHT_ERR_NULL_PTR | INSIGHT_ERR_PARSE_FAILED => Code::MalformedInput,
+        INSIGHT_ERR_INVALID_INPUT => Code::InvalidInput,
+        INSIGHT_ERR_INSUFFICIENT_DATA => Code::InsufficientData,
+        INSIGHT_ERR_INVALID_PARAM => Code::InvalidOption,
+        INSIGHT_ERR_DEGENERATE_DATA => Code::DegenerateData,
+        INSIGHT_ERR_COMPUTATION_FAILED => Code::ComputationFailed,
+        _ => Code::Internal,
     }
 }
 
@@ -141,7 +141,7 @@ fn fail(e: &InsightError) -> i32 {
 /// the function knows, and returns `INSIGHT_ERR_INVALID_PARAM`.
 fn unknown_selector(parameter: &str, got: u32, expected: &[u32], message: String) -> i32 {
     record(Refusal::new(
-        "unknown_option",
+        Code::UnknownOption,
         message,
         serde_json::json!({ "parameter": parameter, "got": got, "expected": expected }),
     ));
@@ -727,7 +727,7 @@ pub unsafe extern "C" fn insight_silhouette(
         let k_usize = k as usize;
         if let Some((index, &bad)) = labels_usize.iter().enumerate().find(|(_, &l)| l >= k_usize) {
             record(Refusal::new(
-                "parameter_out_of_range",
+                Code::ParameterOutOfRange,
                 format!("label {bad} out of range for k={k_usize}"),
                 serde_json::json!({
                     "parameter": "labels",
@@ -1749,7 +1749,7 @@ pub unsafe extern "C" fn insight_hierarchical(
             INSIGHT_LINKAGE_WARD => Linkage::Ward,
             other => {
                 record(Refusal::new(
-                    "unknown_option",
+                    Code::UnknownOption,
                     format!(
                         "linkage must be 0 (single), 1 (complete), 2 (average) or 3 (ward), got {other}"
                     ),
@@ -2380,7 +2380,7 @@ pub unsafe extern "C" fn insight_pelt(
             INSIGHT_PELT_COST_NORMAL => u_analytics::detection::CostFunction::Normal,
             other => {
                 record(Refusal::new(
-                    "unknown_option",
+                    Code::UnknownOption,
                     format!("cost must be 0 (L2) or 1 (Normal), got {other}"),
                     serde_json::json!({ "parameter": "cost", "got": other, "expected": [0, 1] }),
                 ));
@@ -2477,7 +2477,7 @@ pub unsafe extern "C" fn insight_pelt_multi(
             INSIGHT_PELT_COST_NORMAL => u_analytics::detection::CostFunction::Normal,
             other => {
                 record(Refusal::new(
-                    "unknown_option",
+                    Code::UnknownOption,
                     format!("cost must be 0 (L2) or 1 (Normal), got {other}"),
                     serde_json::json!({ "parameter": "cost", "got": other, "expected": [0, 1] }),
                 ));

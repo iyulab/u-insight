@@ -8,6 +8,19 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Added
+
+- `codes()` (WebAssembly): every refusal `code` the package throws, with the
+  fields that can come with it -- `{ refusals: [{ code, fields }], violations:
+  [] }`, the shape every engine package shares -- built from the table the
+  refusals are built from, so a caller that translates codes can check its list
+  against the package's.
+
+### Fixed
+
+- The README lists `csv_parse`, `invalid_input` and `internal`, which the
+  package throws; a test keeps the table and `codes()` equal.
+
 ## [0.32.2] - 2026-10-15
 
 ### Changed

@@ -426,9 +426,19 @@ try {
 | `degenerate_data` | `parameter` where one input is to blame | Constant columns, a singular matrix, … — `correlation_matrix` names a constant column as `data.<column>` (the C ABI by position: `data.1` for the second); in the C ABI, `insight_kde` with an automatic bandwidth and `insight_mann_kendall` on values that are all the same name `data`, and `insight_cramers_v` names `table` for a table with no observations or a row or column that sums to 0 |
 | `column_not_found` | `column` | A column name the data does not have |
 | `computation_failed` | `operation` | A numerical step that did not converge or produced no result |
+| `csv_parse` | `line` | CSV text the C ABI cannot read (`insight_profile_csv`) — `line` is where |
+| `invalid_input` | — | Any other refusal of the input, without a more specific reason |
+| `internal` | — | A fault in this package rather than in the request — please report it |
 | `malformed_input` | `parameter` (and `column`, `index`) | An argument of the wrong shape or type, a non-numeric column entry (`index` is its position), a count with a fraction (`k: 2.5`, "expected a whole number"), or a JSON string |
 
 ### Functions
+
+#### `codes() -> Codes`
+
+Every refusal `code` the functions throw, with the fields that can come with it —
+`{ refusals: [{ code, fields }], violations: [] }` — built from the table the
+refusals come from (the table above explains each), so a caller that translates
+codes can check its list against the package's.
 
 #### `describe(data) -> [ColumnResult]`
 

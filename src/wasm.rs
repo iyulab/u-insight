@@ -41,7 +41,7 @@ use wasm_bindgen::prelude::*;
 
 // ── Refusals ────────────────────────────────────────────────────────
 
-use crate::refusal::Refusal as WireError;
+use crate::refusal::{Code, Refusal as WireError};
 
 impl From<u_analytics::detection::SpectralResidualError> for WireError {
     fn from(e: u_analytics::detection::SpectralResidualError) -> Self {
@@ -236,7 +236,7 @@ fn from_js_with<T: serde::de::DeserializeOwned>(
     }
     if let Some(found) = find_non_finite(&value, param, allow_nan) {
         return Err(js_err(WireError::new(
-            "value_not_finite",
+            Code::ValueNotFinite,
             found.message(),
             found.fields(),
         )));
@@ -257,7 +257,7 @@ fn from_js_with<T: serde::de::DeserializeOwned>(
 fn extract_numeric_array(value: &serde_json::Value, name: &str) -> Result<Vec<f64>, WireError> {
     let arr = value.as_array().ok_or_else(|| {
         WireError::new(
-            "malformed_input",
+            Code::MalformedInput,
             format!("column '{name}' must be a numeric array"),
             json!({ "parameter": "data", "column": name }),
         )
@@ -267,7 +267,7 @@ fn extract_numeric_array(value: &serde_json::Value, name: &str) -> Result<Vec<f6
         .map(|(i, v)| {
             v.as_f64().ok_or_else(|| {
                 WireError::new(
-                    "malformed_input",
+                    Code::MalformedInput,
                     format!("column '{name}' value {i} is not a number: {v}"),
                     json!({ "parameter": "data", "column": name, "index": i }),
                 )
@@ -285,7 +285,7 @@ fn hierarchical_cut(
     match (n_clusters, distance_threshold) {
         // Named by the one that cannot stand beside the other.
         (Some(_), Some(_)) => Err(WireError::new(
-            "invalid_option",
+            Code::InvalidOption,
             "config.distance_threshold cannot be given with config.n_clusters; they are \
              mutually exclusive -- give one"
                 .to_string(),
@@ -294,7 +294,7 @@ fn hierarchical_cut(
         (Some(k), None) => Ok(HierarchicalConfig::with_k(k)),
         (None, Some(t)) => Ok(HierarchicalConfig::with_threshold(t)),
         (None, None) => Err(WireError::new(
-            "missing_option",
+            Code::MissingOption,
             "config must specify either n_clusters or distance_threshold".to_string(),
             json!({ "parameter": "config", "expected": ["n_clusters", "distance_threshold"] }),
         )),
@@ -558,7 +558,7 @@ pub fn describe(
 fn whole(value: f64, parameter: &str, min: usize) -> Result<usize, WireError> {
     if !value.is_finite() {
         return Err(WireError::new(
-            "value_not_finite",
+            Code::ValueNotFinite,
             format!("{parameter} must be a finite number, got {value}"),
             json!({ "parameter": parameter }),
         ));
@@ -677,7 +677,7 @@ fn cluster_labels(labels: &[Whole], k: usize) -> Result<Vec<usize>, WireError> {
                 Ok(label as usize)
             } else {
                 Err(WireError::new(
-                    "parameter_out_of_range",
+                    Code::ParameterOutOfRange,
                     format!("label {label} out of range for k={k}"),
                     json!({
                         "parameter": "labels",
@@ -733,7 +733,7 @@ fn class_labels(target: &[f64]) -> Result<Vec<usize>, WireError> {
                 Ok(v as usize)
             } else {
                 Err(WireError::new(
-                    "not_a_class_label",
+                    Code::NotAClassLabel,
                     format!("target[{index}] is {v}; a class label is a whole number >= 0"),
                     json!({ "parameter": "target", "index": index, "got": v }),
                 ))
@@ -905,7 +905,7 @@ pub fn silhouette(
 
     if labels.len() != data.len() {
         return Err(js_err(WireError::new(
-            "dimension_mismatch",
+            Code::DimensionMismatch,
             format!(
                 "labels length ({}) must match data row count ({})",
                 labels.len(),
@@ -2053,7 +2053,7 @@ pub fn detect_univariate_outliers(
 
     let r = detect_outliers_slice(&req.data, method).ok_or_else(|| {
         js_err(WireError::new(
-            "insufficient_data",
+            Code::InsufficientData,
             format!(
                 "outlier detection needs at least 3 values, got {}",
                 req.data.len()
@@ -2133,7 +2133,7 @@ pub fn estimate_period(
     }
     let r = u_analytics::seasonality::estimate_period(&req.data).ok_or_else(|| {
         js_err(WireError::new(
-            "insufficient_data",
+            Code::InsufficientData,
             "data must have at least 8 observations".to_string(),
             json!({ "parameter": "data", "min": 8, "got": req.data.len() }),
         ))
@@ -2285,6 +2285,58 @@ pub fn spectral_residual(
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
+
+/// A refusal reason: the `code` an `Error` carries and the fields that can
+/// stand beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, tsify::Tsify)]
+#[serde(deny_unknown_fields)]
+struct RefusalCode {
+    code: String,
+    fields: Vec<String>,
+}
+
+/// A violation a checker reports. This package has no checker; the type is
+/// here so every engine's [`Codes`] has one shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, tsify::Tsify)]
+#[serde(deny_unknown_fields)]
+struct ViolationCode {
+    code: String,
+    fields: Vec<String>,
+    checkers: Vec<String>,
+}
+
+/// What this package can answer with besides a result: every refusal
+/// `code`, and no violations -- it has no checker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, tsify::Tsify)]
+#[serde(deny_unknown_fields)]
+struct Codes {
+    refusals: Vec<RefusalCode>,
+    violations: Vec<ViolationCode>,
+}
+
+fn code_catalog() -> Codes {
+    Codes {
+        refusals: Code::ALL
+            .into_iter()
+            .map(|c| RefusalCode {
+                code: c.name().to_string(),
+                fields: c.fields().iter().map(|f| f.to_string()).collect(),
+            })
+            .collect(),
+        violations: vec![],
+    }
+}
+
+/// Every refusal `code` the functions of this package throw, with the fields
+/// that can come with it: `{ refusals: [{ code, fields }], violations: [] }`.
+///
+/// It is built from the table the refusals come from, so a caller that
+/// translates codes can check its list against the package's.
+#[wasm_bindgen(unchecked_return_type = "Codes")]
+pub fn codes() -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(&code_catalog())
+        .map_err(|e| js_err(WireError::malformed_input("result", e.to_string())))
+}
 
 #[cfg(test)]
 mod tests {
@@ -2963,5 +3015,43 @@ mod path_tests {
         assert_eq!(err.fields["code"], "malformed_input");
         assert_eq!(err.fields["parameter"], "data[2]");
         assert_eq!(err.fields["index"], 1);
+    }
+}
+
+#[cfg(test)]
+mod code_catalog_tests {
+    use super::*;
+
+    /// The README's code tables list exactly the published vocabulary, so the
+    /// tables and `codes()` cannot drift apart.
+    #[test]
+    fn the_readme_documents_every_code_and_no_other() {
+        let readme = include_str!("../README.md");
+        let mut documented = std::collections::BTreeSet::new();
+        let mut in_table = false;
+        for line in readme.lines() {
+            if line.starts_with("| `code` |") {
+                in_table = true;
+                continue;
+            }
+            if !line.starts_with('|') {
+                in_table = false;
+                continue;
+            }
+            if in_table && !line.starts_with("|---") {
+                let first = line.split('|').nth(1).expect("a cell");
+                for code in first.split('·') {
+                    documented.insert(code.trim().trim_matches('`').to_string());
+                }
+            }
+        }
+        let catalog = code_catalog();
+        let published: std::collections::BTreeSet<String> = catalog
+            .refusals
+            .iter()
+            .map(|r| r.code.clone())
+            .chain(catalog.violations.iter().map(|v| v.code.clone()))
+            .collect();
+        assert_eq!(documented, published);
     }
 }
