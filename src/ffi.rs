@@ -248,13 +248,15 @@ pub struct CColumnSummary {
     pub null_count: u64,
     /// Column data type: 0=Numeric, 1=Boolean, 2=Categorical, 3=Text.
     pub data_type: u32,
-    /// For numeric columns: mean. NaN for non-numeric.
+    /// For numeric columns: mean. NaN for non-numeric, with no valid values,
+    /// or with an infinite one.
     pub mean: f64,
-    /// For numeric columns: standard deviation. NaN for non-numeric.
+    /// For numeric columns: standard deviation. NaN for non-numeric, below 2
+    /// valid values, or with an infinite one.
     pub std_dev: f64,
-    /// For numeric columns: minimum. NaN for non-numeric.
+    /// For numeric columns: minimum. NaN for non-numeric or with no valid values.
     pub min: f64,
-    /// For numeric columns: maximum. NaN for non-numeric.
+    /// For numeric columns: maximum. NaN for non-numeric or with no valid values.
     pub max: f64,
 }
 
@@ -445,7 +447,14 @@ pub unsafe extern "C" fn insight_profile_column(
         };
 
         let (mean, std_dev, min, max) = match &profile.numeric {
-            Some(np) => (np.mean, np.std_dev, np.min, np.max),
+            // A C struct has no absent value: a statistic the data does
+            // not define is NaN, as for a non-numeric column.
+            Some(np) => (
+                np.mean.unwrap_or(f64::NAN),
+                np.std_dev.unwrap_or(f64::NAN),
+                np.min.unwrap_or(f64::NAN),
+                np.max.unwrap_or(f64::NAN),
+            ),
             None => (f64::NAN, f64::NAN, f64::NAN, f64::NAN),
         };
 

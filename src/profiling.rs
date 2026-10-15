@@ -27,36 +27,45 @@ use std::collections::{HashMap, HashSet};
 // ── Numeric Profile ───────────────────────────────────────────────────
 
 /// Descriptive statistics for a numeric column (computed over valid values only).
+///
+/// A statistic the data does not define is `None` rather than a number: every
+/// one of them on a column with no valid values; the moments (mean, variance,
+/// standard deviation, skewness, kurtosis) when a value is infinite; variance
+/// and standard deviation below 2 values; skewness below 3 values and
+/// kurtosis below 4, and both when the values do not vary.
 #[derive(Debug, Clone)]
 pub struct NumericProfile {
     /// Number of valid (non-null) values.
     pub valid_count: usize,
-    /// Minimum value.
-    pub min: f64,
-    /// Maximum value.
-    pub max: f64,
-    /// Arithmetic mean.
-    pub mean: f64,
-    /// Median (50th percentile).
-    pub median: f64,
-    /// Sample standard deviation.
-    pub std_dev: f64,
-    /// Sample variance.
-    pub variance: f64,
-    /// Skewness (Fisher's definition, bias-corrected G1).
-    pub skewness: f64,
-    /// Excess kurtosis (Fisher's definition, bias-corrected G2).
-    pub kurtosis: f64,
-    /// 5th percentile.
-    pub p5: f64,
-    /// 25th percentile (Q1).
-    pub q1: f64,
-    /// 75th percentile (Q3).
-    pub q3: f64,
-    /// 95th percentile.
-    pub p95: f64,
-    /// Interquartile range (Q3 - Q1).
-    pub iqr: f64,
+    /// Minimum value. `None` with no valid values.
+    pub min: Option<f64>,
+    /// Maximum value. `None` with no valid values.
+    pub max: Option<f64>,
+    /// Arithmetic mean. `None` with no valid values or an infinite one.
+    pub mean: Option<f64>,
+    /// Median (50th percentile). `None` with no valid values.
+    pub median: Option<f64>,
+    /// Sample standard deviation. `None` below 2 values or with an infinite one.
+    pub std_dev: Option<f64>,
+    /// Sample variance. `None` below 2 values or with an infinite one.
+    pub variance: Option<f64>,
+    /// Skewness (Fisher's definition, bias-corrected G1). `None` below 3
+    /// values, with an infinite one, or when the values do not vary.
+    pub skewness: Option<f64>,
+    /// Excess kurtosis (Fisher's definition, bias-corrected G2). `None` below
+    /// 4 values, with an infinite one, or when the values do not vary.
+    pub kurtosis: Option<f64>,
+    /// 5th percentile. `None` with no valid values.
+    pub p5: Option<f64>,
+    /// 25th percentile (Q1). `None` with no valid values.
+    pub q1: Option<f64>,
+    /// 75th percentile (Q3). `None` with no valid values.
+    pub q3: Option<f64>,
+    /// 95th percentile. `None` with no valid values.
+    pub p95: Option<f64>,
+    /// Interquartile range (Q3 - Q1). `None` with no valid values, or when
+    /// both quartiles are the same infinity.
+    pub iqr: Option<f64>,
     /// Count of zero values.
     pub zero_count: usize,
     /// Count of negative values.
@@ -78,8 +87,8 @@ pub struct BooleanProfile {
     pub true_count: usize,
     /// Count of `false` values.
     pub false_count: usize,
-    /// Proportion of `true` among valid values.
-    pub true_ratio: f64,
+    /// Proportion of `true` among valid values. `None` with no valid values.
+    pub true_ratio: Option<f64>,
 }
 
 // ── Categorical Profile ───────────────────────────────────────────────
@@ -93,8 +102,9 @@ pub struct CategoricalProfile {
     pub distinct_count: usize,
     /// Top-N most frequent categories (category, count), sorted by count desc.
     pub top_values: Vec<(String, usize)>,
-    /// Ratio of the most frequent category to valid count.
-    pub mode_ratio: f64,
+    /// Ratio of the most frequent category to valid count. `None` with no
+    /// valid values.
+    pub mode_ratio: Option<f64>,
     /// Whether the column is constant (all same value).
     pub is_constant: bool,
 }
@@ -112,8 +122,8 @@ pub struct TextProfile {
     pub min_length: usize,
     /// Maximum string length among valid values.
     pub max_length: usize,
-    /// Mean string length.
-    pub mean_length: f64,
+    /// Mean string length. `None` with no valid values.
+    pub mean_length: Option<f64>,
     /// Count of empty strings (length 0) among valid values.
     pub empty_count: usize,
 }
@@ -223,19 +233,19 @@ fn profile_numeric(values: &[f64], validity: &crate::dataframe::ValidityBitmap) 
     if valid_count == 0 {
         return NumericProfile {
             valid_count: 0,
-            min: f64::NAN,
-            max: f64::NAN,
-            mean: f64::NAN,
-            median: f64::NAN,
-            std_dev: f64::NAN,
-            variance: f64::NAN,
-            skewness: f64::NAN,
-            kurtosis: f64::NAN,
-            p5: f64::NAN,
-            q1: f64::NAN,
-            q3: f64::NAN,
-            p95: f64::NAN,
-            iqr: f64::NAN,
+            min: None,
+            max: None,
+            mean: None,
+            median: None,
+            std_dev: None,
+            variance: None,
+            skewness: None,
+            kurtosis: None,
+            p5: None,
+            q1: None,
+            q3: None,
+            p95: None,
+            iqr: None,
             zero_count: 0,
             negative_count: 0,
             infinity_count: 0,
@@ -244,20 +254,20 @@ fn profile_numeric(values: &[f64], validity: &crate::dataframe::ValidityBitmap) 
     }
 
     // Use u-numflow stats
-    let mean = u_numflow::stats::mean(&valid).unwrap_or(f64::NAN);
-    let variance = u_numflow::stats::variance(&valid).unwrap_or(f64::NAN);
-    let std_dev = u_numflow::stats::std_dev(&valid).unwrap_or(f64::NAN);
-    let min = u_numflow::stats::min(&valid).unwrap_or(f64::NAN);
-    let max = u_numflow::stats::max(&valid).unwrap_or(f64::NAN);
-    let median = u_numflow::stats::median(&valid).unwrap_or(f64::NAN);
-    let skewness = u_numflow::stats::skewness(&valid).unwrap_or(f64::NAN);
-    let kurtosis = u_numflow::stats::kurtosis(&valid).unwrap_or(f64::NAN);
+    let mean = u_numflow::stats::mean(&valid);
+    let variance = u_numflow::stats::variance(&valid);
+    let std_dev = u_numflow::stats::std_dev(&valid);
+    let min = u_numflow::stats::min(&valid);
+    let max = u_numflow::stats::max(&valid);
+    let median = u_numflow::stats::median(&valid);
+    let skewness = u_numflow::stats::skewness(&valid);
+    let kurtosis = u_numflow::stats::kurtosis(&valid);
 
-    let p5 = u_numflow::stats::quantile(&valid, 0.05).unwrap_or(f64::NAN);
-    let q1 = u_numflow::stats::quantile(&valid, 0.25).unwrap_or(f64::NAN);
-    let q3 = u_numflow::stats::quantile(&valid, 0.75).unwrap_or(f64::NAN);
-    let p95 = u_numflow::stats::quantile(&valid, 0.95).unwrap_or(f64::NAN);
-    let iqr = q3 - q1;
+    let p5 = u_numflow::stats::quantile(&valid, 0.05);
+    let q1 = u_numflow::stats::quantile(&valid, 0.25);
+    let q3 = u_numflow::stats::quantile(&valid, 0.75);
+    let p95 = u_numflow::stats::quantile(&valid, 0.95);
+    let iqr = q3.zip(q1).map(|(q3, q1)| q3 - q1).filter(|d| !d.is_nan());
 
     let zero_count = valid.iter().filter(|&&v| v == 0.0).count();
     let negative_count = valid.iter().filter(|&&v| v < 0.0).count();
@@ -305,11 +315,7 @@ fn profile_boolean(values: &[bool], validity: &crate::dataframe::ValidityBitmap)
     }
 
     let valid_count = true_count + false_count;
-    let true_ratio = if valid_count > 0 {
-        true_count as f64 / valid_count as f64
-    } else {
-        0.0
-    };
+    let true_ratio = (valid_count > 0).then(|| true_count as f64 / valid_count as f64);
 
     BooleanProfile {
         valid_count,
@@ -350,11 +356,7 @@ fn profile_categorical(
         .collect();
 
     let mode_count = freq_vec.first().map_or(0, |&(_, c)| c);
-    let mode_ratio = if valid_count > 0 {
-        mode_count as f64 / valid_count as f64
-    } else {
-        0.0
-    };
+    let mode_ratio = (valid_count > 0).then(|| mode_count as f64 / valid_count as f64);
 
     let is_constant = distinct_count <= 1;
 
@@ -385,11 +387,8 @@ fn profile_text(values: &[String], validity: &crate::dataframe::ValidityBitmap) 
     let distinct_count = distinct.len();
     let min_length = lengths.iter().copied().min().unwrap_or(0);
     let max_length = lengths.iter().copied().max().unwrap_or(0);
-    let mean_length = if valid_count > 0 {
-        lengths.iter().sum::<usize>() as f64 / valid_count as f64
-    } else {
-        0.0
-    };
+    let mean_length =
+        (valid_count > 0).then(|| lengths.iter().sum::<usize>() as f64 / valid_count as f64);
 
     TextProfile {
         valid_count,
@@ -1059,15 +1058,24 @@ pub fn compute_flags(profile: &ColumnProfile, thresholds: &FlagThresholds) -> Ve
     if let Some(np) = &profile.numeric {
         if np.valid_count > 0 && np.distinct_count <= 1 {
             flags.push(DiagnosticFlag::ConstantColumn);
-        } else if np.std_dev.is_finite() && np.std_dev < thresholds.zero_variance_threshold {
+        } else if np
+            .std_dev
+            .is_some_and(|sd| sd < thresholds.zero_variance_threshold)
+        {
             flags.push(DiagnosticFlag::ZeroVariance);
         }
 
-        if np.skewness.is_finite() && np.skewness.abs() > thresholds.extreme_skewness {
+        if np
+            .skewness
+            .is_some_and(|s| s.abs() > thresholds.extreme_skewness)
+        {
             flags.push(DiagnosticFlag::ExtremeSkewness);
         }
 
-        if np.kurtosis.is_finite() && np.kurtosis.abs() > thresholds.extreme_kurtosis {
+        if np
+            .kurtosis
+            .is_some_and(|k| k.abs() > thresholds.extreme_kurtosis)
+        {
             flags.push(DiagnosticFlag::ExtremeKurtosis);
         }
 
@@ -1089,7 +1097,10 @@ pub fn compute_flags(profile: &ColumnProfile, thresholds: &FlagThresholds) -> Ve
             flags.push(DiagnosticFlag::HighCardinality);
         }
 
-        if cp.mode_ratio > thresholds.imbalance_ratio {
+        if cp
+            .mode_ratio
+            .is_some_and(|r| r > thresholds.imbalance_ratio)
+        {
             flags.push(DiagnosticFlag::Imbalanced);
         }
 
@@ -1103,8 +1114,11 @@ pub fn compute_flags(profile: &ColumnProfile, thresholds: &FlagThresholds) -> Ve
             flags.push(DiagnosticFlag::ConstantColumn);
         }
 
-        let ratio = bp.true_ratio.max(1.0 - bp.true_ratio);
-        if ratio > thresholds.imbalance_ratio {
+        // With no valid values there is no balance to judge.
+        if bp
+            .true_ratio
+            .is_some_and(|r| r.max(1.0 - r) > thresholds.imbalance_ratio)
+        {
             flags.push(DiagnosticFlag::Imbalanced);
         }
     }
@@ -1148,10 +1162,10 @@ mod tests {
 
         let np = prof.numeric.expect("numeric profile");
         assert_eq!(np.valid_count, 5);
-        assert_eq!(np.min, 1.0);
-        assert_eq!(np.max, 5.0);
-        assert!((np.mean - 3.0).abs() < 1e-10);
-        assert!((np.median - 3.0).abs() < 1e-10);
+        assert_eq!(np.min, Some(1.0));
+        assert_eq!(np.max, Some(5.0));
+        assert!((np.mean.expect("mean") - 3.0).abs() < 1e-10);
+        assert!((np.median.expect("median") - 3.0).abs() < 1e-10);
         assert_eq!(np.zero_count, 0);
         assert_eq!(np.negative_count, 0);
         assert_eq!(np.distinct_count, 5);
@@ -1172,8 +1186,8 @@ mod tests {
 
         let np = prof.numeric.expect("numeric profile");
         assert_eq!(np.valid_count, 3);
-        assert_eq!(np.min, 10.0);
-        assert_eq!(np.max, 40.0);
+        assert_eq!(np.min, Some(10.0));
+        assert_eq!(np.max, Some(40.0));
     }
 
     #[test]
@@ -1185,7 +1199,9 @@ mod tests {
         let prof = profile_column("x", &col);
         let np = prof.numeric.expect("numeric profile");
         assert_eq!(np.valid_count, 0);
-        assert!(np.mean.is_nan());
+        assert_eq!(np.mean, None);
+        assert_eq!(np.min, None);
+        assert_eq!(np.iqr, None);
     }
 
     #[test]
@@ -1210,10 +1226,10 @@ mod tests {
             validity: ValidityBitmap::all_valid(n),
         };
         let np = profile_column("x", &col).numeric.expect("numeric");
-        assert!((np.q1 - 25.0).abs() < 1.0);
-        assert!((np.median - 50.0).abs() < 1e-10);
-        assert!((np.q3 - 75.0).abs() < 1.0);
-        assert!((np.iqr - 50.0).abs() < 1.0);
+        assert!((np.q1.expect("q1") - 25.0).abs() < 1.0);
+        assert!((np.median.expect("median") - 50.0).abs() < 1e-10);
+        assert!((np.q3.expect("q3") - 75.0).abs() < 1.0);
+        assert!((np.iqr.expect("iqr") - 50.0).abs() < 1.0);
     }
 
     #[test]
@@ -1238,7 +1254,7 @@ mod tests {
         assert_eq!(bp.valid_count, 5);
         assert_eq!(bp.true_count, 3);
         assert_eq!(bp.false_count, 2);
-        assert!((bp.true_ratio - 0.6).abs() < 1e-10);
+        assert!((bp.true_ratio.expect("true_ratio") - 0.6).abs() < 1e-10);
     }
 
     #[test]
@@ -1276,7 +1292,7 @@ mod tests {
         // Top value should be "A" with count 4
         assert_eq!(cp.top_values[0].0, "A");
         assert_eq!(cp.top_values[0].1, 4);
-        assert!((cp.mode_ratio - 4.0 / 7.0).abs() < 1e-10);
+        assert!((cp.mode_ratio.expect("mode_ratio") - 4.0 / 7.0).abs() < 1e-10);
     }
 
     #[test]
@@ -1293,7 +1309,7 @@ mod tests {
             .expect("categorical");
         assert!(cp.is_constant);
         assert_eq!(cp.distinct_count, 1);
-        assert!((cp.mode_ratio - 1.0).abs() < 1e-10);
+        assert!((cp.mode_ratio.expect("mode_ratio") - 1.0).abs() < 1e-10);
     }
 
     #[test]
@@ -1402,7 +1418,7 @@ mod tests {
         };
         let np = profile_column("x", &col).numeric.expect("numeric");
         assert!(
-            np.skewness.abs() < 0.5,
+            np.skewness.expect("skewness").abs() < 0.5,
             "skewness should be near zero for uniform-like data"
         );
     }
@@ -1567,9 +1583,54 @@ mod tests {
         let flags = compute_flags(&prof, &FlagThresholds::default());
         assert!(
             flags.contains(&DiagnosticFlag::ExtremeSkewness),
-            "skewness = {}",
-            prof.numeric.as_ref().unwrap().skewness
+            "skewness = {:?}",
+            prof.numeric.as_ref().expect("numeric").skewness
         );
+    }
+
+    #[test]
+    fn an_all_missing_boolean_column_has_no_ratio_and_no_imbalance() {
+        let col = Column::Boolean {
+            values: vec![false; 4],
+            validity: ValidityBitmap::all_invalid(4),
+        };
+        let prof = profile_column("b", &col);
+        assert_eq!(prof.boolean.as_ref().expect("boolean").true_ratio, None);
+        let flags = compute_flags(&prof, &FlagThresholds::default());
+        assert!(!flags.contains(&DiagnosticFlag::Imbalanced), "{flags:?}");
+    }
+
+    #[test]
+    fn statistics_the_data_does_not_define_are_none() {
+        let numeric = |values: Vec<f64>| {
+            let n = values.len();
+            let col = Column::Numeric {
+                values,
+                validity: ValidityBitmap::all_valid(n),
+            };
+            profile_column("x", &col).numeric.expect("numeric")
+        };
+        // One value: no spread, no shape.
+        let one = numeric(vec![4.0]);
+        assert_eq!(one.mean, Some(4.0));
+        assert_eq!((one.variance, one.std_dev), (None, None));
+        assert_eq!((one.skewness, one.kurtosis), (None, None));
+        // Two and three values: skewness needs 3, kurtosis 4.
+        let two = numeric(vec![1.0, 2.0]);
+        assert!(two.std_dev.is_some());
+        assert_eq!((two.skewness, two.kurtosis), (None, None));
+        let three = numeric(vec![1.0, 2.0, 4.0]);
+        assert!(three.skewness.is_some());
+        assert_eq!(three.kurtosis, None);
+        // Constant values: zero variance, no shape.
+        let constant = numeric(vec![3.0; 5]);
+        assert_eq!(constant.std_dev, Some(0.0));
+        assert_eq!((constant.skewness, constant.kurtosis), (None, None));
+        // An infinite value: the moments are undefined, the order statistics are not.
+        let infinite = numeric(vec![1.0, 2.0, 3.0, f64::INFINITY]);
+        assert_eq!((infinite.mean, infinite.std_dev), (None, None));
+        assert_eq!(infinite.max, Some(f64::INFINITY));
+        assert_eq!(infinite.min, Some(1.0));
     }
 
     #[test]

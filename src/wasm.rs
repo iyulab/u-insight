@@ -327,25 +327,28 @@ export interface VifInput {
 
 // ── Serializable DTOs ─────────────────────────────────────────────────
 
-/// Descriptive statistics for a single numeric column.
+/// Descriptive statistics for a single numeric column. A statistic the data
+/// does not define is `undefined`: every one with no valid values; `std_dev`
+/// and `variance` below 2 values; `skewness` below 3 and `kurtosis` below 4,
+/// and both when the values do not vary.
 #[derive(Serialize, tsify::Tsify)]
 struct NumericStats {
     count: usize,
     null_count: usize,
     missing_pct: f64,
-    min: f64,
-    max: f64,
-    mean: f64,
-    median: f64,
-    std_dev: f64,
-    variance: f64,
-    skewness: f64,
-    kurtosis: f64,
-    q1: f64,
-    q3: f64,
-    iqr: f64,
-    p5: f64,
-    p95: f64,
+    min: Option<f64>,
+    max: Option<f64>,
+    mean: Option<f64>,
+    median: Option<f64>,
+    std_dev: Option<f64>,
+    variance: Option<f64>,
+    skewness: Option<f64>,
+    kurtosis: Option<f64>,
+    q1: Option<f64>,
+    q3: Option<f64>,
+    iqr: Option<f64>,
+    p5: Option<f64>,
+    p95: Option<f64>,
 }
 
 /// Summary statistics for a boolean column.
@@ -356,7 +359,8 @@ struct BoolStats {
     missing_pct: f64,
     true_count: usize,
     false_count: usize,
-    true_ratio: f64,
+    /// `undefined` with no valid values.
+    true_ratio: Option<f64>,
 }
 
 /// Summary statistics for a categorical column.
@@ -367,7 +371,8 @@ struct CatStats {
     missing_pct: f64,
     distinct_count: usize,
     top_values: Vec<(String, usize)>,
-    mode_ratio: f64,
+    /// `undefined` with no valid values.
+    mode_ratio: Option<f64>,
     is_constant: bool,
 }
 
@@ -380,7 +385,8 @@ struct TextStats {
     distinct_count: usize,
     min_length: usize,
     max_length: usize,
-    mean_length: f64,
+    /// `undefined` with no valid values.
+    mean_length: Option<f64>,
     empty_count: usize,
 }
 

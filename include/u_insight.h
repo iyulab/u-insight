@@ -119,19 +119,21 @@ typedef struct CColumnSummary {
    */
   uint32_t data_type;
   /**
-   * For numeric columns: mean. NaN for non-numeric.
+   * For numeric columns: mean. NaN for non-numeric, with no valid values,
+   * or with an infinite one.
    */
   double mean;
   /**
-   * For numeric columns: standard deviation. NaN for non-numeric.
+   * For numeric columns: standard deviation. NaN for non-numeric, below 2
+   * valid values, or with an infinite one.
    */
   double std_dev;
   /**
-   * For numeric columns: minimum. NaN for non-numeric.
+   * For numeric columns: minimum. NaN for non-numeric or with no valid values.
    */
   double min;
   /**
-   * For numeric columns: maximum. NaN for non-numeric.
+   * For numeric columns: maximum. NaN for non-numeric or with no valid values.
    */
   double max;
 } CColumnSummary;

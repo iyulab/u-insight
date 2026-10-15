@@ -54,6 +54,22 @@ public class ClientTests : IDisposable
         Assert.Equal(0u, result.Columns[0].NullCount);
     }
 
+    [Fact]
+    public void ProfileCsv_UndefinedStatisticsAreNull()
+    {
+        // One row: the value column has a mean but no standard deviation;
+        // the text column has neither.
+        var result = _client.ProfileCsv("name,value\nAlice,1.5\n");
+
+        var name = result.Columns[0];
+        Assert.Null(name.Mean);
+        Assert.Null(name.StdDev);
+        var value = result.Columns[1];
+        Assert.Equal(1.5, value.Mean);
+        Assert.Equal(1.5, value.Min);
+        Assert.Null(value.StdDev);
+    }
+
     // ── Clustering ──
 
     [Fact]

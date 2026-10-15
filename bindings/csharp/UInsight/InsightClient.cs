@@ -80,10 +80,10 @@ public sealed class InsightClient : IDisposable
                     ValidCount = native.ValidCount,
                     NullCount = native.NullCount,
                     DataType = dataType,
-                    Mean = native.Mean,
-                    StdDev = native.StdDev,
-                    Min = native.Min,
-                    Max = native.Max
+                    Mean = Defined(native.Mean),
+                    StdDev = Defined(native.StdDev),
+                    Min = Defined(native.Min),
+                    Max = Defined(native.Max)
                 };
             }
 
@@ -1109,6 +1109,9 @@ public sealed class InsightClient : IDisposable
         return (nRows, nCols, flat);
     }
 
+    /// <summary>A statistic the C struct reports as NaN — one the data does not define — as <c>null</c>.</summary>
+    private static double? Defined(double value) => double.IsNaN(value) ? null : value;
+
     private static uint[] CopyU32Array(IntPtr ptr, uint count)
     {
         var result = new uint[count];
@@ -1203,14 +1206,14 @@ public class ColumnSummary
     public ulong NullCount { get; init; }
     /// <summary>Detected data type of the column.</summary>
     public InsightDataType DataType { get; init; }
-    /// <summary>Mean (numeric columns only).</summary>
-    public double Mean { get; init; }
-    /// <summary>Standard deviation (numeric columns only).</summary>
-    public double StdDev { get; init; }
-    /// <summary>Minimum value (numeric columns only).</summary>
-    public double Min { get; init; }
-    /// <summary>Maximum value (numeric columns only).</summary>
-    public double Max { get; init; }
+    /// <summary>Mean — <c>null</c> for a non-numeric column, with no valid values, or with an infinite one.</summary>
+    public double? Mean { get; init; }
+    /// <summary>Sample standard deviation — <c>null</c> for a non-numeric column, below 2 valid values, or with an infinite one.</summary>
+    public double? StdDev { get; init; }
+    /// <summary>Minimum value — <c>null</c> for a non-numeric column or with no valid values.</summary>
+    public double? Min { get; init; }
+    /// <summary>Maximum value — <c>null</c> for a non-numeric column or with no valid values.</summary>
+    public double? Max { get; init; }
 }
 
 /// <summary>K-Means clustering result.</summary>

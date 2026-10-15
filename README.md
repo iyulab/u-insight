@@ -449,6 +449,18 @@ Descriptive statistics per column. Input: column-major `{ "col1": [1,2,3] }`.
 
 **Output:** Array of `{ name, data_type, numeric: { count, min, max, mean, median, std_dev, variance, skewness, kurtosis, q1, q3, iqr, p5, p95, ... } }`.
 
+A statistic the data does not define is `undefined` (declared `number | undefined`), never a number:
+
+| Statistic | `undefined` when |
+|---|---|
+| every one | the column has no valid values |
+| `std_dev`, `variance` | fewer than 2 values |
+| `skewness` | fewer than 3 values, or the values do not vary |
+| `kurtosis` | fewer than 4 values, or the values do not vary |
+
+The same holds for `boolean.true_ratio`, `categorical.mode_ratio` and
+`text.mean_length`: `undefined` when the column has no valid values.
+
 #### `correlation_matrix(data) -> CorrelationResult`
 
 Pearson correlation matrix. Input: column-major `{ "col1": [1,2,3], "col2": [4,5,6] }`.

@@ -24,6 +24,15 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Changed
 
+- **Breaking:** a statistic the data does not define is absent rather than
+  NaN. `NumericProfile`'s statistics are `Option<f64>` in Rust; `describe`'s
+  `numeric` fields are `number | undefined` (they were declared `number` and
+  came back as `NaN` — skewness of two values, standard deviation of one);
+  .NET `ColumnSummary.Mean` / `StdDev` / `Min` / `Max` are `double?`, `null`
+  for a non-numeric column as well. The C struct keeps NaN and documents when.
+  The README lists the conditions. A column with no valid values has no
+  `true_ratio`, `mode_ratio` or `mean_length` either (they were `0`) — an
+  all-missing boolean column is no longer flagged `Imbalanced`.
 - **Breaking:** the option is `quantile` (Rust `MahalanobisConfig::quantile`,
   .NET `Mahalanobis(data, quantile)`, C `insight_mahalanobis(…, quantile, …)`
   and the refusal's `parameter`); `chi2_quantile` named a law no longer used.
