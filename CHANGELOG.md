@@ -10,6 +10,9 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Fixed
 
+- A result the package fails to hand back to JavaScript is refused as
+  `internal`, not as `malformed_input` with `parameter: "result"` — the fault
+  is the package's, not the caller's input.
 - **Mahalanobis outliers are judged against the distance's exact law.** The
   mean and covariance come from the same rows the distances are taken for, so
   a squared distance follows `(n−1)²/n · Beta(p/2, (n−p−1)/2)`, not χ²(p)

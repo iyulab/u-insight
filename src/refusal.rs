@@ -146,6 +146,12 @@ impl Refusal {
         }
     }
 
+    /// The package failed, not the input: a result it could not hand back.
+    #[cfg(feature = "wasm")]
+    pub(crate) fn internal(message: String) -> Self {
+        Self::new(Code::Internal, message, json!({}))
+    }
+
     /// An argument that is not the shape the function takes: a JSON string
     /// instead of a value, a wrong type, a missing or unknown key.
     #[cfg(feature = "wasm")]

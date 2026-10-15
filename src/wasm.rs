@@ -49,10 +49,11 @@ impl From<u_analytics::detection::SpectralResidualError> for WireError {
     }
 }
 
-/// A result that could not be turned into a JavaScript value.
+/// A result that could not be turned into a JavaScript value: the package
+/// failed, not the input.
 impl From<serde_wasm_bindgen::Error> for WireError {
     fn from(e: serde_wasm_bindgen::Error) -> Self {
-        WireError::malformed_input("result", e.to_string())
+        WireError::internal(e.to_string())
     }
 }
 
@@ -2335,7 +2336,7 @@ fn code_catalog() -> Codes {
 #[wasm_bindgen(unchecked_return_type = "Codes")]
 pub fn codes() -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&code_catalog())
-        .map_err(|e| js_err(WireError::malformed_input("result", e.to_string())))
+        .map_err(|e| js_err(WireError::internal(e.to_string())))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
