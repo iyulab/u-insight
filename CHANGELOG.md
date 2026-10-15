@@ -8,6 +8,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-16
+
 ### Added
 
 - `codes()` (WebAssembly): every refusal `code` the package throws, with the

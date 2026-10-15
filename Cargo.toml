@@ -1,6 +1,6 @@
 [package]
 name = "u-insight"
-version = "0.32.2"
+version = "0.33.0"
 rust-version = "1.85"
 edition = "2021"
 authors = ["iyulab"]
@@ -28,8 +28,8 @@ categories = ["algorithms", "science"]
 wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde-wasm-bindgen", "dep:serde", "dep:tsify", "dep:serde_path_to_error"]
 
 [dependencies]
-u-analytics = "0.24"
-u-numflow = "0.12"
+u-analytics = "0.25"
+u-numflow = "0.13"
 serde_json = "1"
 wasm-bindgen = { version = "0.2", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
