@@ -475,14 +475,17 @@ public sealed class InsightClient : IDisposable
     /// Runs Mahalanobis distance outlier detection.
     /// </summary>
     /// <param name="data">Rows are observations, columns are variables.</param>
-    /// <param name="chi2Quantile">
-    /// The probability whose chi-squared quantile (degrees of freedom = number of
-    /// columns) is the outlier threshold. Must lie strictly between 0 and 1.
+    /// <param name="quantile">
+    /// Probability of the threshold's quantile, strictly between 0 and 1. The mean and
+    /// covariance come from the same rows, so a squared distance follows
+    /// (n−1)²/n · Beta(p/2, (n−p−1)/2) exactly — under normality a row is flagged with
+    /// probability 1 − <paramref name="quantile"/>.
     /// </param>
     /// <exception cref="InsightException">
-    /// <paramref name="chi2Quantile"/> is outside (0, 1), or the data cannot be analysed.
+    /// <paramref name="quantile"/> is outside (0, 1), there are fewer than columns + 2 rows,
+    /// or the data cannot be analysed.
     /// </exception>
-    public MahalanobisResult Mahalanobis(double[,] data, double chi2Quantile = 0.975)
+    public MahalanobisResult Mahalanobis(double[,] data, double quantile = 0.975)
     {
         var (nRows, nCols, flat) = Flatten(data);
         var native = new NativeStructs.CMahalanobisResult();
@@ -492,7 +495,7 @@ public sealed class InsightClient : IDisposable
             fixed (double* ptr = flat)
             {
                 Native.ThrowIfFailed(
-                    Native.insight_mahalanobis(ptr, nRows, nCols, chi2Quantile, ref native));
+                    Native.insight_mahalanobis(ptr, nRows, nCols, quantile, ref native));
             }
         }
 

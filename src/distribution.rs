@@ -1118,6 +1118,23 @@ mod tests {
         }
     }
 
+    /// The critical value is Grubbs' own, which already accounts for the mean
+    /// and deviation being estimated from the sample (unlike a χ² or normal
+    /// cut-off): two-sided α = 0.05 gives 2.290 at n = 10 and 2.709 at n = 20
+    /// (NIST/SEMATECH e-Handbook §1.3.5.17 table; Grubbs 1969).
+    #[test]
+    fn grubbs_critical_value_is_the_published_one() {
+        for (n, want) in [(10usize, 2.290), (20, 2.709)] {
+            let data: Vec<f64> = (0..n).map(|i| (i as f64 * 0.37).sin()).collect();
+            let r = grubbs_test(&data, 0.05).unwrap();
+            assert!(
+                (r.critical_value - want).abs() < 1e-3,
+                "n {n}: {}",
+                r.critical_value
+            );
+        }
+    }
+
     #[test]
     fn grubbs_statistic_positive() {
         let data = [1.0, 2.0, 3.0, 4.0, 5.0, 100.0];

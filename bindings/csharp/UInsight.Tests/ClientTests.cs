@@ -221,7 +221,7 @@ public class ClientTests : IDisposable
             { 100, 100 } // outlier
         };
 
-        var result = _client.Mahalanobis(data, chi2Quantile: 0.975);
+        var result = _client.Mahalanobis(data, quantile: 0.975);
 
         Assert.Equal(10, result.Distances.Length);
         Assert.Equal(10, result.Anomalies.Length);

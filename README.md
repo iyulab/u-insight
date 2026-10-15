@@ -279,7 +279,7 @@ JavaScript — which is the one place they are implemented and kept current.
 | Function | Description |
 |----------|-------------|
 | `insight_last_error` | Last error message (thread-local) |
-| `insight_last_error_parameter` | Name of the argument or option the last `INSIGHT_ERR_INVALID_PARAM` is about (`chi2_quantile`, `threshold`, …), or null (thread-local) |
+| `insight_last_error_parameter` | Name of the argument or option the last `INSIGHT_ERR_INVALID_PARAM` is about (`quantile`, `threshold`, …), or null (thread-local) |
 | `insight_last_error_json` | The last refusal as JSON — `{"error", "code", …fields}`, the same `code` and fields as the WebAssembly `Error` (see *Errors* below), or null (thread-local) |
 | `insight_clear_error` | Clear error state |
 | `insight_version` | Library version string |

@@ -47,7 +47,7 @@ public class InsightException : Exception
     /// </summary>
     /// <remarks>
     /// A numeric option outside the interval it takes (<c>k = 0</c>, a
-    /// non-positive DBSCAN <c>epsilon</c>, a <c>chi2_quantile</c> outside (0, 1))
+    /// non-positive DBSCAN <c>epsilon</c>, a Mahalanobis <c>quantile</c> outside (0, 1))
     /// is <c>parameter_out_of_range</c>, with the interval in
     /// <see cref="Details"/>; an option asking for more than the data holds (more
     /// clusters than points) is <c>insufficient_data</c>, with the rows needed as
@@ -58,7 +58,7 @@ public class InsightException : Exception
 
     /// <summary>
     /// The argument or option the refusal is about, as a path into the request
-    /// (<c>chi2_quantile</c>, <c>threshold</c>, <c>batch_size</c>, …) — the body's
+    /// (<c>quantile</c>, <c>threshold</c>, <c>batch_size</c>, …) — the body's
     /// <c>parameter</c>. <c>null</c> when the refusal is not
     /// about one value.
     /// </summary>

@@ -8,6 +8,27 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mahalanobis outliers are judged against the distance's exact law.** The
+  mean and covariance come from the same rows the distances are taken for, so
+  a squared distance follows `(n−1)²/n · Beta(p/2, (n−p−1)/2)`, not χ²(p)
+  (Gnanadesikan & Kettenring 1972; Phase I T²). The χ² threshold flagged far
+  fewer points than its level said (normal data, n = 10, p = 2: 0.02 % of rows
+  against the stated 2.5 % — exactly `P(Beta(1, 3.5) > 7.378/8.1)`), and with few rows it could exceed the largest possible
+  distance, `(n−1)²/n`, so no point could be flagged at all (p = 2, n = 6).
+  `threshold` is now the scaled Beta quantile; it meets χ² as n grows.
+
+### Changed
+
+- **Breaking:** the option is `quantile` (Rust `MahalanobisConfig::quantile`,
+  .NET `Mahalanobis(data, quantile)`, C `insight_mahalanobis(…, quantile, …)`
+  and the refusal's `parameter`); `chi2_quantile` named a law no longer used.
+- **Breaking:** Mahalanobis needs `columns + 2` rows (`insufficient_data`,
+  `min` = p + 2): with `p + 1` every row lies at the same distance and none can
+  stand out. The C entry point's own free-text check for `n > p` is gone; the
+  refusal is the structured one every transport gives.
+
 ## [0.33.0] - 2026-10-16
 
 ### Added

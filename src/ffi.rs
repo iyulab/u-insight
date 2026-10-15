@@ -176,7 +176,7 @@ pub extern "C" fn insight_last_error() -> *const c_char {
 
 /// Returns the name of the parameter the last error is about, or null when it
 /// is not about one. Set together with an `INSIGHT_ERR_INVALID_PARAM` whose
-/// cause is a single named argument or option -- `chi2_quantile`, or a spectral
+/// cause is a single named argument or option -- `quantile`, or a spectral
 /// residual option such as `threshold` or `batch_size` -- so a caller can
 /// branch on it or map it to its own name without reading the message.
 /// The returned string is valid until the next FFI call on this thread.
@@ -1429,10 +1429,12 @@ pub struct CMahalanobisResult {
 
 /// Runs Mahalanobis distance multivariate outlier detection on row-major data.
 ///
-/// `chi2_quantile` is the probability whose chi-squared quantile (with
-/// `n_cols` degrees of freedom) is the outlier threshold, e.g. 0.975. A value
-/// outside (0, 1) is refused with `INSIGHT_ERR_INVALID_PARAM`; it used to be
-/// replaced by 0.975 without notice.
+/// `quantile` is the probability of the threshold's quantile, e.g. 0.975: the
+/// squared distance's exact law when the mean and covariance are estimated
+/// from the same rows is `(n−1)²/n · Beta(p/2, (n−p−1)/2)`, so under normality
+/// a point is flagged with probability `1 − quantile`. A value outside (0, 1)
+/// is refused with `INSIGHT_ERR_INVALID_PARAM`. Fewer than `n_cols + 2` rows
+/// are refused (`insufficient_data`).
 ///
 /// # Safety
 /// - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
@@ -1443,7 +1445,7 @@ pub unsafe extern "C" fn insight_mahalanobis(
     data: *const f64,
     n_rows: u32,
     n_cols: u32,
-    chi2_quantile: f64,
+    quantile: f64,
     out: *mut CMahalanobisResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
@@ -1453,19 +1455,13 @@ pub unsafe extern "C" fn insight_mahalanobis(
 
         let nr = n_rows as usize;
         let nc = n_cols as usize;
-        if nr < nc + 1 {
-            return refuse(
-                INSIGHT_ERR_INVALID_INPUT,
-                "need n > p for Mahalanobis distance",
-            );
-        }
 
         let raw = unsafe { slice::from_raw_parts(data, nr * nc) };
         let points: Vec<Vec<f64>> = (0..nr)
             .map(|i| raw[i * nc..(i + 1) * nc].to_vec())
             .collect();
 
-        let config = crate::mahalanobis::MahalanobisConfig { chi2_quantile };
+        let config = crate::mahalanobis::MahalanobisConfig { quantile };
 
         match crate::mahalanobis::mahalanobis(&points, &config) {
             Ok(r) => {
@@ -4641,14 +4637,14 @@ mod tests {
         };
         let rc = unsafe { insight_mahalanobis(data.as_ptr(), 20, 2, 1.5, &mut out) };
         assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
-        assert_eq!(last_error_parameter().as_deref(), Some("chi2_quantile"));
+        assert_eq!(last_error_parameter().as_deref(), Some("quantile"));
         let body = last_error_body().expect("a body");
         assert_eq!(
             body,
             serde_json::json!({
                 "error": body["error"],
                 "code": "parameter_out_of_range",
-                "parameter": "chi2_quantile",
+                "parameter": "quantile",
                 "exclusive_min": 0.0,
                 "exclusive_max": 1.0,
                 "got": 1.5,

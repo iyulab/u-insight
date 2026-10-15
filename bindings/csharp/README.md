@@ -110,7 +110,7 @@ public sealed class InsightClient : IDisposable
     // Anomaly Detection
     AnomalyResult IsolationForest(double[,] data, uint nEstimators = 100, double contamination = 0.1, ulong seed = 42);
     AnomalyResult Lof(double[,] data, uint k = 20, double threshold = 1.5);
-    MahalanobisResult Mahalanobis(double[,] data, double chi2Quantile = 0.975);
+    MahalanobisResult Mahalanobis(double[,] data, double quantile = 0.975);   // exact Beta threshold
 
     // Statistical Analysis
     CorrelationResult Correlation(double[,] data);

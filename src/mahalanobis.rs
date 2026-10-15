@@ -10,9 +10,26 @@
 //! D²(x) = (x - μ)ᵀ Σ⁻¹ (x - μ)
 //!
 //! where μ is the mean vector and Σ is the covariance matrix.
-//! Under normality, D² follows a χ²(p) distribution.
 //!
-//! Reference: Mahalanobis (1936). "On the generalised distance in statistics."
+//! # Threshold
+//!
+//! μ and Σ are estimated from the same `n` points the distances are taken
+//! for, so a point is never far from a centre it helped place: `D²` is at most
+//! `(n − 1)² / n`, and under normality it follows exactly
+//!
+//! ```text
+//! n · D² / (n − 1)²  ~  Beta(p/2, (n − p − 1)/2)
+//! ```
+//!
+//! — the χ²(p) law holds only for a point outside the estimate (or as
+//! n → ∞). The threshold is that Beta quantile, scaled back. With few rows the
+//! χ² quantile can exceed `(n − 1)²/n` and no point could ever be flagged
+//! (p = 2, n = 6: largest possible D² 4.17, χ²₀.₉₇₅ 7.38).
+//!
+//! References: Mahalanobis (1936), "On the generalised distance in
+//! statistics". Gnanadesikan & Kettenring (1972), *Biometrics* 28, 81–124.
+//! Tracy, Young & Mason (1992), *J. Quality Technology* 24, 88–95 (Phase I T²).
+//! Montgomery, *Introduction to Statistical Quality Control*, ch. 11.
 //!
 //! # Example
 //!
@@ -44,25 +61,24 @@ use u_numflow::matrix::Matrix;
 /// Configuration for Mahalanobis distance outlier detection.
 #[derive(Debug, Clone)]
 pub struct MahalanobisConfig {
-    /// Significance level for the chi-squared threshold. Default: 0.975.
+    /// Probability of the threshold's quantile, in (0, 1). Default: 0.975.
     ///
-    /// Points with CDF(D², df=p) > this value are classified as outliers.
-    /// 0.975 corresponds to a 2.5% false positive rate (upper tail).
-    pub chi2_quantile: f64,
+    /// A point whose distance is above the `quantile` of its exact
+    /// distribution (module docs) is an outlier: under normality each point is
+    /// flagged with probability `1 − quantile` (2.5 % at the default).
+    pub quantile: f64,
 }
 
 impl Default for MahalanobisConfig {
     fn default() -> Self {
-        Self {
-            chi2_quantile: 0.975,
-        }
+        Self { quantile: 0.975 }
     }
 }
 
 impl MahalanobisConfig {
-    /// Sets the chi-squared quantile threshold.
-    pub fn chi2_quantile(mut self, q: f64) -> Self {
-        self.chi2_quantile = q;
+    /// Sets the threshold's quantile.
+    pub fn quantile(mut self, q: f64) -> Self {
+        self.quantile = q;
         self
     }
 }
@@ -76,7 +92,8 @@ pub struct MahalanobisResult {
     pub distances: Vec<f64>,
     /// Binary anomaly labels: true = outlier.
     pub anomalies: Vec<bool>,
-    /// Chi-squared threshold used for classification.
+    /// Threshold on the squared distance: `(n − 1)²/n` times the `quantile`
+    /// of Beta(p/2, (n − p − 1)/2).
     pub threshold: f64,
     /// Number of outliers detected.
     pub outlier_count: usize,
@@ -98,7 +115,8 @@ pub struct MahalanobisResult {
 /// # Errors
 ///
 /// Returns `InsightError` with specific categories:
-/// - [`InsightError::InsufficientData`] — fewer than `p + 1` rows (where p = dimensionality)
+/// - [`InsightError::InsufficientData`] — fewer than `p + 2` rows (where p = dimensionality):
+///   with `p + 1` every point lies at the same distance and none can stand out
 /// - [`InsightError::DimensionMismatch`] — points with inconsistent dimensions
 /// - [`InsightError::DegenerateData`] — non-finite values, near-zero variance columns,
 ///   or singular covariance matrix (likely collinear columns). The `reason` field
@@ -123,12 +141,12 @@ pub fn mahalanobis(
     config: &MahalanobisConfig,
 ) -> Result<MahalanobisResult, InsightError> {
     let n = data.len();
-    // A probability outside (0, 1) has no chi-squared quantile; left unchecked
-    // the threshold is NaN, no distance exceeds it, and the result reports no
+    // A probability outside (0, 1) has no quantile; left unchecked the
+    // threshold is NaN, no distance exceeds it, and the result reports no
     // outliers as if the data had none.
     InsightError::check_range(
-        "chi2_quantile",
-        config.chi2_quantile,
+        "quantile",
+        config.quantile,
         Bound::Open(0.0),
         Bound::Open(1.0),
     )?;
@@ -145,11 +163,12 @@ pub fn mahalanobis(
         });
     }
 
-    // Need at least p+1 observations for a non-singular covariance matrix
-    if n <= p {
-        return Err(InsightError::too_few("data", p + 1, n));
+    // p + 1 rows give a non-singular covariance, but then every point lies at
+    // the same distance, (n − 1)²/n: the Beta law below needs n − p − 1 > 0.
+    if n < p + 2 {
+        return Err(InsightError::too_few("data", p + 2, n));
     }
-    let q = config.chi2_quantile;
+    let q = config.quantile;
 
     // Validate dimensions and values
     for (row_idx, point) in data.iter().enumerate() {
@@ -247,8 +266,20 @@ pub fn mahalanobis(
         distances.push(d2.max(0.0));
     }
 
-    // Compute chi-squared threshold
-    let threshold = u_numflow::special::chi_squared_quantile(q, p as f64);
+    // The exact law of a point's distance from an estimate it helped make.
+    let (nf, pf) = (n as f64, p as f64);
+    let beta = u_numflow::distributions::BetaDistribution::new(pf / 2.0, (nf - pf - 1.0) / 2.0)
+        .map_err(|e| InsightError::ComputationFailed {
+            operation: "threshold distribution".into(),
+            detail: e.to_string(),
+        })?;
+    let b = beta
+        .quantile(q)
+        .ok_or_else(|| InsightError::ComputationFailed {
+            operation: "threshold quantile".into(),
+            detail: format!("no Beta quantile at {q}"),
+        })?;
+    let threshold = (nf - 1.0) * (nf - 1.0) / nf * b;
 
     // Classify outliers
     let anomalies: Vec<bool> = distances.iter().map(|&d| d > threshold).collect();
@@ -493,43 +524,117 @@ mod tests {
         let mut data = make_cluster(&[0.0, 0.0], 30, 1.0);
         data.push(vec![10.0, 10.0]); // moderate outlier
 
-        let strict = mahalanobis(&data, &MahalanobisConfig::default().chi2_quantile(0.99)).unwrap();
-        let lenient =
-            mahalanobis(&data, &MahalanobisConfig::default().chi2_quantile(0.95)).unwrap();
+        let strict = mahalanobis(&data, &MahalanobisConfig::default().quantile(0.99)).unwrap();
+        let lenient = mahalanobis(&data, &MahalanobisConfig::default().quantile(0.95)).unwrap();
 
         // Stricter threshold → fewer outliers (or equal)
         assert!(strict.threshold >= lenient.threshold);
     }
 
-    /// The threshold is the chi-squared quantile to table precision
-    /// (NIST/SEMATECH §1.3.6.7.4), including one and two dimensions, where the
-    /// Wilson-Hilferty approximation this used to rely on was 1.9 % low at
-    /// 0.975 and 3.0 % high at 0.999 -- off in opposite directions, so it
-    /// flagged too many points at one level and too few at the other.
+    /// The threshold is the Beta quantile, scaled: its Beta CDF -- the
+    /// regularized incomplete beta, independent of the quantile search -- is
+    /// the requested probability.
     #[test]
-    fn threshold_is_the_exact_chi_squared_quantile() {
-        let cases = [
-            (1, 0.975, 5.024),
-            (1, 0.999, 10.828),
-            (2, 0.95, 5.991),
-            (2, 0.975, 7.378),
-            (3, 0.975, 9.348),
-            (5, 0.975, 12.833),
-        ];
-        for (dim, q, want) in cases {
-            let data: Vec<Vec<f64>> = (0..40)
+    fn threshold_is_the_scaled_beta_quantile() {
+        for (dim, n, q) in [
+            (1, 12, 0.975),
+            (2, 6, 0.975),
+            (2, 40, 0.95),
+            (3, 25, 0.999),
+            (5, 40, 0.975),
+        ] {
+            let data: Vec<Vec<f64>> = (0..n)
                 .map(|i| {
                     (0..dim)
                         .map(|j| ((i * (j + 3) * 7919) % 101) as f64 / 10.0)
                         .collect()
                 })
                 .collect();
-            let r = mahalanobis(&data, &MahalanobisConfig::default().chi2_quantile(q)).unwrap();
+            let r = mahalanobis(&data, &MahalanobisConfig::default().quantile(q)).unwrap();
+            let (nf, pf) = (n as f64, dim as f64);
+            let x = r.threshold * nf / ((nf - 1.0) * (nf - 1.0));
+            let cdf =
+                u_numflow::special::regularized_incomplete_beta(x, pf / 2.0, (nf - pf - 1.0) / 2.0);
             assert!(
-                (r.threshold - want).abs() < 1e-3,
-                "dim {dim}, q {q}: threshold {} want {want}",
-                r.threshold
+                (cdf - q).abs() < 1e-8,
+                "dim {dim}, n {n}, q {q}: CDF at threshold {cdf}"
             );
+            let bound = (nf - 1.0) * (nf - 1.0) / nf;
+            assert!(
+                r.distances.iter().all(|&d| d <= bound + 1e-9),
+                "D² above (n−1)²/n"
+            );
+        }
+    }
+
+    /// With many rows the estimate is the truth and the law is χ²(p).
+    #[test]
+    fn with_many_rows_the_threshold_meets_chi_squared() {
+        let data: Vec<Vec<f64>> = (0..4000)
+            .map(|i| vec![((i * 7919) % 101) as f64, ((i * 104_729) % 97) as f64])
+            .collect();
+        let r = mahalanobis(&data, &MahalanobisConfig::default()).unwrap();
+        let chi2 = u_numflow::special::chi_squared_quantile(0.975, 2.0);
+        assert!(
+            (r.threshold / chi2 - 1.0).abs() < 0.005,
+            "{} vs {chi2}",
+            r.threshold
+        );
+    }
+
+    /// p = 2, n = 6: the largest possible D² is 25/6 ≈ 4.17, below χ²₀.₉₇₅(2)
+    /// = 7.38 -- the χ² threshold could flag nothing, even a point far off.
+    #[test]
+    fn a_far_point_in_a_small_sample_is_flagged() {
+        let data = vec![
+            vec![1.0, 2.0],
+            vec![1.2, 2.1],
+            vec![0.9, 1.9],
+            vec![1.1, 2.2],
+            vec![1.0, 1.8],
+            vec![9.0, -6.0],
+        ];
+        let r = mahalanobis(&data, &MahalanobisConfig::default()).unwrap();
+        assert!(r.threshold < 25.0 / 6.0);
+        assert!(r.anomalies[5], "{:?} over {}", r.distances, r.threshold);
+        assert_eq!(r.outlier_count, 1);
+    }
+
+    /// Monte Carlo: normal data, n = 10, p = 2, 3000 samples -- each point is
+    /// flagged with probability 1 − quantile = 2.5 % (30 000 points, s.e.
+    /// 0.09 %). The χ² threshold flagged 0.02 % here: D² = 8.1·B with
+    /// B ~ Beta(1, 3.5), and P(B > 7.378/8.1) = 0.089^3.5 ≈ 2.1e-4.
+    #[test]
+    fn under_normality_a_point_is_flagged_at_the_stated_rate() {
+        use u_numflow::distributions::{Normal, Sample};
+        let z = Normal::new(0.0, 1.0).unwrap();
+        let mut rng = u_numflow::random::create_rng(5);
+        let (mut flagged, mut points) = (0, 0);
+        for _ in 0..3000 {
+            let data: Vec<Vec<f64>> = (0..10)
+                .map(|_| {
+                    let a = z.sample(&mut rng);
+                    vec![a, 0.6 * a + 0.8 * z.sample(&mut rng)]
+                })
+                .collect();
+            let r = mahalanobis(&data, &MahalanobisConfig::default()).unwrap();
+            flagged += r.outlier_count;
+            points += 10;
+        }
+        let rate = flagged as f64 / points as f64;
+        assert!((rate - 0.025).abs() < 0.004, "flag rate {rate}");
+    }
+
+    #[test]
+    fn p_plus_one_rows_are_too_few() {
+        let data = vec![vec![1.0, 2.0], vec![2.0, 1.0], vec![0.0, 0.0]];
+        match mahalanobis(&data, &MahalanobisConfig::default()) {
+            Err(InsightError::InsufficientData {
+                min_required,
+                actual,
+                ..
+            }) => assert_eq!((min_required, actual), (4, 3)),
+            other => panic!("{other:?}"),
         }
     }
 
@@ -539,11 +644,11 @@ mod tests {
     fn quantile_outside_the_unit_interval_is_refused() {
         let data = make_cluster(&[0.0, 0.0], 30, 1.0);
         for q in [0.0, 1.0, 1.5, -0.1, f64::NAN] {
-            match mahalanobis(&data, &MahalanobisConfig::default().chi2_quantile(q)) {
+            match mahalanobis(&data, &MahalanobisConfig::default().quantile(q)) {
                 Err(InsightError::ParameterOutOfRange {
                     name, low, high, ..
                 }) => {
-                    assert_eq!(name, "chi2_quantile");
+                    assert_eq!(name, "quantile");
                     assert_eq!((low, high), (Bound::Open(0.0), Bound::Open(1.0)));
                 }
                 other => panic!("q = {q}: {other:?}"),

@@ -822,7 +822,7 @@ INSIGHT_API const char *insight_last_error(void);
 /**
  * Returns the name of the parameter the last error is about, or null when it
  * is not about one. Set together with an `INSIGHT_ERR_INVALID_PARAM` whose
- * cause is a single named argument or option -- `chi2_quantile`, or a spectral
+ * cause is a single named argument or option -- `quantile`, or a spectral
  * residual option such as `threshold` or `batch_size` -- so a caller can
  * branch on it or map it to its own name without reading the message.
  * The returned string is valid until the next FFI call on this thread.
@@ -1120,10 +1120,12 @@ int32_t insight_regression(const double *x,
 /**
  * Runs Mahalanobis distance multivariate outlier detection on row-major data.
  *
- * `chi2_quantile` is the probability whose chi-squared quantile (with
- * `n_cols` degrees of freedom) is the outlier threshold, e.g. 0.975. A value
- * outside (0, 1) is refused with `INSIGHT_ERR_INVALID_PARAM`; it used to be
- * replaced by 0.975 without notice.
+ * `quantile` is the probability of the threshold's quantile, e.g. 0.975: the
+ * squared distance's exact law when the mean and covariance are estimated
+ * from the same rows is `(n−1)²/n · Beta(p/2, (n−p−1)/2)`, so under normality
+ * a point is flagged with probability `1 − quantile`. A value outside (0, 1)
+ * is refused with `INSIGHT_ERR_INVALID_PARAM`. Fewer than `n_cols + 2` rows
+ * are refused (`insufficient_data`).
  *
  * # Safety
  * - `data` must point to `n_rows * n_cols` contiguous f64 values (row-major).
@@ -1134,7 +1136,7 @@ INSIGHT_API
 int32_t insight_mahalanobis(const double *data,
                             uint32_t n_rows,
                             uint32_t n_cols,
-                            double chi2_quantile,
+                            double quantile,
                             struct CMahalanobisResult *out);
 
 /**

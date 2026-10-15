@@ -155,7 +155,7 @@ internal static partial class NativeLibrary
 
     [LibraryImport(LibraryName)]
     public static unsafe partial int insight_mahalanobis(
-        double* data, uint nRows, uint nCols, double chi2Quantile,
+        double* data, uint nRows, uint nCols, double quantile,
         ref NativeStructs.CMahalanobisResult result);
 
     #endregion
