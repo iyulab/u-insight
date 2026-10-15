@@ -8,6 +8,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-10-15
+
+### Changed
+
+- Built on `u-analytics` 0.23. Nothing this crate exposes changes: its control-chart
+  run-test defaults, which changed there, are not part of this crate's surface.
+
 ## [0.32.0] - 2026-10-14
 
 ### Fixed
