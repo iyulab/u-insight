@@ -1195,6 +1195,17 @@ INSIGHT_API void insight_free_anova_features(struct CAnovaFeature *ptr, uint32_t
 INSIGHT_API const char *insight_version(void);
 
 /**
+ * Returns every refusal `code` the library answers with, and the fields
+ * beside each, as JSON: `{"refusals": [{"code", "fields"}], "violations":
+ * []}` -- built from the table the refusals are made from, so a caller that
+ * translates codes can check its list against the library's.
+ *
+ * # Safety
+ * The returned string lives for the life of the process. Do not free it.
+ */
+INSIGHT_API const char *insight_codes(void);
+
+/**
  * Runs hierarchical agglomerative clustering on row-major data.
  *
  * # Parameters

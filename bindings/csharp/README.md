@@ -89,8 +89,9 @@ in the `UAnalytics` package, not here.
 ```csharp
 public sealed class InsightClient : IDisposable
 {
-    // Version
+    // Version · codes
     string GetVersion();
+    Codes GetCodes();   // Codes(Refusals, Violations) — every ErrorCode, with its fields
 
     // Profiling
     ProfileResult ProfileCsv(string csvData);

@@ -438,7 +438,9 @@ try {
 Every refusal `code` the functions throw, with the fields that can come with it —
 `{ refusals: [{ code, fields }], violations: [] }` — built from the table the
 refusals come from (the table above explains each), so a caller that translates
-codes can check its list against the package's.
+codes can check its list against the package's. The C library returns the same JSON
+from `insight_codes()` (a static string — not freed) and the .NET package from
+`InsightClient.GetCodes()`.
 
 #### `describe(data) -> [ColumnResult]`
 

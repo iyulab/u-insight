@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace UInsight.Tests;
@@ -12,6 +14,17 @@ public class ClientTests : IDisposable
     private readonly InsightClient _client = new();
 
     public void Dispose() => _client.Dispose();
+
+    [Fact]
+    public void The_code_catalog_carries_exactly_what_the_library_sent()
+    {
+        var raw = UInsight.Interop.NativeLibrary.GetCodesJson();
+        var codes = _client.GetCodes();
+        var written = JsonSerializer.SerializeToNode(codes, InsightJson.Default.Codes);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(raw), written), $"library: {raw}\nrecord: {written}");
+        Assert.Contains(codes.Refusals, r => r.Code == "insufficient_data" && r.Fields.Contains("min"));
+        Assert.Empty(codes.Violations);
+    }
 
     [Fact]
     public void GetVersion_ReturnsNonEmpty()

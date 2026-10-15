@@ -2284,7 +2284,7 @@ pub fn spectral_residual(
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
+// ── Code catalog ─────────────────────────────────────────────────────
 
 /// A refusal reason: the `code` an `Error` carries and the fields that can
 /// stand beside it.
@@ -2337,6 +2337,8 @@ pub fn codes() -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(&code_catalog())
         .map_err(|e| js_err(WireError::malformed_input("result", e.to_string())))
 }
+
+// ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -3021,6 +3023,13 @@ mod path_tests {
 #[cfg(test)]
 mod code_catalog_tests {
     use super::*;
+
+    /// The C library's catalog (built without serde) is this one, value for value.
+    #[test]
+    fn the_c_catalog_is_the_typed_one() {
+        let typed = serde_json::to_value(code_catalog()).expect("the catalog serializes");
+        assert_eq!(typed, crate::refusal::code_catalog_json());
+    }
 
     /// The README's code tables list exactly the published vocabulary, so the
     /// tables and `codes()` cannot drift apart.

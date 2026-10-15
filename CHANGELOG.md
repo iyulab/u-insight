@@ -14,7 +14,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   fields that can come with it -- `{ refusals: [{ code, fields }], violations:
   [] }`, the shape every engine package shares -- built from the table the
   refusals are built from, so a caller that translates codes can check its list
-  against the package's.
+  against the package's. The same catalog over the C ABI (`insight_codes()`)
+  and in .NET (`InsightClient.GetCodes()` → `Codes(Refusals, Violations)`).
 
 ### Fixed
 

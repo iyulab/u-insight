@@ -4,6 +4,17 @@ use serde_json::json;
 
 use crate::error::{Bound, InsightError};
 
+/// The published vocabulary -- `{"refusals": [{"code", "fields"}],
+/// "violations": []}`, the shape every engine package shares -- from
+/// [`Code::ALL`]. This crate has no checker.
+pub(crate) fn code_catalog_json() -> serde_json::Value {
+    let refusals: Vec<serde_json::Value> = Code::ALL
+        .into_iter()
+        .map(|c| json!({ "code": c.name(), "fields": c.fields() }))
+        .collect();
+    json!({ "refusals": refusals, "violations": [] })
+}
+
 /// Every reason the crate's transports refuse with: the stable `code` a
 /// refusal carries, and the fields that can stand beside it. A [`Refusal`] is
 /// built from one of these, so the published list ([`Code::ALL`]) is the list
@@ -30,7 +41,6 @@ pub(crate) enum Code {
 }
 
 impl Code {
-    #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
     pub(crate) const ALL: [Code; 17] = [
         Code::MalformedInput,
         Code::UnknownOption,

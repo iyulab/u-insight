@@ -35,10 +35,13 @@
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="\" />
 
-
     <!-- Native libraries, one per runtime identifier, placed under runtimes/ by the
          NuGet release workflow; its build matrix is the list of runtimes. -->
     <None Include="runtimes/**/*" Pack="true" PackagePath="runtimes/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="UInsight.Tests" />
   </ItemGroup>
 
 </Project>

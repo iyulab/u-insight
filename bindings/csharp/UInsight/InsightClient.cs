@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Native = UInsight.Interop.NativeLibrary;
 using NativeStructs = UInsight.Interop.NativeStructs;
 
@@ -16,6 +17,17 @@ public sealed class InsightClient : IDisposable
     /// Gets the native library version.
     /// </summary>
     public string GetVersion() => Native.GetVersion();
+
+    /// <summary>
+    /// Every refusal <see cref="InsightException.ErrorCode"/> the library and this client
+    /// raise, with the fields beside each — built from the table the refusals are made from,
+    /// so a caller that translates codes can check its list against the library's. It is the
+    /// library's whole list, so it also names reasons only the WebAssembly package's functions
+    /// raise; this package has no checker, so <see cref="Codes.Violations"/> is empty.
+    /// </summary>
+    public Codes GetCodes() =>
+        JsonSerializer.Deserialize(Native.GetCodesJson(), InsightJson.Default.Codes)
+        ?? throw new InvalidOperationException("The native library returned no code catalog.");
 
     #region Profiling
 

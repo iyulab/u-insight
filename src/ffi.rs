@@ -1678,6 +1678,24 @@ pub extern "C" fn insight_version() -> *const c_char {
     VERSION.as_ptr().cast()
 }
 
+/// Returns every refusal `code` the library answers with, and the fields
+/// beside each, as JSON: `{"refusals": [{"code", "fields"}], "violations":
+/// []}` -- built from the table the refusals are made from, so a caller that
+/// translates codes can check its list against the library's.
+///
+/// # Safety
+/// The returned string lives for the life of the process. Do not free it.
+#[no_mangle]
+pub extern "C" fn insight_codes() -> *const c_char {
+    static CODES: std::sync::OnceLock<std::ffi::CString> = std::sync::OnceLock::new();
+    CODES
+        .get_or_init(|| {
+            std::ffi::CString::new(crate::refusal::code_catalog_json().to_string())
+                .expect("JSON has no interior NUL")
+        })
+        .as_ptr()
+}
+
 // ── Hierarchical Clustering FFI ──────────────────────────────────────
 
 /// C-compatible hierarchical clustering result.
@@ -3075,6 +3093,21 @@ pub unsafe extern "C" fn insight_free_spectral_residual_result(
 mod tests {
     use super::*;
     use std::ffi::CString;
+
+    #[test]
+    fn ffi_codes_are_the_refusal_table() {
+        let s = unsafe { CStr::from_ptr(insight_codes()) }
+            .to_str()
+            .expect("UTF-8");
+        let codes: serde_json::Value = serde_json::from_str(s).expect("a catalog");
+        assert_eq!(codes, crate::refusal::code_catalog_json());
+        let refusals = codes["refusals"].as_array().expect("refusals");
+        assert_eq!(refusals.len(), crate::refusal::Code::ALL.len());
+        assert!(refusals.iter().any(|r| r["code"] == "insufficient_data"));
+        assert_eq!(codes["violations"], serde_json::json!([]));
+        // The same pointer every call: the string lives for the process.
+        assert_eq!(insight_codes(), insight_codes());
+    }
 
     #[test]
     fn ffi_version() {

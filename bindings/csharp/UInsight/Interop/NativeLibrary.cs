@@ -42,6 +42,9 @@ internal static partial class NativeLibrary
     public static partial IntPtr insight_version();
 
     [LibraryImport(LibraryName)]
+    public static partial IntPtr insight_codes();
+
+    [LibraryImport(LibraryName)]
     public static partial IntPtr insight_last_error();
 
     [LibraryImport(LibraryName)]
@@ -283,6 +286,13 @@ internal static partial class NativeLibrary
         var ptr = insight_version();
         return Marshal.PtrToStringUTF8(ptr) ?? "unknown";
     }
+
+    /// <summary>
+    /// Gets the code catalog as the native library returns it (a static string — not freed).
+    /// </summary>
+    public static string GetCodesJson() =>
+        Marshal.PtrToStringUTF8(insight_codes())
+        ?? throw new InvalidOperationException("The native library returned no code catalog.");
 
     /// <summary>
     /// Converts an error code to a descriptive message.
