@@ -8,6 +8,14 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.32.2] - 2026-10-15
+
+### Changed
+
+- Built on `u-analytics` 0.24. Nothing this crate exposes changes: the fields
+  added there (capability and Weibull intervals) are not part of this crate's
+  surface.
+
 ## [0.32.1] - 2026-10-15
 
 ### Changed
