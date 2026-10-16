@@ -2002,7 +2002,9 @@ pub fn condition_number_diagnostic(
 /// `{ method, indices, scores, count, pct, lower_fence, upper_fence, center, spread }`
 ///
 /// `method` aliases: `tukey` → IQR Tukey fences (k=1.5), `three_sigma` →
-/// mean ± 3·σ, `hampel` → robust median ± 3.5·(MAD/0.6745).
+/// mean ± 3·σ. `modified_zscore` fences at median ± 3.5·(MAD/0.6745)
+/// (Iglewicz & Hoaglin), `hampel` at median ± 3·(MAD/0.6745) (the Hampel
+/// identifier).
 #[derive(Deserialize, tsify::Tsify)]
 #[serde(deny_unknown_fields)]
 struct OutlierInputDto {
@@ -2041,7 +2043,8 @@ pub fn detect_univariate_outliers(
     let method = match req.method.as_str() {
         "iqr" | "tukey" => OutlierMethod::Iqr,
         "zscore" | "three_sigma" => OutlierMethod::Zscore,
-        "modified_zscore" | "hampel" => OutlierMethod::ModifiedZscore,
+        "modified_zscore" => OutlierMethod::ModifiedZscore,
+        "hampel" => OutlierMethod::Hampel,
         other => {
             return Err(js_err(WireError::unknown_option(
                 "method",
@@ -2073,6 +2076,7 @@ pub fn detect_univariate_outliers(
         OutlierMethod::Iqr => "iqr",
         OutlierMethod::Zscore => "zscore",
         OutlierMethod::ModifiedZscore => "modified_zscore",
+        OutlierMethod::Hampel => "hampel",
     };
 
     let dto = UnivariateOutlierDto {

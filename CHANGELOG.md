@@ -8,6 +8,20 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking** `OutlierMethod` has a `Hampel` variant (a `match` over it must
+  handle it).
+
+### Fixed
+
+- `detect_univariate_outliers` with `method: "hampel"` is the Hampel
+  identifier — fences at the median ± 3 robust standard deviations
+  (MAD / 0.6745), the identifier's conventional threshold. It was another name
+  for `modified_zscore`, which fences at 3.5. Rust: `OutlierMethod::Hampel`.
+- The README names how auto-K chooses (silhouette) and lists the gap
+  statistic as its own function.
+
 ## [0.34.0] - 2026-10-16
 
 ### Fixed

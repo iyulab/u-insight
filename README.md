@@ -105,7 +105,7 @@ Built on `u-analytics` (statistical algorithms), `u-numflow` (math primitives).
 | Module | Description |
 |--------|-------------|
 | `analysis` | Correlation (Pearson/Spearman), regression (simple/multiple OLS), Cramer's V contingency analysis |
-| `clustering` | K-Means++ (auto-K, Gap Statistic), Mini-Batch K-Means, DBSCAN, Hierarchical Agglomerative (Single/Complete/Average/Ward), HDBSCAN |
+| `clustering` | K-Means++ (auto-K by silhouette), gap statistic (Tibshirani et al. 2001), Mini-Batch K-Means, DBSCAN, Hierarchical Agglomerative (Single/Complete/Average/Ward), HDBSCAN |
 | `distribution` | ECDF, histogram bins (Sturges/Scott/FD), QQ-plot, normality tests (KS, Jarque-Bera, Shapiro-Wilk, Anderson-Darling), Grubbs test, distribution fitting |
 | `pca` | Principal Component Analysis with auto-scaling option |
 | `isolation_forest` | Isolation Forest anomaly detection (Liu et al. 2008) |

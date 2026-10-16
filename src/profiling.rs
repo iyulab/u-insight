@@ -700,6 +700,11 @@ pub enum OutlierMethod {
     /// Outlier if |M_i| > threshold. Default threshold = 3.5.
     /// Reference: Iglewicz & Hoaglin (1993).
     ModifiedZscore,
+    /// Hampel identifier: outlier if |x - median| > 3 · σ̂ with the robust
+    /// scale σ̂ = MAD / 0.6745 (≈ 1.4826 · MAD). The modified z-score's scale
+    /// with the conventional threshold of 3.
+    /// Reference: Davies & Gather (1993); Pearson (2002).
+    Hampel,
 }
 
 /// Result of outlier detection on a numeric column.
@@ -768,7 +773,10 @@ pub fn detect_outliers(col: &Column, method: OutlierMethod) -> Option<OutlierRes
     match method {
         OutlierMethod::Iqr => detect_iqr(&valid, &vals),
         OutlierMethod::Zscore => detect_zscore(&valid, &vals),
-        OutlierMethod::ModifiedZscore => detect_modified_zscore(&valid, &vals),
+        OutlierMethod::ModifiedZscore => {
+            detect_robust(&valid, &vals, OutlierMethod::ModifiedZscore, 3.5)
+        }
+        OutlierMethod::Hampel => detect_robust(&valid, &vals, OutlierMethod::Hampel, 3.0),
     }
 }
 
@@ -806,7 +814,10 @@ pub fn detect_outliers_slice(data: &[f64], method: OutlierMethod) -> Option<Outl
     match method {
         OutlierMethod::Iqr => detect_iqr(&valid, &vals),
         OutlierMethod::Zscore => detect_zscore(&valid, &vals),
-        OutlierMethod::ModifiedZscore => detect_modified_zscore(&valid, &vals),
+        OutlierMethod::ModifiedZscore => {
+            detect_robust(&valid, &vals, OutlierMethod::ModifiedZscore, 3.5)
+        }
+        OutlierMethod::Hampel => detect_robust(&valid, &vals, OutlierMethod::Hampel, 3.0),
     }
 }
 
@@ -903,9 +914,15 @@ fn detect_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<OutlierResult> 
     })
 }
 
-fn detect_modified_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<OutlierResult> {
+/// Median and MAD fences at `threshold` robust standard deviations: the
+/// modified z-score (3.5) and the Hampel identifier (3).
+fn detect_robust(
+    valid: &[(usize, f64)],
+    vals: &[f64],
+    method: OutlierMethod,
+    threshold: f64,
+) -> Option<OutlierResult> {
     let median = u_numflow::stats::median(vals)?;
-    let threshold = 3.5;
 
     // MAD = median(|x_i - median(x)|)
     let mut abs_devs: Vec<f64> = vals.iter().map(|&v| (v - median).abs()).collect();
@@ -914,7 +931,7 @@ fn detect_modified_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<Outlie
 
     if mad < 1e-15 {
         return Some(OutlierResult {
-            method: OutlierMethod::ModifiedZscore,
+            method,
             indices: Vec::new(),
             scores: Vec::new(),
             count: 0,
@@ -948,7 +965,7 @@ fn detect_modified_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<Outlie
 
     let scale = mad / factor;
     Some(OutlierResult {
-        method: OutlierMethod::ModifiedZscore,
+        method,
         indices,
         scores,
         count,
@@ -1869,6 +1886,20 @@ mod tests {
         let scale = r.spread / 0.6745;
         let expected_upper = r.center + 3.5 * scale;
         assert!((r.upper_fence - expected_upper).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hampel_fences_at_three_robust_standard_deviations() {
+        let data: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let r = detect_outliers_slice(&data, OutlierMethod::Hampel).unwrap();
+        let scale = r.spread / 0.6745;
+        assert!((r.upper_fence - (r.center + 3.0 * scale)).abs() < 1e-9);
+        // A point between the two fences is a Hampel outlier only.
+        let mut with = data.clone();
+        with.push(r.center + 3.2 * scale);
+        let h = detect_outliers_slice(&with, OutlierMethod::Hampel).unwrap();
+        let m = detect_outliers_slice(&with, OutlierMethod::ModifiedZscore).unwrap();
+        assert_eq!((h.count, m.count), (1, 0));
     }
 
     #[test]
