@@ -10,6 +10,15 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Added
 
+- `lof` takes `contamination` (the expected outlier fraction, as
+  `isolation_forest` does) in place of `threshold`: the `ceil(n · contamination)`
+  highest scores are outliers and the result's `threshold` is the lowest of
+  them. Giving both is refused (`invalid_option`). Rust:
+  `LofConfig::contamination`. WebAssembly and Rust only — the C ABI's
+  `insight_lof` keeps its signature.
+- `regression` returns `fitted` and `residuals`, one per observation in input
+  order (they were left for the caller to rebuild from the coefficients). Rust:
+  `RegressionAnalysis::fitted`, `RegressionAnalysis::residuals`.
 - `distribution_analysis` says why a normality test has no result:
   `normality.omitted` lists each absent test (`ks_test`, `jarque_bera`,
   `shapiro_wilk`, `anderson_darling`) with `reason` — `too_few_values` (`min`),
@@ -20,8 +29,11 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Changed
 
-- **Breaking** `NormalityAssessment` has an `omitted` field (a struct literal
-  must set it).
+- **Breaking** `NormalityAssessment` has an `omitted` field, `LofConfig` a
+  `contamination` field and `RegressionAnalysis` `fitted` and `residuals` (a
+  struct literal must set them).
+- The WebAssembly `lof` config `threshold` is optional with no default value in
+  the declaration (still 1.5 when neither it nor `contamination` is given).
 
 ## [0.35.0] - 2026-10-16
 

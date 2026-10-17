@@ -273,6 +273,31 @@ pub struct RegressionAnalysis {
     pub vif: Vec<f64>,
     /// F-statistic p-value.
     pub f_p_value: f64,
+    /// Fitted values `ŷᵢ = b₀ + Σⱼ bⱼ·xⱼᵢ`, one per observation, in input order.
+    pub fitted: Vec<f64>,
+    /// Residuals `yᵢ − ŷᵢ`, one per observation, in input order.
+    pub residuals: Vec<f64>,
+}
+
+/// The fitted values of a model with `coefficients` (intercept first) and the
+/// residuals they leave on `target`.
+fn fitted_and_residuals(
+    predictors: &[Vec<f64>],
+    coefficients: &[f64],
+    target: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let fitted: Vec<f64> = (0..target.len())
+        .map(|i| {
+            coefficients[0]
+                + predictors
+                    .iter()
+                    .zip(&coefficients[1..])
+                    .map(|(column, b)| b * column[i])
+                    .sum::<f64>()
+        })
+        .collect();
+    let residuals = target.iter().zip(&fitted).map(|(y, f)| y - f).collect();
+    (fitted, residuals)
 }
 
 /// Performs regression analysis (simple or multiple OLS).
@@ -328,15 +353,19 @@ pub fn regression_analysis(
                 detail: "computation returned None (possible degenerate data)".into(),
             })?;
 
+        let coefficients = vec![result.intercept, result.slope];
+        let (fitted, residuals) = fitted_and_residuals(predictors, &coefficients, target);
         Ok(RegressionAnalysis {
             target_name: target_name.to_string(),
             predictor_names: predictor_names.to_vec(),
             r_squared: result.r_squared,
             adj_r_squared: result.adjusted_r_squared,
-            coefficients: vec![result.intercept, result.slope],
+            coefficients,
             p_values: vec![result.intercept_p, result.slope_p],
             vif: Vec::new(),
             f_p_value: result.f_p_value,
+            fitted,
+            residuals,
         })
     } else {
         // Multiple linear regression
@@ -348,6 +377,7 @@ pub fn regression_analysis(
                     .into(),
             })?;
 
+        let (fitted, residuals) = fitted_and_residuals(predictors, &result.coefficients, target);
         Ok(RegressionAnalysis {
             target_name: target_name.to_string(),
             predictor_names: predictor_names.to_vec(),
@@ -357,6 +387,8 @@ pub fn regression_analysis(
             p_values: result.p_values.clone(),
             vif: result.vif.clone(),
             f_p_value: result.f_p_value,
+            fitted,
+            residuals,
         })
     }
 }
@@ -1266,6 +1298,33 @@ mod tests {
         assert!(result.r_squared > 0.99);
         assert_eq!(result.coefficients.len(), 3); // intercept + 2 predictors
         assert_eq!(result.vif.len(), 2); // VIF for each predictor
+    }
+
+    /// Fitted values and residuals are the model applied to the data: they add
+    /// back to the target, and an OLS fit with an intercept leaves residuals
+    /// summing to zero.
+    #[test]
+    fn regression_returns_fitted_values_and_residuals() {
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0];
+        let y = vec![3.1, 3.9, 7.2, 7.8, 11.3, 11.9];
+        for predictors in [vec![x1.clone()], vec![x1.clone(), x2.clone()]] {
+            let names: Vec<String> = (0..predictors.len()).map(|i| format!("x{i}")).collect();
+            let r = regression_analysis(&predictors, &names, &y, "y").unwrap();
+            assert_eq!(r.fitted.len(), y.len());
+            assert_eq!(r.residuals.len(), y.len());
+            for i in 0..y.len() {
+                let expected = r.coefficients[0]
+                    + predictors
+                        .iter()
+                        .zip(&r.coefficients[1..])
+                        .map(|(c, b)| b * c[i])
+                        .sum::<f64>();
+                assert!((r.fitted[i] - expected).abs() < 1e-12);
+                assert!((r.fitted[i] + r.residuals[i] - y[i]).abs() < 1e-12);
+            }
+            assert!(r.residuals.iter().sum::<f64>().abs() < 1e-9);
+        }
     }
 
     #[test]

@@ -549,7 +549,10 @@ Isolation Forest anomaly detection. `config`: `{ "n_estimators": 100, "contamina
 
 #### `lof(data, config) -> LofResult`
 
-Local Outlier Factor anomaly detection. `config`: `{ "k": 20, "threshold": 1.5 }`.
+Local Outlier Factor anomaly detection. `config`: `{ "k": 20, "threshold": 1.5 }` or `{ "k": 20, "contamination": 0.05 }`.
+
+- `threshold` (default 1.5): a point scoring above it is an outlier.
+- `contamination` (`0` to `1`): the expected outlier fraction, as in `isolation_forest` — the `ceil(n · contamination)` highest scores are outliers (ties included) and the result's `threshold` is the lowest of them (`Infinity` when none is). It cannot be given with `threshold`.
 
 **Output:**
 ```json
@@ -581,8 +584,10 @@ OLS regression analysis.
 
 **Output:**
 ```json
-{ "target_name": "y", "predictor_names": ["x1"], "r_squared": 0.99, "adj_r_squared": 0.99, "coefficients": [0.1, 2.0], "p_values": [0.9, 0.0001], "vif": [1.0], "f_p_value": 0.0001 }
+{ "target_name": "y", "predictor_names": ["x1"], "r_squared": 0.99, "adj_r_squared": 0.99, "coefficients": [0.1, 2.0], "p_values": [0.9, 0.0001], "vif": [1.0], "f_p_value": 0.0001, "fitted": [2.1, 4.1, 6.1, 8.1, 10.1], "residuals": [0.0, -0.2, 0.0, -0.2, 0.0] }
 ```
+
+`fitted` is the model applied to each observation (`coefficients[0]` plus each coefficient times its predictor) and `residuals` is `target − fitted`, both in input order.
 
 #### `feature_importance(data) -> FeatureImportanceResult`
 

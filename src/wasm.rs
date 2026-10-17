@@ -1280,17 +1280,41 @@ struct LofConfigDto {
     #[serde(default = "default_lof_k")]
     #[tsify(optional, type = "number")]
     k: Whole,
-    /// LOF threshold for outlier classification. Default: 1.5.
-    #[serde(default = "default_lof_threshold")]
-    #[tsify(optional)]
-    threshold: f64,
+    /// LOF score above which a point is an outlier. Default: 1.5 when
+    /// `contamination` is not given; cannot be given with it.
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    threshold: Option<f64>,
+    /// Expected outlier fraction, in `[0, 1]`: the `ceil(n·contamination)`
+    /// highest scores are outliers and `threshold` in the result is the lowest
+    /// of them. Cannot be given with `threshold`.
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    contamination: Option<f64>,
 }
 
 fn default_lof_k() -> Whole {
     Whole(20.0)
 }
-fn default_lof_threshold() -> f64 {
-    1.5
+
+/// How a LOF run cuts its scores: a score threshold or an expected outlier
+/// fraction, not both.
+fn lof_cut(
+    threshold: Option<f64>,
+    contamination: Option<f64>,
+) -> Result<crate::lof::LofConfig, WireError> {
+    use crate::lof::LofConfig;
+    match (threshold, contamination) {
+        (Some(_), Some(_)) => Err(WireError::new(
+            Code::InvalidOption,
+            "config.contamination cannot be given with config.threshold; they are mutually              exclusive -- give one"
+                .to_string(),
+            json!({ "parameter": "config.contamination" }),
+        )),
+        (Some(t), None) => Ok(LofConfig::default().threshold(t)),
+        (None, Some(c)) => Ok(LofConfig::default().contamination(c)),
+        (None, None) => Ok(LofConfig::default()),
+    }
 }
 
 /// LOF anomaly detection result.
@@ -1309,7 +1333,7 @@ struct LofDto {
 ///
 /// `data`: row-major points `[[x,y,...], ...]`
 ///
-/// `config`: `{ "k": 20, "threshold": 1.5 }`
+/// `config`: `{ "k": 20, "threshold": 1.5 }` or `{ "k": 20, "contamination": 0.05 }`
 ///
 /// # Output
 ///
@@ -1322,11 +1346,13 @@ pub fn lof(
     let data: Vec<Vec<f64>> = from_js(data, "data")?;
     let cfg: LofConfigDto = from_js(config, "config")?;
 
-    use crate::lof::{lof as lof_fn, LofConfig};
+    use crate::lof::lof as lof_fn;
 
     // `lof` refuses fewer than one neighbour.
     let k = cfg.k.count("k", 1).map_err(js_err)?;
-    let config = LofConfig::default().k(k).threshold(cfg.threshold);
+    let config = lof_cut(cfg.threshold, cfg.contamination)
+        .map_err(js_err)?
+        .k(k);
     let result = lof_fn(&data, &config).map_err(js_err)?;
 
     let dto = LofDto {
@@ -1630,6 +1656,10 @@ struct RegressionDto {
     p_values: Vec<f64>,
     vif: Vec<f64>,
     f_p_value: f64,
+    /// Fitted values, one per observation in input order.
+    fitted: Vec<f64>,
+    /// Residuals `y − ŷ`, one per observation in input order.
+    residuals: Vec<f64>,
 }
 
 /// Runs OLS regression analysis.
@@ -1647,7 +1677,7 @@ struct RegressionDto {
 ///
 /// # Output
 ///
-/// `{ target_name, predictor_names, r_squared, adj_r_squared, coefficients, p_values, vif, f_p_value }`
+/// `{ target_name, predictor_names, r_squared, adj_r_squared, coefficients, p_values, vif, f_p_value, fitted, residuals }`
 #[wasm_bindgen(unchecked_return_type = "RegressionDto")]
 pub fn regression(
     #[wasm_bindgen(unchecked_param_type = "RegressionInputDto")] data: JsValue,
@@ -1689,6 +1719,8 @@ pub fn regression(
         p_values: result.p_values,
         vif: result.vif,
         f_p_value: result.f_p_value,
+        fitted: result.fitted,
+        residuals: result.residuals,
     };
 
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
@@ -3042,6 +3074,27 @@ mod path_tests {
         assert_eq!(refusal.fields["code"], "value_not_finite");
         assert_eq!(refusal.fields["parameter"], "data[1]");
         assert_eq!(refusal.fields["index"], 1);
+    }
+
+    #[test]
+    fn lof_takes_a_threshold_or_a_contamination_not_both() {
+        let both = super::lof_cut(Some(1.5), Some(0.1)).expect_err("both given");
+        assert_eq!(both.fields["code"], "invalid_option");
+        assert_eq!(both.fields["parameter"], "config.contamination");
+        assert_eq!(
+            super::lof_cut(Some(2.0), None)
+                .expect("threshold")
+                .threshold,
+            2.0
+        );
+        assert_eq!(
+            super::lof_cut(None, Some(0.1))
+                .expect("contamination")
+                .contamination,
+            Some(0.1)
+        );
+        let neither = super::lof_cut(None, None).expect("defaults");
+        assert_eq!((neither.threshold, neither.contamination), (1.5, None));
     }
 
     #[test]

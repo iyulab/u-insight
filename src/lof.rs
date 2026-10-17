@@ -55,6 +55,11 @@ pub struct LofConfig {
     /// LOF threshold for outlier classification, a finite number `> 0`.
     /// Default: 1.5. Points with LOF > threshold are classified as outliers.
     pub threshold: f64,
+    /// Expected outlier fraction, in `[0, 1]`. When set it replaces
+    /// `threshold`: the `ceil(n · contamination)` highest scores are outliers
+    /// (ties included) and [`LofResult::threshold`] is the lowest of them,
+    /// the way `isolation_forest` cuts its scores. Default: not set.
+    pub contamination: Option<f64>,
 }
 
 impl Default for LofConfig {
@@ -62,6 +67,7 @@ impl Default for LofConfig {
         Self {
             k: 20,
             threshold: 1.5,
+            contamination: None,
         }
     }
 }
@@ -78,6 +84,12 @@ impl LofConfig {
         self.threshold = t;
         self
     }
+
+    /// Sets the expected outlier fraction, which replaces the threshold.
+    pub fn contamination(mut self, c: f64) -> Self {
+        self.contamination = Some(c);
+        self
+    }
 }
 
 // ── Result ────────────────────────────────────────────────────────────
@@ -89,7 +101,8 @@ pub struct LofResult {
     pub scores: Vec<f64>,
     /// Binary anomaly labels: true = anomaly (LOF > threshold).
     pub anomalies: Vec<bool>,
-    /// Threshold used for classification.
+    /// Threshold used for classification: the configured one, or with
+    /// `contamination` the lowest score flagged (infinite when none is).
     pub threshold: f64,
     /// Number of anomalies detected.
     pub anomaly_count: usize,
@@ -118,12 +131,17 @@ pub struct LofResult {
 pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightError> {
     let n = data.len();
     InsightError::check_count("k", config.k, 1)?;
-    InsightError::check_range(
-        "threshold",
-        config.threshold,
-        Bound::Open(0.0),
-        Bound::Unbounded,
-    )?;
+    match config.contamination {
+        Some(c) => {
+            InsightError::check_range("contamination", c, Bound::Closed(0.0), Bound::Closed(1.0))?
+        }
+        None => InsightError::check_range(
+            "threshold",
+            config.threshold,
+            Bound::Open(0.0),
+            Bound::Unbounded,
+        )?,
+    }
     if n == 0 {
         return Err(InsightError::empty("data"));
     }
@@ -229,8 +247,22 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
     }
 
     // Classify anomalies
-    let threshold = config.threshold;
-    let anomalies: Vec<bool> = scores.iter().map(|&s| s > threshold).collect();
+    let (threshold, anomalies): (f64, Vec<bool>) = match config.contamination {
+        Some(c) => {
+            let mut sorted = scores.clone();
+            sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            let flagged = ((n as f64 * c).ceil() as usize).min(n);
+            let cut = match flagged {
+                0 => f64::INFINITY,
+                f => sorted[f - 1],
+            };
+            (cut, scores.iter().map(|&s| s >= cut).collect())
+        }
+        None => (
+            config.threshold,
+            scores.iter().map(|&s| s > config.threshold).collect(),
+        ),
+    };
     let anomaly_count = anomalies.iter().filter(|&&a| a).count();
     let anomaly_fraction = anomaly_count as f64 / n as f64;
 
@@ -267,6 +299,54 @@ mod tests {
         // Outlier far away
         data.push(vec![100.0, 100.0]);
         data
+    }
+
+    /// An expected outlier fraction cuts the scores the way a threshold does:
+    /// the `ceil(n * c)` highest are flagged, and the result reports the cut.
+    #[test]
+    fn contamination_flags_the_highest_scores() {
+        let data = cluster_with_outlier();
+        let n = data.len();
+        let result = lof(&data, &LofConfig::default().k(5).contamination(0.05)).unwrap();
+        // ceil(21 * 0.05) = 2 flagged, the outlier among them.
+        assert_eq!(result.anomaly_count, 2, "{:?}", result.scores);
+        assert!(result.anomalies[n - 1]);
+        let lowest_flagged = result
+            .scores
+            .iter()
+            .zip(&result.anomalies)
+            .filter(|&(_, &a)| a)
+            .map(|(&s, _)| s)
+            .fold(f64::INFINITY, f64::min);
+        assert_eq!(result.threshold, lowest_flagged);
+    }
+
+    #[test]
+    fn contamination_zero_flags_nothing_and_one_flags_all() {
+        let data = cluster_with_outlier();
+        let none = lof(&data, &LofConfig::default().k(5).contamination(0.0)).unwrap();
+        assert_eq!(none.anomaly_count, 0);
+        assert!(none.threshold.is_infinite());
+        let all = lof(&data, &LofConfig::default().k(5).contamination(1.0)).unwrap();
+        assert_eq!(all.anomaly_count, data.len());
+    }
+
+    #[test]
+    fn contamination_outside_the_unit_interval_is_refused() {
+        let data = cluster_with_outlier();
+        for c in [-0.1, 1.1, f64::NAN] {
+            let err = lof(&data, &LofConfig::default().k(5).contamination(c)).unwrap_err();
+            assert!(
+                matches!(&err, InsightError::ParameterOutOfRange { name, .. } if name == "contamination"),
+                "{c}: {err:?}"
+            );
+        }
+        // With a contamination the threshold is not read: a bad one is not refused.
+        assert!(lof(
+            &data,
+            &LofConfig::default().k(5).threshold(-1.0).contamination(0.1)
+        )
+        .is_ok());
     }
 
     #[test]
