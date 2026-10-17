@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-17
+
+Depends on u-analytics 0.27 and u-numflow 0.14. `UInsight` 0.36.0.
+
 ### Added
 
 - `lof` takes `contamination` (the expected outlier fraction, as

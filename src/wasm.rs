@@ -1307,7 +1307,7 @@ fn lof_cut(
     match (threshold, contamination) {
         (Some(_), Some(_)) => Err(WireError::new(
             Code::InvalidOption,
-            "config.contamination cannot be given with config.threshold; they are mutually              exclusive -- give one"
+            "config.contamination cannot be given with config.threshold; they are mutually exclusive -- give one"
                 .to_string(),
             json!({ "parameter": "config.contamination" }),
         )),
