@@ -8,6 +8,21 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Added
+
+- `distribution_analysis` says why a normality test has no result:
+  `normality.omitted` lists each absent test (`ks_test`, `jarque_bera`,
+  `shapiro_wilk`, `anderson_darling`) with `reason` — `too_few_values` (`min`),
+  `too_many_values` (`max`) or `constant_values`. Shapiro-Wilk is defined for 3
+  to 5000 values, so above 5000 it was absent with nothing to tell the reader
+  why. Rust: `NormalityAssessment::omitted`, `OmittedTest`, `OmissionReason`,
+  `NormalityTest`. The C ABI result keeps its NaN-when-unavailable fields.
+
+### Changed
+
+- **Breaking** `NormalityAssessment` has an `omitted` field (a struct literal
+  must set it).
+
 ## [0.35.0] - 2026-10-16
 
 Depends on u-analytics 0.27 and u-numflow 0.14. `UInsight` 0.35.0.

@@ -565,8 +565,10 @@ Distribution analysis on a 1-D array. `config`: `{ "bin_method": "freedman_diaco
 
 **Output:**
 ```json
-{ "n": 100, "ecdf": { "values": [...], "probabilities": [...] }, "histogram": { "n_bins": 10, "bin_width": 0.5, "edges": [...], "counts": [...] }, "qq_plot": { "theoretical": [...], "sample": [...] }, "normality": { "shapiro_wilk": { "statistic": 0.98, "p_value": 0.45, "rejected": false }, "is_normal": true }, "fits": [] }
+{ "n": 100, "ecdf": { "values": [...], "probabilities": [...] }, "histogram": { "n_bins": 10, "bin_width": 0.5, "edges": [...], "counts": [...] }, "qq_plot": { "theoretical": [...], "sample": [...] }, "normality": { "ks_test": {...}, "jarque_bera": {...}, "shapiro_wilk": { "statistic": 0.98, "p_value": 0.45, "rejected": false }, "anderson_darling": {...}, "omitted": [], "is_normal": true, "significance_level": 0.05 }, "fits": [] }
 ```
+
+A normality test that was not run is `null` in `normality` and is listed in `normality.omitted` with its reason — `{ "test": "shapiro_wilk", "reason": "too_many_values", "max": 5000 }`. The sizes each test takes: Kolmogorov-Smirnov 5 or more values, Jarque-Bera and Anderson-Darling 8 or more, Shapiro-Wilk 3 to 5000. `reason` is `"too_few_values"` (with `min`), `"too_many_values"` (with `max`) or `"constant_values"` (every value is the same). `is_normal` combines the tests that ran: normality is rejected if any of them rejects, and it is `false` when none ran.
 
 #### `regression(data) -> RegressionResult`
 

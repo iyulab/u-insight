@@ -124,6 +124,95 @@ pub struct NormalityTestResult {
     pub rejected: bool,
 }
 
+/// One of the four normality tests of [`NormalityAssessment`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NormalityTest {
+    /// Kolmogorov-Smirnov (`ks_test`).
+    KolmogorovSmirnov,
+    /// Jarque-Bera (`jarque_bera`).
+    JarqueBera,
+    /// Shapiro-Wilk (`shapiro_wilk`).
+    ShapiroWilk,
+    /// Anderson-Darling (`anderson_darling`).
+    AndersonDarling,
+}
+
+impl NormalityTest {
+    /// The test's name in the assessment's fields (`"shapiro_wilk"`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::KolmogorovSmirnov => "ks_test",
+            Self::JarqueBera => "jarque_bera",
+            Self::ShapiroWilk => "shapiro_wilk",
+            Self::AndersonDarling => "anderson_darling",
+        }
+    }
+
+    /// The sample sizes the test is defined for: `(min, max)`, `max` open-ended
+    /// as `None`.
+    fn sample_size(self) -> (usize, Option<usize>) {
+        match self {
+            Self::KolmogorovSmirnov => (5, None),
+            Self::JarqueBera | Self::AndersonDarling => (8, None),
+            // Royston's approximation of the W distribution, 3 to 5000 values.
+            Self::ShapiroWilk => (3, Some(5000)),
+        }
+    }
+}
+
+/// Why a normality test was not run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OmissionReason {
+    /// Fewer values than the test is defined for (`min`).
+    TooFewValues {
+        /// The fewest values the test takes.
+        min: usize,
+    },
+    /// More values than the test is defined for (`max`).
+    TooManyValues {
+        /// The most values the test takes.
+        max: usize,
+    },
+    /// Every value is the same, so there is no spread to test.
+    ConstantValues,
+}
+
+impl OmissionReason {
+    /// The reason's wire name (`"too_many_values"`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::TooFewValues { .. } => "too_few_values",
+            Self::TooManyValues { .. } => "too_many_values",
+            Self::ConstantValues => "constant_values",
+        }
+    }
+}
+
+/// A normality test that was not run, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OmittedTest {
+    /// The test.
+    pub test: NormalityTest,
+    /// Why it has no result.
+    pub reason: OmissionReason,
+}
+
+/// Why `test` gave no result for `n` finite values: outside the sizes it is
+/// defined for, or else no spread to test.
+fn omission(test: NormalityTest, n: usize) -> OmittedTest {
+    let (min, max) = test.sample_size();
+    let reason = if n < min {
+        OmissionReason::TooFewValues { min }
+    } else if max.is_some_and(|max| n > max) {
+        OmissionReason::TooManyValues {
+            max: max.expect("checked above"),
+        }
+    } else {
+        OmissionReason::ConstantValues
+    };
+    OmittedTest { test, reason }
+}
+
 /// Combined normality assessment from multiple tests.
 #[derive(Debug, Clone)]
 pub struct NormalityAssessment {
@@ -131,12 +220,16 @@ pub struct NormalityAssessment {
     pub ks_test: Option<NormalityTestResult>,
     /// Jarque-Bera test result (None if insufficient data, requires n >= 8).
     pub jarque_bera: Option<NormalityTestResult>,
-    /// Shapiro-Wilk test result (None if n < 3 or n > 5000).
+    /// Shapiro-Wilk test result (None if n < 3 or n > 5000, or all values equal).
     pub shapiro_wilk: Option<NormalityTestResult>,
     /// Anderson-Darling test result (None if n < 8).
     pub anderson_darling: Option<NormalityTestResult>,
+    /// The tests with no result above, each with its reason, in the order
+    /// KS, Jarque-Bera, Shapiro-Wilk, Anderson-Darling. Empty when all four ran.
+    pub omitted: Vec<OmittedTest>,
     /// Overall verdict: true if data appears normally distributed.
-    /// Uses conservative approach: rejects normality if any test rejects.
+    /// Uses conservative approach: rejects normality if any test that ran
+    /// rejects (and at least one ran); a test in `omitted` takes no part.
     pub is_normal: bool,
     /// Significance level used.
     pub significance_level: f64,
@@ -318,11 +411,23 @@ pub fn distribution_analysis(
     let any_available = tests.iter().any(|t| t.is_some());
     let is_normal = any_available && !any_rejected;
 
+    let omitted = [
+        (NormalityTest::KolmogorovSmirnov, ks_test.is_none()),
+        (NormalityTest::JarqueBera, jarque_bera.is_none()),
+        (NormalityTest::ShapiroWilk, shapiro_wilk.is_none()),
+        (NormalityTest::AndersonDarling, anderson_darling.is_none()),
+    ]
+    .into_iter()
+    .filter(|&(_, missing)| missing)
+    .map(|(test, _)| omission(test, data.len()))
+    .collect();
+
     let normality = NormalityAssessment {
         ks_test,
         jarque_bera,
         shapiro_wilk,
         anderson_darling,
+        omitted,
         is_normal,
         significance_level: alpha,
     };
@@ -922,6 +1027,71 @@ mod tests {
     #[test]
     fn shapiro_wilk_constant() {
         assert!(shapiro_wilk(&[5.0, 5.0, 5.0, 5.0]).is_none());
+    }
+
+    // ── Tests that were not run ─────────────────────────────────
+
+    fn varied(n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| (i as f64 * 1.3).sin() * 10.0 + (i % 7) as f64)
+            .collect()
+    }
+
+    fn analysed(data: &[f64]) -> NormalityAssessment {
+        distribution_analysis(data, &DistributionConfig::default())
+            .expect("analysis")
+            .normality
+    }
+
+    fn omitted_of(a: &NormalityAssessment) -> Vec<(&'static str, OmissionReason)> {
+        a.omitted
+            .iter()
+            .map(|o| (o.test.name(), o.reason))
+            .collect()
+    }
+
+    #[test]
+    fn all_four_tests_run_within_their_sizes() {
+        for n in [8, 100, 5000] {
+            assert!(analysed(&varied(n)).omitted.is_empty(), "n = {n}");
+        }
+    }
+
+    #[test]
+    fn shapiro_wilk_is_omitted_above_5000_values_and_says_why() {
+        let a = analysed(&varied(5001));
+        assert!(a.shapiro_wilk.is_none());
+        assert_eq!(
+            omitted_of(&a),
+            [("shapiro_wilk", OmissionReason::TooManyValues { max: 5000 })]
+        );
+        // The verdict combines the three that ran.
+        assert!(a.ks_test.is_some() && a.jarque_bera.is_some() && a.anderson_darling.is_some());
+    }
+
+    #[test]
+    fn short_samples_omit_the_tests_that_need_more_values() {
+        let a = analysed(&varied(4));
+        assert_eq!(
+            omitted_of(&a),
+            [
+                ("ks_test", OmissionReason::TooFewValues { min: 5 }),
+                ("jarque_bera", OmissionReason::TooFewValues { min: 8 }),
+                ("anderson_darling", OmissionReason::TooFewValues { min: 8 }),
+            ]
+        );
+        assert!(a.shapiro_wilk.is_some());
+    }
+
+    #[test]
+    fn a_constant_sample_omits_every_test_it_has_the_values_for() {
+        let a = analysed(&[5.0; 10]);
+        assert_eq!(a.omitted.len(), 4);
+        assert!(a
+            .omitted
+            .iter()
+            .all(|o| o.reason == OmissionReason::ConstantValues));
+        assert!(!a.is_normal);
     }
 
     // ── Anderson-Darling ────────────────────────────────────────

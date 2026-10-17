@@ -1442,12 +1442,31 @@ struct NormalityTestDto {
     rejected: bool,
 }
 
+/// A normality test with no result, and why. `min` is set for
+/// `"too_few_values"`, `max` for `"too_many_values"`.
+#[derive(Serialize, tsify::Tsify)]
+struct OmittedTestDto {
+    #[tsify(type = "\"ks_test\" | \"jarque_bera\" | \"shapiro_wilk\" | \"anderson_darling\"")]
+    test: String,
+    #[tsify(type = "\"too_few_values\" | \"too_many_values\" | \"constant_values\"")]
+    reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    min: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    max: Option<usize>,
+}
+
 #[derive(Serialize, tsify::Tsify)]
 struct NormalityDto {
     ks_test: Option<NormalityTestDto>,
     jarque_bera: Option<NormalityTestDto>,
     shapiro_wilk: Option<NormalityTestDto>,
     anderson_darling: Option<NormalityTestDto>,
+    /// The tests above that are absent, each with its reason; empty when all
+    /// four ran. `is_normal` combines only the tests that ran.
+    omitted: Vec<OmittedTestDto>,
     is_normal: bool,
     significance_level: f64,
 }
@@ -1548,6 +1567,23 @@ pub fn distribution_analysis(
             jarque_bera: map_test(result.normality.jarque_bera),
             shapiro_wilk: map_test(result.normality.shapiro_wilk),
             anderson_darling: map_test(result.normality.anderson_darling),
+            omitted: result
+                .normality
+                .omitted
+                .iter()
+                .map(|o| OmittedTestDto {
+                    test: o.test.name().to_string(),
+                    reason: o.reason.name().to_string(),
+                    min: match o.reason {
+                        crate::distribution::OmissionReason::TooFewValues { min } => Some(min),
+                        _ => None,
+                    },
+                    max: match o.reason {
+                        crate::distribution::OmissionReason::TooManyValues { max } => Some(max),
+                        _ => None,
+                    },
+                })
+                .collect(),
             is_normal: result.normality.is_normal,
             significance_level: result.normality.significance_level,
         },
