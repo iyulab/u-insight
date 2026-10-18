@@ -1,0 +1,642 @@
+{
+  "$schema": "scripts/engine-card/engine-card.schema.json",
+  "card_version": 1,
+  "engine": {
+    "id": "u-insight",
+    "summary": "Statistical analysis of tabular data: column profiles, correlation, clustering (k-means, DBSCAN, hierarchical), PCA, anomaly detection (isolation forest, LOF, univariate outlier rules), distribution analysis with normality tests and fits, OLS regression, feature importance, multicollinearity diagnostics and univariate time-series period and anomaly scoring.",
+    "version": "0.36.0",
+    "license": "MIT",
+    "repository": "https://github.com/iyulab/u-insight"
+  },
+  "surfaces": [
+    {
+      "kind": "crate",
+      "name": "u-insight",
+      "package_version": "0.36.0",
+      "engine_version": "0.36.0",
+      "error_shape": "Err(InsightError), whose variant names the reason and holds the values behind it."
+    },
+    {
+      "kind": "npm",
+      "name": "@iyulab/u-insight",
+      "package_version": "0.36.0",
+      "engine_version": "0.36.0",
+      "wasm": true,
+      "note": "Native JS values in and out, typed in the .d.ts; column-major inputs are objects keyed by column name. Bundler and Node targets; no bundler-less browser build.",
+      "error_shape": "A thrown Error whose code property is the code, with the fields (parameter, index, min, max, got, expected, ...) as its other properties."
+    },
+    {
+      "kind": "nuget",
+      "name": "UInsight",
+      "package_version": "0.36.0",
+      "engine_version": "0.36.0",
+      "note": "C ABI wrapper over C structs (the cbindgen header), versioned with the crate.",
+      "error_shape": "An InsightException whose ErrorCode is the code, Parameter and Index the fields of those names, and Details the rest."
+    }
+  ],
+  "errors": {
+    "shape": "A refusal carries a stable snake_case 'code' and the fields listed for that code; how it arrives depends on the surface (error_shape).",
+    "source": {
+      "catalog": "code_catalog in src/wasm.rs, built from the Code table the refusals are made from; published as codes() in WebAssembly, over the C ABI and as Codes on .NET. What each code means is tabled in README.md, which a test holds equal to the catalog.",
+      "test": "src/wasm.rs::code_catalog_tests::the_readme_documents_every_code_and_no_other"
+    }
+  },
+  "operations": [
+    {
+      "id": "describe",
+      "summary": "A profile of each column of a column-major dataset whose columns may mix numbers, strings, booleans and nulls: its data type (numeric, boolean, categorical or text) and the statistics of that type -- for a numeric column count, missing values, extremes, mean, median, spread and shape; a statistic the data does not define is absent.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/describe.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/describe.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "correlation_matrix",
+      "summary": "The Pearson, Spearman or Kendall correlation matrix of numeric columns, and, with their p-values, the pairs whose correlation is above 0.7 in absolute value; every column needs at least 3 values.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/correlation_matrix.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/correlation_matrix.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "kmeans",
+      "summary": "k-means clustering of row-major points with k-means++ initialisation and restarts from a fixed seed: labels numbered by first appearance, centroids, within-cluster sum of squares, iterations and cluster sizes.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/kmeans.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/kmeans.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "silhouette",
+      "summary": "Silhouette scores of a given clustering: the mean over points with a defined silhouette and each point's own (0 for a point alone in its cluster).",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/silhouette.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/silhouette.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none",
+        "complexity": "O(n^2) for n points."
+      }
+    },
+    {
+      "id": "pca",
+      "summary": "Principal component analysis of row-major data, optionally on standardized columns: eigenvalues, explained variance ratios, loadings and the scores of each row.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/pca.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/pca.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "dbscan",
+      "summary": "DBSCAN density clustering of row-major points for a radius epsilon and min_samples: labels (noise apart), cluster count and sizes, noise count and core points.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/dbscan.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/dbscan.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "hierarchical",
+      "summary": "Agglomerative clustering of row-major points by single, complete, average or Ward linkage, cut at a cluster count or a distance threshold: the merge sequence and the labels.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/hierarchical.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/hierarchical.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "isolation_forest",
+      "summary": "Isolation forest anomaly scores of row-major points, and the anomalies above the threshold an expected contamination sets; seeded, 42 when no seed is given.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/isolation_forest.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/isolation_forest.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "lof",
+      "summary": "Local outlier factor scores of row-major points for k neighbours, and the anomalies above a score threshold or an expected contamination.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/lof.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/lof.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "distribution_analysis",
+      "summary": "The distribution of a numeric sample: ECDF, histogram (by Sturges, Scott, Freedman-Diaconis or a fixed bin count), normal Q-Q points, normality tests (Kolmogorov-Smirnov, Jarque-Bera, Shapiro-Wilk, Anderson-Darling, each omitted with a reason when the sample is outside its range) and optionally fitted distributions.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/distribution_analysis.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/distribution_analysis.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "regression",
+      "summary": "Ordinary least squares regression of a target on named predictor columns: coefficients with p-values, R^2 and adjusted R^2, the F test p-value, VIF of each predictor, fitted values and residuals.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/regression.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/regression.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "feature_importance",
+      "summary": "The importance of named feature columns for a target by permutation (regression target, seeded), ANOVA F test or mutual information (class target).",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/feature_importance.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/feature_importance.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "vif_diagnostic",
+      "summary": "The variance inflation factor of each numeric column, and the columns above a threshold (default 10).",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/vif_diagnostic.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/vif_diagnostic.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "condition_number_diagnostic",
+      "summary": "The 2-norm condition number of the sample covariance matrix of numeric columns (above 30 indicates multicollinearity, Belsley 1991); Infinity for a numerically singular matrix.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/condition_number_diagnostic.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/condition_number_diagnostic.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "detect_univariate_outliers",
+      "summary": "Outliers of a numeric sample by the IQR (Tukey) fences, z-score, modified z-score or Hampel rule: the indices, scores, count, share and the fences used.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/detect_univariate_outliers.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/detect_univariate_outliers.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "estimate_period",
+      "summary": "The dominant period of a univariate series by AutoPeriod (Vlachos, Yu & Castelli 2005): periodogram peaks above a permutation threshold confirmed on the autocorrelation function; null when no period passes both stages.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/estimate_period.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/estimate_period.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "spectral_residual",
+      "summary": "An anomaly score for every point of a series by spectral residual saliency (Ren et al. 2019), with the expected value and band at each point and the points judged anomalous.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/spectral_residual.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/spectral_residual.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "none"
+      },
+      "performance": {
+        "status": "none"
+      }
+    }
+  ]
+}

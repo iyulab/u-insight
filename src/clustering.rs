@@ -46,7 +46,9 @@ pub struct KMeansConfig {
     pub tol: f64,
     /// Number of random restarts (best result kept). Default: 10.
     pub n_init: usize,
-    /// Random seed (None for time-based). Default: Some(42).
+    /// Random seed: restart `i` draws from `seed + i`. `None` starts from a
+    /// fixed default instead, so a run is reproducible either way.
+    /// Default: Some(42).
     pub seed: Option<u64>,
 }
 
@@ -180,8 +182,11 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
     // Run n_init restarts, keep best (lowest WCSS)
     let mut best_result: Option<KMeansResult> = None;
 
+    // Each restart from its own seed -- `None` included, whose restarts all
+    // started from the one default seed and so repeated the first.
+    let base = config.seed.unwrap_or(DEFAULT_KMEANS_SEED);
     for init_idx in 0..config.n_init {
-        let seed = config.seed.map(|s| s.wrapping_add(init_idx as u64));
+        let seed = Some(base.wrapping_add(init_idx as u64));
         let result = kmeans_single(data, k, d, config.max_iter, config.tol, seed);
 
         if best_result
@@ -592,6 +597,9 @@ fn kmeans_single(
     }
 }
 
+/// The seed k-means++ draws from when the caller gives none.
+const DEFAULT_KMEANS_SEED: u64 = 12345;
+
 /// K-Means++ initialization: select k initial centroids using
 /// distance-proportional probability sampling.
 ///
@@ -602,7 +610,7 @@ fn kmeans_plus_plus(data: &[Vec<f64>], k: usize, _d: usize, seed: Option<u64>) -
     let mut centroids: Vec<Vec<f64>> = Vec::with_capacity(k);
 
     // Simple LCG-based random number generator for reproducibility
-    let mut rng_state = seed.unwrap_or(12345);
+    let mut rng_state = seed.unwrap_or(DEFAULT_KMEANS_SEED);
     let mut next_rand = || -> f64 {
         rng_state = rng_state
             .wrapping_mul(6364136223846793005)
@@ -3189,6 +3197,20 @@ mod tests {
     }
 
     // ── Reproducibility ──────────────────────────────────────────
+
+    /// Without a seed the restarts still start from distinct seeds -- the
+    /// default and the ones after it -- rather than repeating the first.
+    #[test]
+    fn an_unseeded_kmeans_restarts_from_distinct_seeds() {
+        let data: Vec<Vec<f64>> = (0..40)
+            .map(|i| vec![(i % 7) as f64 * 1.3, (i % 5) as f64 * 0.7 + (i / 10) as f64])
+            .collect();
+        let unseeded = kmeans(&data, &KMeansConfig::new(4).seed(None)).expect("runs");
+        let from_default =
+            kmeans(&data, &KMeansConfig::new(4).seed(Some(DEFAULT_KMEANS_SEED))).expect("runs");
+        assert_eq!(unseeded.labels, from_default.labels);
+        assert_eq!(unseeded.wcss.to_bits(), from_default.wcss.to_bits());
+    }
 
     #[test]
     fn kmeans_reproducible_with_seed() {

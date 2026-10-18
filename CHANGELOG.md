@@ -8,6 +8,14 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- `kmeans` with `seed: None` ran all `n_init` restarts from the same seed, so
+  every restart repeated the first and the extra restarts changed nothing.
+  Restart `i` now starts from the default seed plus `i`, as a given seed's
+  restarts already did. An unseeded run can return a different clustering --
+  never one with a higher WCSS, since the first restart is unchanged.
+
 ## [0.36.0] - 2026-10-17
 
 Depends on u-analytics 0.27 and u-numflow 0.14. `UInsight` 0.36.0.

@@ -302,6 +302,97 @@ fn hierarchical_cut(
     }
 }
 
+// ── Option names ───────────────────────────────────────────────────
+
+/// `correlation_matrix`'s `_method` names.
+const CORRELATION_METHODS: [(&str, crate::analysis::CorrelationMethod); 3] = [
+    ("pearson", crate::analysis::CorrelationMethod::Pearson),
+    ("spearman", crate::analysis::CorrelationMethod::Spearman),
+    ("kendall", crate::analysis::CorrelationMethod::Kendall),
+];
+
+/// `hierarchical`'s `linkage` names (read case-insensitively).
+const LINKAGES: [(&str, crate::clustering::Linkage); 4] = [
+    ("single", crate::clustering::Linkage::Single),
+    ("complete", crate::clustering::Linkage::Complete),
+    ("average", crate::clustering::Linkage::Average),
+    ("ward", crate::clustering::Linkage::Ward),
+];
+
+/// `distribution_analysis`'s `bin_method` names (read case-insensitively).
+const BIN_METHODS: [(&str, crate::distribution::BinMethod); 3] = [
+    ("sturges", crate::distribution::BinMethod::Sturges),
+    ("scott", crate::distribution::BinMethod::Scott),
+    (
+        "freedman_diaconis",
+        crate::distribution::BinMethod::FreedmanDiaconis,
+    ),
+];
+
+/// What `feature_importance` computes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportanceMethod {
+    Permutation,
+    Anova,
+    MutualInfo,
+}
+
+/// `feature_importance`'s `method` names (read case-insensitively).
+const IMPORTANCE_METHODS: [(&str, ImportanceMethod); 3] = [
+    ("permutation", ImportanceMethod::Permutation),
+    ("anova", ImportanceMethod::Anova),
+    ("mutual_info", ImportanceMethod::MutualInfo),
+];
+
+/// `detect_univariate_outliers`'s `method` names: each method's own name and
+/// its other spellings (`tukey` = `iqr`, `three_sigma` = `zscore`).
+const OUTLIER_METHODS: [(&str, crate::profiling::OutlierMethod); 6] = [
+    ("iqr", crate::profiling::OutlierMethod::Iqr),
+    ("tukey", crate::profiling::OutlierMethod::Iqr),
+    ("zscore", crate::profiling::OutlierMethod::Zscore),
+    ("three_sigma", crate::profiling::OutlierMethod::Zscore),
+    (
+        "modified_zscore",
+        crate::profiling::OutlierMethod::ModifiedZscore,
+    ),
+    ("hampel", crate::profiling::OutlierMethod::Hampel),
+];
+
+/// The name a result reports an outlier method by.
+fn outlier_method_name(method: crate::profiling::OutlierMethod) -> &'static str {
+    use crate::profiling::OutlierMethod;
+    match method {
+        OutlierMethod::Iqr => "iqr",
+        OutlierMethod::Zscore => "zscore",
+        OutlierMethod::ModifiedZscore => "modified_zscore",
+        OutlierMethod::Hampel => "hampel",
+    }
+}
+
+/// The value `table` gives `name` (`fold_case`: compared in lowercase), or
+/// `unknown_option` at `parameter` listing the table's names -- the parser
+/// and its refusal read one list.
+fn named<T: Copy>(
+    parameter: &str,
+    name: &str,
+    table: &[(&str, T)],
+    fold_case: bool,
+) -> Result<T, WireError> {
+    let wanted = if fold_case {
+        name.to_lowercase()
+    } else {
+        name.to_string()
+    };
+    table
+        .iter()
+        .find(|(n, _)| *n == wanted)
+        .map(|(_, v)| *v)
+        .ok_or_else(|| {
+            let expected: Vec<&str> = table.iter().map(|(n, _)| *n).collect();
+            WireError::unknown_option(parameter, name, &expected)
+        })
+}
+
 // ── TypeScript declarations for column-major inputs ─────────────────
 
 /// Column-major inputs keyed by column name. Declared by hand: their keys are
@@ -332,6 +423,7 @@ export interface VifInput {
 /// and `variance` below 2 values; `skewness` below 3 and `kurtosis` below 4,
 /// and both when the values do not vary.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct NumericStats {
     count: usize,
     null_count: usize,
@@ -353,6 +445,7 @@ struct NumericStats {
 
 /// Summary statistics for a boolean column.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct BoolStats {
     count: usize,
     null_count: usize,
@@ -365,6 +458,7 @@ struct BoolStats {
 
 /// Summary statistics for a categorical column.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct CatStats {
     count: usize,
     null_count: usize,
@@ -378,6 +472,7 @@ struct CatStats {
 
 /// Summary statistics for a text column.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct TextStats {
     count: usize,
     null_count: usize,
@@ -392,6 +487,7 @@ struct TextStats {
 
 /// Column profile result returned by `describe`.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct ColumnResult {
     name: String,
     data_type: String,
@@ -403,6 +499,7 @@ struct ColumnResult {
 
 /// Result of correlation analysis.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct CorrelationResult {
     /// Column names (in order).
     names: Vec<String>,
@@ -415,6 +512,7 @@ struct CorrelationResult {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct CorrelationPairDto {
     col_a: String,
     col_b: String,
@@ -424,6 +522,7 @@ struct CorrelationPairDto {
 
 /// Result of K-Means clustering.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct KMeansDto {
     k: usize,
     labels: Vec<usize>,
@@ -435,6 +534,7 @@ struct KMeansDto {
 
 /// Result of silhouette analysis.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct SilhouetteDto {
     avg: f64,
     per_sample: Vec<f64>,
@@ -442,6 +542,7 @@ struct SilhouetteDto {
 
 /// Result of PCA.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct PcaDto {
     n_components: usize,
     n_features: usize,
@@ -589,6 +690,23 @@ fn whole(value: f64, parameter: &str, min: usize) -> Result<usize, WireError> {
 /// its type, whether it is in range a matter of its value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Whole(f64);
+
+/// On the wire a [`Whole`] is a whole number -- its range is the field's to
+/// check.
+#[cfg(test)]
+impl schemars::JsonSchema for Whole {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Whole".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "integer" })
+    }
+}
 
 impl<'de> Deserialize<'de> for Whole {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -802,19 +920,8 @@ pub fn correlation_matrix(
         .collect::<Result<_, _>>()
         .map_err(js_err)?;
 
-    use crate::analysis::{correlation_analysis, CorrelationConfig, CorrelationMethod};
-    let method = match method_str.as_str() {
-        "pearson" => CorrelationMethod::Pearson,
-        "spearman" => CorrelationMethod::Spearman,
-        "kendall" => CorrelationMethod::Kendall,
-        other => {
-            return Err(js_err(WireError::unknown_option(
-                "_method",
-                other,
-                &["pearson", "spearman", "kendall"],
-            )))
-        }
-    };
+    use crate::analysis::{correlation_analysis, CorrelationConfig};
+    let method = named("_method", &method_str, &CORRELATION_METHODS, false).map_err(js_err)?;
     let config = CorrelationConfig {
         method,
         high_threshold: 0.7,
@@ -935,6 +1042,7 @@ pub fn silhouette(
 
 /// PCA configuration input.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct PcaConfigDto {
     /// Number of principal components to keep.
@@ -998,6 +1106,7 @@ pub fn pca(
 
 /// DBSCAN configuration input.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct DbscanConfigDto {
     epsilon: f64,
@@ -1007,6 +1116,7 @@ struct DbscanConfigDto {
 
 /// DBSCAN clustering result.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct DbscanDto {
     /// Cluster label per point: null = noise, number = cluster id.
     labels: Vec<Option<usize>>,
@@ -1056,12 +1166,14 @@ pub fn dbscan(
 
 /// Hierarchical clustering configuration input.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct HierarchicalConfigDto {
     /// Linkage: "single", "complete", "average", "ward". Default: "ward".
     #[serde(default = "default_linkage")]
     #[tsify(optional)]
     #[tsify(type = "\"single\" | \"complete\" | \"average\" | \"ward\"")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::linkage"))]
     linkage: String,
     /// Number of flat clusters (mutually exclusive with distance_threshold).
     #[tsify(optional)]
@@ -1086,22 +1198,12 @@ fn default_linkage() -> String {
 /// refused: it used to be read as `"ward"`, so a misspelling ran a different
 /// method than the one asked for and nothing said so.
 fn parse_linkage(name: &str) -> Result<crate::clustering::Linkage, WireError> {
-    use crate::clustering::Linkage;
-    match name.to_lowercase().as_str() {
-        "single" => Ok(Linkage::Single),
-        "complete" => Ok(Linkage::Complete),
-        "average" => Ok(Linkage::Average),
-        "ward" => Ok(Linkage::Ward),
-        _ => Err(WireError::unknown_option(
-            "linkage",
-            name,
-            &["single", "complete", "average", "ward"],
-        )),
-    }
+    named("linkage", name, &LINKAGES, true)
 }
 
 /// A single merge step in the dendrogram.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct MergeDto {
     cluster_a: usize,
     cluster_b: usize,
@@ -1111,6 +1213,7 @@ struct MergeDto {
 
 /// Hierarchical clustering result.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct HierarchicalDto {
     merges: Vec<MergeDto>,
     labels: Option<Vec<usize>>,
@@ -1179,6 +1282,7 @@ pub fn hierarchical(
 
 /// Isolation Forest configuration input.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct IsolationForestConfigDto {
     /// Number of trees. Default: 100.
@@ -1215,6 +1319,7 @@ fn default_seed() -> Option<Whole> {
 
 /// Isolation Forest anomaly detection result.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct IsolationForestDto {
     scores: Vec<f64>,
     anomalies: Vec<bool>,
@@ -1274,6 +1379,7 @@ pub fn isolation_forest(
 
 /// LOF configuration input.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct LofConfigDto {
     /// Number of nearest neighbors. Default: 20.
@@ -1319,6 +1425,7 @@ fn lof_cut(
 
 /// LOF anomaly detection result.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct LofDto {
     scores: Vec<f64>,
     anomalies: Vec<bool>,
@@ -1370,12 +1477,14 @@ pub fn lof(
 
 /// Distribution analysis configuration input.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct DistributionConfigDto {
     /// Bin method: "sturges", "scott", "freedman_diaconis". Default: "freedman_diaconis".
     #[serde(default = "default_bin_method")]
     #[tsify(optional)]
     #[tsify(type = "\"sturges\" | \"scott\" | \"freedman_diaconis\"")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::bin_method"))]
     bin_method: String,
     /// Explicit bin count (>= 1). When set, takes precedence over `bin_method`.
     #[serde(default)]
@@ -1416,18 +1525,7 @@ fn resolve_bin_method(
     bins: Option<usize>,
 ) -> Result<crate::distribution::BinMethod, WireError> {
     use crate::distribution::BinMethod;
-    let named = match bin_method.to_lowercase().as_str() {
-        "sturges" => BinMethod::Sturges,
-        "scott" => BinMethod::Scott,
-        "freedman_diaconis" => BinMethod::FreedmanDiaconis,
-        _ => {
-            return Err(WireError::unknown_option(
-                "bin_method",
-                bin_method,
-                &["sturges", "scott", "freedman_diaconis"],
-            ))
-        }
-    };
+    let named = named("bin_method", bin_method, &BIN_METHODS, true)?;
     Ok(match bins {
         Some(n) => BinMethod::Fixed(n),
         None => named,
@@ -1441,12 +1539,14 @@ fn default_true() -> bool {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct EcdfDto {
     values: Vec<f64>,
     probabilities: Vec<f64>,
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct HistogramDto {
     n_bins: usize,
     bin_width: f64,
@@ -1456,12 +1556,14 @@ struct HistogramDto {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct QQPlotDto {
     theoretical: Vec<f64>,
     sample: Vec<f64>,
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct NormalityTestDto {
     statistic: f64,
     p_value: f64,
@@ -1471,10 +1573,13 @@ struct NormalityTestDto {
 /// A normality test with no result, and why. `min` is set for
 /// `"too_few_values"`, `max` for `"too_many_values"`.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct OmittedTestDto {
     #[tsify(type = "\"ks_test\" | \"jarque_bera\" | \"shapiro_wilk\" | \"anderson_darling\"")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::normality_test"))]
     test: String,
     #[tsify(type = "\"too_few_values\" | \"too_many_values\" | \"constant_values\"")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::omission_reason"))]
     reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[tsify(optional)]
@@ -1485,6 +1590,7 @@ struct OmittedTestDto {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct NormalityDto {
     ks_test: Option<NormalityTestDto>,
     jarque_bera: Option<NormalityTestDto>,
@@ -1498,6 +1604,7 @@ struct NormalityDto {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct FitResultDto {
     distribution: String,
     parameters: Vec<(String, f64)>,
@@ -1508,6 +1615,7 @@ struct FitResultDto {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct DistributionAnalysisDto {
     n: usize,
     ecdf: Option<EcdfDto>,
@@ -1634,6 +1742,7 @@ pub fn distribution_analysis(
 
 /// Regression input: column-major predictors + target.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct RegressionInputDto {
     /// Predictor columns: `{ "x1": [1,2,3], "x2": [4,5,6] }`.
@@ -1647,6 +1756,7 @@ struct RegressionInputDto {
 
 /// Regression analysis result.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct RegressionDto {
     target_name: String,
     predictor_names: Vec<String>,
@@ -1730,6 +1840,7 @@ pub fn regression(
 
 /// Feature importance input.
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct FeatureImportanceInputDto {
     /// Feature columns: `{ "f1": [1,2,3], "f2": [4,5,6] }`.
@@ -1741,6 +1852,7 @@ struct FeatureImportanceInputDto {
     #[serde(default = "default_fi_method")]
     #[tsify(optional)]
     #[tsify(type = "\"permutation\" | \"anova\" | \"mutual_info\"")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::importance_method"))]
     method: String,
     /// Significance level for ANOVA. Default: 0.05.
     #[serde(default = "default_significance")]
@@ -1772,6 +1884,7 @@ fn default_fi_seed() -> Whole {
 
 /// A single feature's importance result.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct FeatureImportanceItemDto {
     name: String,
     index: usize,
@@ -1786,6 +1899,7 @@ struct FeatureImportanceItemDto {
 
 /// Feature importance result.
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct FeatureImportanceDto {
     method: String,
     features: Vec<FeatureImportanceItemDto>,
@@ -1840,8 +1954,8 @@ pub fn feature_importance(
         .map(|n| input.features[n].clone())
         .collect();
 
-    match input.method.to_lowercase().as_str() {
-        "anova" => {
+    match named("method", &input.method, &IMPORTANCE_METHODS, true).map_err(js_err)? {
+        ImportanceMethod::Anova => {
             use crate::analysis::anova_feature_selection;
 
             let class_target = class_labels(&input.target).map_err(js_err)?;
@@ -1874,7 +1988,7 @@ pub fn feature_importance(
 
             serde_wasm_bindgen::to_value(&dto).map_err(js_err)
         }
-        "mutual_info" => {
+        ImportanceMethod::MutualInfo => {
             use crate::analysis::mutual_info_classif;
 
             let class_target = class_labels(&input.target).map_err(js_err)?;
@@ -1907,7 +2021,7 @@ pub fn feature_importance(
 
             serde_wasm_bindgen::to_value(&dto).map_err(js_err)
         }
-        "permutation" => {
+        ImportanceMethod::Permutation => {
             use crate::feature_importance::permutation_importance;
 
             // `permutation_importance` refuses fewer than one repeat.
@@ -1936,17 +2050,13 @@ pub fn feature_importance(
 
             serde_wasm_bindgen::to_value(&dto).map_err(js_err)
         }
-        other => Err(js_err(WireError::unknown_option(
-            "method",
-            other,
-            &["permutation", "anova", "mutual_info"],
-        ))),
     }
 }
 
 // ── Multicollinearity Diagnostics (VIF / Condition Number) ───────────
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct VifDto {
     vif_per_column: Vec<f64>,
     high_vif_columns: Vec<u32>,
@@ -2012,6 +2122,7 @@ pub fn vif_diagnostic(
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct ConditionNumberDto {
     condition_number: f64,
     names: Vec<String>,
@@ -2074,6 +2185,7 @@ pub fn condition_number_diagnostic(
 /// (Iglewicz & Hoaglin), `hampel` at median ± 3·(MAD/0.6745) (the Hampel
 /// identifier).
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct OutlierInputDto {
     data: Vec<f64>,
@@ -2082,6 +2194,7 @@ struct OutlierInputDto {
     #[tsify(
         type = "\"iqr\" | \"tukey\" | \"zscore\" | \"three_sigma\" | \"modified_zscore\" | \"hampel\""
     )]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::outlier_method"))]
     method: String,
 }
 fn default_outlier_method() -> String {
@@ -2089,6 +2202,7 @@ fn default_outlier_method() -> String {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct UnivariateOutlierDto {
     method: String,
     indices: Vec<usize>,
@@ -2107,27 +2221,8 @@ pub fn detect_univariate_outliers(
 ) -> Result<JsValue, JsValue> {
     let req: OutlierInputDto = from_js(data, "data")?;
 
-    use crate::profiling::{detect_outliers_slice, OutlierMethod};
-    let method = match req.method.as_str() {
-        "iqr" | "tukey" => OutlierMethod::Iqr,
-        "zscore" | "three_sigma" => OutlierMethod::Zscore,
-        "modified_zscore" => OutlierMethod::ModifiedZscore,
-        "hampel" => OutlierMethod::Hampel,
-        other => {
-            return Err(js_err(WireError::unknown_option(
-                "method",
-                other,
-                &[
-                    "iqr",
-                    "tukey",
-                    "zscore",
-                    "three_sigma",
-                    "modified_zscore",
-                    "hampel",
-                ],
-            )))
-        }
-    };
+    use crate::profiling::detect_outliers_slice;
+    let method = named("method", &req.method, &OUTLIER_METHODS, false).map_err(js_err)?;
 
     let r = detect_outliers_slice(&req.data, method).ok_or_else(|| {
         js_err(WireError::new(
@@ -2140,12 +2235,7 @@ pub fn detect_univariate_outliers(
         ))
     })?;
 
-    let method_str = match r.method {
-        OutlierMethod::Iqr => "iqr",
-        OutlierMethod::Zscore => "zscore",
-        OutlierMethod::ModifiedZscore => "modified_zscore",
-        OutlierMethod::Hampel => "hampel",
-    };
+    let method_str = outlier_method_name(r.method);
 
     let dto = UnivariateOutlierDto {
         method: method_str.to_string(),
@@ -2165,12 +2255,14 @@ pub fn detect_univariate_outliers(
 // ── Time series ──────────────────────────────────────────────────────
 
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct SeasonalityInputDto {
     data: Vec<f64>,
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct PeriodCandidateDto {
     period: usize,
     acf: f64,
@@ -2180,6 +2272,7 @@ struct PeriodCandidateDto {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct SeasonalityDto {
     period: Option<usize>,
     candidates: Vec<PeriodCandidateDto>,
@@ -2238,6 +2331,7 @@ pub fn estimate_period(
 }
 
 #[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct SpectralResidualInputDto {
     data: Vec<f64>,
@@ -2268,6 +2362,7 @@ struct SpectralResidualInputDto {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct SrPointDto {
     index: usize,
     value: f64,
@@ -2283,6 +2378,7 @@ struct SrPointDto {
 }
 
 #[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct SpectralResidualDto {
     points: Vec<SrPointDto>,
     anomalies: Vec<usize>,
@@ -2368,6 +2464,7 @@ pub fn spectral_residual(
 /// A refusal reason: the `code` an `Error` carries and the fields that can
 /// stand beside it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct RefusalCode {
     code: String,
@@ -2377,6 +2474,7 @@ struct RefusalCode {
 /// A violation a checker reports. This package has no checker; the type is
 /// here so every engine's [`Codes`] has one shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct ViolationCode {
     code: String,
@@ -2387,6 +2485,7 @@ struct ViolationCode {
 /// What this package can answer with besides a result: every refusal
 /// `code`, and no violations -- it has no checker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct Codes {
     refusals: Vec<RefusalCode>,
@@ -3162,5 +3261,258 @@ mod code_catalog_tests {
             .chain(catalog.violations.iter().map(|v| v.code.clone()))
             .collect();
         assert_eq!(documented, published);
+    }
+}
+
+/// The closed string vocabularies of the binding, and the column-keyed
+/// inputs no struct describes, as JSON Schema built from the tables the
+/// binding reads (the engine card's schemas; tests only).
+#[cfg(test)]
+mod card_schema {
+    use schemars::{Schema, SchemaGenerator};
+    use serde_json::json;
+
+    use crate::distribution::{NormalityTest, OmissionReason};
+    use crate::engine_card::string_enum;
+
+    fn schema(value: serde_json::Value) -> Schema {
+        Schema::try_from(value).expect("an object is a schema")
+    }
+
+    pub(super) fn names<T>(table: &[(&'static str, T)]) -> Schema {
+        string_enum(table.iter().map(|(n, _)| *n))
+    }
+
+    pub(super) fn linkage(_: &mut SchemaGenerator) -> Schema {
+        names(&super::LINKAGES)
+    }
+
+    pub(super) fn bin_method(_: &mut SchemaGenerator) -> Schema {
+        names(&super::BIN_METHODS)
+    }
+
+    pub(super) fn importance_method(_: &mut SchemaGenerator) -> Schema {
+        names(&super::IMPORTANCE_METHODS)
+    }
+
+    pub(super) fn outlier_method(_: &mut SchemaGenerator) -> Schema {
+        names(&super::OUTLIER_METHODS)
+    }
+
+    pub(super) fn normality_test(_: &mut SchemaGenerator) -> Schema {
+        let all = [
+            NormalityTest::KolmogorovSmirnov,
+            NormalityTest::JarqueBera,
+            NormalityTest::ShapiroWilk,
+            NormalityTest::AndersonDarling,
+        ];
+        // A new test fails to compile here until the list above has it.
+        for t in all {
+            match t {
+                NormalityTest::KolmogorovSmirnov
+                | NormalityTest::JarqueBera
+                | NormalityTest::ShapiroWilk
+                | NormalityTest::AndersonDarling => {}
+            }
+        }
+        string_enum(all.iter().map(|t| t.name()))
+    }
+
+    pub(super) fn omission_reason(_: &mut SchemaGenerator) -> Schema {
+        let all = [
+            OmissionReason::TooFewValues { min: 0 },
+            OmissionReason::TooManyValues { max: 0 },
+            OmissionReason::ConstantValues,
+        ];
+        // A new reason fails to compile here until the list above has it.
+        for r in &all {
+            match r {
+                OmissionReason::TooFewValues { .. }
+                | OmissionReason::TooManyValues { .. }
+                | OmissionReason::ConstantValues => {}
+            }
+        }
+        string_enum(all.iter().map(|r| r.name()))
+    }
+
+    /// `describe`: columns by name, each a list mixing numbers, strings,
+    /// booleans and nulls.
+    pub(super) fn describe_input() -> Schema {
+        schema(json!({
+            "description": "Columns by name; a column may mix numbers, strings, booleans and nulls.",
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": { "type": ["number", "string", "boolean", "null"] }
+            }
+        }))
+    }
+
+    /// `correlation_matrix`: numeric columns by name, and `_method`.
+    pub(super) fn correlation_input() -> Schema {
+        schema(json!({
+            "description": "Numeric columns by name, and optionally _method (default \"pearson\").",
+            "type": "object",
+            "properties": { "_method": names(&super::CORRELATION_METHODS).to_value() },
+            "additionalProperties": { "type": "array", "items": { "type": "number" } }
+        }))
+    }
+
+    /// `vif_diagnostic`: numeric columns by name, and `_threshold`.
+    pub(super) fn vif_input() -> Schema {
+        schema(json!({
+            "description": "Numeric columns by name, and optionally _threshold (default 10).",
+            "type": "object",
+            "properties": { "_threshold": { "type": "number" } },
+            "additionalProperties": { "type": "array", "items": { "type": "number" } }
+        }))
+    }
+
+    /// Numeric columns by name.
+    pub(super) fn columns() -> Schema {
+        schema(json!({
+            "description": "Numeric columns by name.",
+            "type": "object",
+            "additionalProperties": { "type": "array", "items": { "type": "number" } }
+        }))
+    }
+}
+
+#[cfg(test)]
+mod engine_card_tests {
+    //! The engine card's operations are this binding's exports, and the
+    //! schemas it points at are generated from the types they read and return.
+
+    use super::*;
+    use crate::engine_card::{arg, Schemas};
+
+    fn schemas() -> Schemas {
+        let s = Schemas::new();
+        let rows = || s.of::<Vec<Vec<f64>>>();
+        let num = || s.of::<f64>();
+        s.op(
+            "describe",
+            vec![arg("data", card_schema::describe_input())],
+            s.of::<Vec<ColumnResult>>(),
+        );
+        s.op(
+            "correlation_matrix",
+            vec![arg("data", card_schema::correlation_input())],
+            s.of::<CorrelationResult>(),
+        );
+        s.op(
+            "kmeans",
+            vec![arg("data", rows()), arg("k", num())],
+            s.of::<KMeansDto>(),
+        );
+        s.op(
+            "silhouette",
+            vec![
+                arg("data", rows()),
+                arg("labels", s.of::<Vec<f64>>()),
+                arg("k", num()),
+            ],
+            s.of::<SilhouetteDto>(),
+        );
+        s.op(
+            "pca",
+            vec![arg("data", rows()), arg("config", s.of::<PcaConfigDto>())],
+            s.of::<PcaDto>(),
+        );
+        s.op(
+            "dbscan",
+            vec![
+                arg("data", rows()),
+                arg("config", s.of::<DbscanConfigDto>()),
+            ],
+            s.of::<DbscanDto>(),
+        );
+        s.op(
+            "hierarchical",
+            vec![
+                arg("data", rows()),
+                arg("config", s.of::<HierarchicalConfigDto>()),
+            ],
+            s.of::<HierarchicalDto>(),
+        );
+        s.op(
+            "isolation_forest",
+            vec![
+                arg("data", rows()),
+                arg("config", s.of::<IsolationForestConfigDto>()),
+            ],
+            s.of::<IsolationForestDto>(),
+        );
+        s.op(
+            "lof",
+            vec![arg("data", rows()), arg("config", s.of::<LofConfigDto>())],
+            s.of::<LofDto>(),
+        );
+        s.op(
+            "distribution_analysis",
+            vec![
+                arg("data", s.of::<Vec<f64>>()),
+                arg("config", s.of::<DistributionConfigDto>()),
+            ],
+            s.of::<DistributionAnalysisDto>(),
+        );
+        s.op(
+            "regression",
+            vec![arg("data", s.of::<RegressionInputDto>())],
+            s.of::<RegressionDto>(),
+        );
+        s.op(
+            "feature_importance",
+            vec![arg("data", s.of::<FeatureImportanceInputDto>())],
+            s.of::<FeatureImportanceDto>(),
+        );
+        s.op(
+            "vif_diagnostic",
+            vec![arg("data", card_schema::vif_input())],
+            s.of::<VifDto>(),
+        );
+        s.op(
+            "condition_number_diagnostic",
+            vec![arg("data", card_schema::columns())],
+            s.of::<ConditionNumberDto>(),
+        );
+        s.op(
+            "detect_univariate_outliers",
+            vec![arg("data", s.of::<OutlierInputDto>())],
+            s.of::<UnivariateOutlierDto>(),
+        );
+        s.op(
+            "estimate_period",
+            vec![arg("data", s.of::<SeasonalityInputDto>())],
+            s.of::<SeasonalityDto>(),
+        );
+        s.op(
+            "spectral_residual",
+            vec![arg("data", s.of::<SpectralResidualInputDto>())],
+            s.of::<SpectralResidualDto>(),
+        );
+        s
+    }
+
+    #[test]
+    fn the_schemas_are_generated_from_the_binding_types() {
+        schemas().check("u-insight WebAssembly operations");
+    }
+
+    #[test]
+    fn every_export_is_a_card_operation_with_its_arguments() {
+        let s = schemas();
+        s.check_exports(include_str!("wasm.rs"));
+        s.check_card();
+    }
+
+    /// Nothing reads a clock or draws unseeded randomness: the randomized
+    /// methods (k-means++ initialisation, isolation forest, permutation
+    /// importance) draw from a seed that defaults to a fixed value, so every
+    /// operation returns the same result for the same arguments.
+    #[test]
+    fn the_crate_reads_no_clock_and_no_unseeded_randomness() {
+        let expected: Vec<(String, &str)> = Vec::new();
+        assert_eq!(crate::engine_card::clock_and_entropy_uses(), expected);
     }
 }

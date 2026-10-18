@@ -1,0 +1,2289 @@
+{
+  "$defs": {
+    "BoolStats": {
+      "description": "Summary statistics for a boolean column.",
+      "properties": {
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "false_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "missing_pct": {
+          "format": "double",
+          "type": "number"
+        },
+        "null_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "true_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "true_ratio": {
+          "description": "`undefined` with no valid values.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "count",
+        "null_count",
+        "missing_pct",
+        "true_count",
+        "false_count"
+      ],
+      "type": "object"
+    },
+    "CatStats": {
+      "description": "Summary statistics for a categorical column.",
+      "properties": {
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "distinct_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "is_constant": {
+          "type": "boolean"
+        },
+        "missing_pct": {
+          "format": "double",
+          "type": "number"
+        },
+        "mode_ratio": {
+          "description": "`undefined` with no valid values.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "null_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "top_values": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "count",
+        "null_count",
+        "missing_pct",
+        "distinct_count",
+        "top_values",
+        "is_constant"
+      ],
+      "type": "object"
+    },
+    "ColumnResult": {
+      "description": "Column profile result returned by `describe`.",
+      "properties": {
+        "boolean": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoolStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categorical": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "numeric": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NumericStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "data_type"
+      ],
+      "type": "object"
+    },
+    "ConditionNumberDto": {
+      "properties": {
+        "condition_number": {
+          "format": "double",
+          "type": "number"
+        },
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "condition_number",
+        "names"
+      ],
+      "type": "object"
+    },
+    "CorrelationPairDto": {
+      "properties": {
+        "col_a": {
+          "type": "string"
+        },
+        "col_b": {
+          "type": "string"
+        },
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "r": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "col_a",
+        "col_b",
+        "r",
+        "p_value"
+      ],
+      "type": "object"
+    },
+    "CorrelationResult": {
+      "description": "Result of correlation analysis.",
+      "properties": {
+        "high_pairs": {
+          "description": "Pairs with |r| > 0.7, sorted by |r| descending.",
+          "items": {
+            "$ref": "#/$defs/CorrelationPairDto"
+          },
+          "type": "array"
+        },
+        "matrix": {
+          "description": "Flattened n×n matrix (row-major).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "n": {
+          "description": "n — dimension of the square matrix.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "names": {
+          "description": "Column names (in order).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "names",
+        "matrix",
+        "n",
+        "high_pairs"
+      ],
+      "type": "object"
+    },
+    "DbscanConfigDto": {
+      "additionalProperties": false,
+      "description": "DBSCAN configuration input.",
+      "properties": {
+        "epsilon": {
+          "format": "double",
+          "type": "number"
+        },
+        "min_samples": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "epsilon",
+        "min_samples"
+      ],
+      "type": "object"
+    },
+    "DbscanDto": {
+      "description": "DBSCAN clustering result.",
+      "properties": {
+        "cluster_sizes": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "core_points": {
+          "items": {
+            "type": "boolean"
+          },
+          "type": "array"
+        },
+        "labels": {
+          "description": "Cluster label per point: null = noise, number = cluster id.",
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "n_clusters": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "noise_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "labels",
+        "n_clusters",
+        "noise_count",
+        "cluster_sizes",
+        "core_points"
+      ],
+      "type": "object"
+    },
+    "DistributionAnalysisDto": {
+      "properties": {
+        "ecdf": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EcdfDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fits": {
+          "items": {
+            "$ref": "#/$defs/FitResultDto"
+          },
+          "type": "array"
+        },
+        "histogram": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HistogramDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "normality": {
+          "$ref": "#/$defs/NormalityDto"
+        },
+        "qq_plot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QQPlotDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "n",
+        "normality",
+        "fits"
+      ],
+      "type": "object"
+    },
+    "DistributionConfigDto": {
+      "additionalProperties": false,
+      "description": "Distribution analysis configuration input.",
+      "properties": {
+        "bin_method": {
+          "default": "freedman_diaconis",
+          "description": "Bin method: \"sturges\", \"scott\", \"freedman_diaconis\". Default: \"freedman_diaconis\".",
+          "enum": [
+            "sturges",
+            "scott",
+            "freedman_diaconis"
+          ],
+          "type": "string"
+        },
+        "bins": {
+          "description": "Explicit bin count (>= 1). When set, takes precedence over `bin_method`.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "compute_ecdf": {
+          "default": true,
+          "description": "Whether to compute ECDF. Default: true.",
+          "type": "boolean"
+        },
+        "compute_histogram": {
+          "default": true,
+          "description": "Whether to compute histogram. Default: true.",
+          "type": "boolean"
+        },
+        "compute_qq_plot": {
+          "default": true,
+          "description": "Whether to compute QQ-plot. Default: true.",
+          "type": "boolean"
+        },
+        "fit_distributions": {
+          "default": false,
+          "description": "Whether to fit distributions. Default: false.",
+          "type": "boolean"
+        },
+        "significance_level": {
+          "default": 0.05,
+          "description": "Significance level for normality tests. Default: 0.05.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "EcdfDto": {
+      "properties": {
+        "probabilities": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "values",
+        "probabilities"
+      ],
+      "type": "object"
+    },
+    "FeatureImportanceDto": {
+      "description": "Feature importance result.",
+      "properties": {
+        "baseline_score": {
+          "description": "Only present for permutation importance.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "features": {
+          "items": {
+            "$ref": "#/$defs/FeatureImportanceItemDto"
+          },
+          "type": "array"
+        },
+        "method": {
+          "type": "string"
+        },
+        "selected_indices": {
+          "description": "Only present for ANOVA.",
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "features"
+      ],
+      "type": "object"
+    },
+    "FeatureImportanceInputDto": {
+      "additionalProperties": false,
+      "description": "Feature importance input.",
+      "properties": {
+        "features": {
+          "additionalProperties": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Feature columns: `{ \"f1\": [1,2,3], \"f2\": [4,5,6] }`.",
+          "type": "object"
+        },
+        "method": {
+          "default": "permutation",
+          "description": "Method: \"permutation\", \"anova\", or \"mutual_info\". Default: \"permutation\".",
+          "enum": [
+            "permutation",
+            "anova",
+            "mutual_info"
+          ],
+          "type": "string"
+        },
+        "n_bins": {
+          "description": "Number of bins for mutual information. None = auto (Sturges' rule).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "n_repeats": {
+          "description": "Number of permutation repeats. Default: 5.",
+          "type": "integer"
+        },
+        "seed": {
+          "description": "Random seed for permutation. Default: 42.",
+          "type": "integer"
+        },
+        "significance_level": {
+          "default": 0.05,
+          "description": "Significance level for ANOVA. Default: 0.05.",
+          "format": "double",
+          "type": "number"
+        },
+        "target": {
+          "description": "Target values (continuous for permutation, categorical class ids for ANOVA/MI).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "features",
+        "target"
+      ],
+      "type": "object"
+    },
+    "FeatureImportanceItemDto": {
+      "description": "A single feature's importance result.",
+      "properties": {
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "p_value": {
+          "description": "Only present for ANOVA.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "score": {
+          "format": "double",
+          "type": "number"
+        },
+        "std_dev": {
+          "description": "Only present for permutation importance.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "index",
+        "score"
+      ],
+      "type": "object"
+    },
+    "FitResultDto": {
+      "properties": {
+        "aic": {
+          "format": "double",
+          "type": "number"
+        },
+        "bic": {
+          "format": "double",
+          "type": "number"
+        },
+        "distribution": {
+          "type": "string"
+        },
+        "log_likelihood": {
+          "format": "double",
+          "type": "number"
+        },
+        "n_params": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parameters": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "format": "double",
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "distribution",
+        "parameters",
+        "log_likelihood",
+        "aic",
+        "bic",
+        "n_params"
+      ],
+      "type": "object"
+    },
+    "HierarchicalConfigDto": {
+      "additionalProperties": false,
+      "description": "Hierarchical clustering configuration input.",
+      "properties": {
+        "distance_threshold": {
+          "description": "Distance threshold for dendrogram cut (mutually exclusive with n_clusters).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "linkage": {
+          "default": "ward",
+          "description": "Linkage: \"single\", \"complete\", \"average\", \"ward\". Default: \"ward\".",
+          "enum": [
+            "single",
+            "complete",
+            "average",
+            "ward"
+          ],
+          "type": "string"
+        },
+        "max_points": {
+          "description": "Max input points (memory guard). Omit for the default; `0` disables it.\nRejects oversized inputs before allocating the O(n²) distance matrix.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "n_clusters": {
+          "description": "Number of flat clusters (mutually exclusive with distance_threshold).",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "HierarchicalDto": {
+      "description": "Hierarchical clustering result.",
+      "properties": {
+        "labels": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "merges": {
+          "items": {
+            "$ref": "#/$defs/MergeDto"
+          },
+          "type": "array"
+        },
+        "n_clusters": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "merges"
+      ],
+      "type": "object"
+    },
+    "HistogramDto": {
+      "properties": {
+        "bin_width": {
+          "format": "double",
+          "type": "number"
+        },
+        "counts": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "method": {
+          "type": "string"
+        },
+        "n_bins": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "n_bins",
+        "bin_width",
+        "edges",
+        "counts",
+        "method"
+      ],
+      "type": "object"
+    },
+    "IsolationForestConfigDto": {
+      "additionalProperties": false,
+      "description": "Isolation Forest configuration input.",
+      "properties": {
+        "contamination": {
+          "default": 0.1,
+          "description": "Expected contamination rate (0.0–1.0). Default: 0.1.",
+          "format": "double",
+          "type": "number"
+        },
+        "max_samples": {
+          "description": "Subsample size per tree. 0 = auto (min(256, n)). Default: 0.",
+          "type": "integer"
+        },
+        "n_estimators": {
+          "description": "Number of trees. Default: 100.",
+          "type": "integer"
+        },
+        "seed": {
+          "description": "Random seed. Default: 42.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IsolationForestDto": {
+      "description": "Isolation Forest anomaly detection result.",
+      "properties": {
+        "anomalies": {
+          "items": {
+            "type": "boolean"
+          },
+          "type": "array"
+        },
+        "anomaly_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "anomaly_fraction": {
+          "format": "double",
+          "type": "number"
+        },
+        "scores": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "threshold": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "scores",
+        "anomalies",
+        "threshold",
+        "anomaly_count",
+        "anomaly_fraction"
+      ],
+      "type": "object"
+    },
+    "KMeansDto": {
+      "description": "Result of K-Means clustering.",
+      "properties": {
+        "centroids": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "cluster_sizes": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "iterations": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "k": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "labels": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "wcss": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "k",
+        "labels",
+        "centroids",
+        "wcss",
+        "iterations",
+        "cluster_sizes"
+      ],
+      "type": "object"
+    },
+    "LofConfigDto": {
+      "additionalProperties": false,
+      "description": "LOF configuration input.",
+      "properties": {
+        "contamination": {
+          "default": null,
+          "description": "Expected outlier fraction, in `[0, 1]`: the `ceil(n·contamination)`\nhighest scores are outliers and `threshold` in the result is the lowest\nof them. Cannot be given with `threshold`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "k": {
+          "description": "Number of nearest neighbors. Default: 20.",
+          "type": "integer"
+        },
+        "threshold": {
+          "default": null,
+          "description": "LOF score above which a point is an outlier. Default: 1.5 when\n`contamination` is not given; cannot be given with it.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LofDto": {
+      "description": "LOF anomaly detection result.",
+      "properties": {
+        "anomalies": {
+          "items": {
+            "type": "boolean"
+          },
+          "type": "array"
+        },
+        "anomaly_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "anomaly_fraction": {
+          "format": "double",
+          "type": "number"
+        },
+        "scores": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "threshold": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "scores",
+        "anomalies",
+        "threshold",
+        "anomaly_count",
+        "anomaly_fraction"
+      ],
+      "type": "object"
+    },
+    "MergeDto": {
+      "description": "A single merge step in the dendrogram.",
+      "properties": {
+        "cluster_a": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cluster_b": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "distance": {
+          "format": "double",
+          "type": "number"
+        },
+        "size": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cluster_a",
+        "cluster_b",
+        "distance",
+        "size"
+      ],
+      "type": "object"
+    },
+    "NormalityDto": {
+      "properties": {
+        "anderson_darling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalityTestDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_normal": {
+          "type": "boolean"
+        },
+        "jarque_bera": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalityTestDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ks_test": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalityTestDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "omitted": {
+          "description": "The tests above that are absent, each with its reason; empty when all\nfour ran. `is_normal` combines only the tests that ran.",
+          "items": {
+            "$ref": "#/$defs/OmittedTestDto"
+          },
+          "type": "array"
+        },
+        "shapiro_wilk": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalityTestDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "significance_level": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "omitted",
+        "is_normal",
+        "significance_level"
+      ],
+      "type": "object"
+    },
+    "NormalityTestDto": {
+      "properties": {
+        "p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "rejected": {
+          "type": "boolean"
+        },
+        "statistic": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "statistic",
+        "p_value",
+        "rejected"
+      ],
+      "type": "object"
+    },
+    "NumericStats": {
+      "description": "Descriptive statistics for a single numeric column. A statistic the data\ndoes not define is `undefined`: every one with no valid values; `std_dev`\nand `variance` below 2 values; `skewness` below 3 and `kurtosis` below 4,\nand both when the values do not vary.",
+      "properties": {
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "iqr": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "kurtosis": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mean": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "median": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "missing_pct": {
+          "format": "double",
+          "type": "number"
+        },
+        "null_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "p5": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "p95": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "q1": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "q3": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "skewness": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "std_dev": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "variance": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "count",
+        "null_count",
+        "missing_pct"
+      ],
+      "type": "object"
+    },
+    "OmittedTestDto": {
+      "description": "A normality test with no result, and why. `min` is set for\n`\"too_few_values\"`, `max` for `\"too_many_values\"`.",
+      "properties": {
+        "max": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "too_few_values",
+            "too_many_values",
+            "constant_values"
+          ],
+          "type": "string"
+        },
+        "test": {
+          "enum": [
+            "ks_test",
+            "jarque_bera",
+            "shapiro_wilk",
+            "anderson_darling"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "test",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "OutlierInputDto": {
+      "additionalProperties": false,
+      "description": "Univariate outlier detection on a flat numeric vector.\n\n# Input\n```json\n{ \"data\": [1.0, 2.0, 3.0, 100.0], \"method\": \"iqr\" }\n```\n`method` ∈ `{\"iqr\"|\"tukey\", \"zscore\"|\"three_sigma\", \"modified_zscore\"|\"hampel\"}`.\nOptional, defaults to `\"iqr\"`.\n\n# Output\n`{ method, indices, scores, count, pct, lower_fence, upper_fence, center, spread }`\n\n`method` aliases: `tukey` → IQR Tukey fences (k=1.5), `three_sigma` →\nmean ± 3·σ. `modified_zscore` fences at median ± 3.5·(MAD/0.6745)\n(Iglewicz & Hoaglin), `hampel` at median ± 3·(MAD/0.6745) (the Hampel\nidentifier).",
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "method": {
+          "default": "iqr",
+          "enum": [
+            "iqr",
+            "tukey",
+            "zscore",
+            "three_sigma",
+            "modified_zscore",
+            "hampel"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "PcaConfigDto": {
+      "additionalProperties": false,
+      "description": "PCA configuration input.",
+      "properties": {
+        "auto_scale": {
+          "default": true,
+          "description": "Standardise each column to unit variance before the decomposition\n(correlation-matrix PCA). Default: `true` — without it a column in\nlarge units takes the leading components. `false` gives\ncovariance-matrix PCA.",
+          "type": "boolean"
+        },
+        "n_components": {
+          "description": "Number of principal components to keep.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "n_components"
+      ],
+      "type": "object"
+    },
+    "PcaDto": {
+      "description": "Result of PCA.",
+      "properties": {
+        "cumulative_variance_ratio": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "eigenvalues": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "explained_variance_ratio": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "loadings": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "means": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "n_components": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "n_features": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scores": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "stds": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "n_components",
+        "n_features",
+        "eigenvalues",
+        "explained_variance_ratio",
+        "cumulative_variance_ratio",
+        "loadings",
+        "scores",
+        "means",
+        "stds"
+      ],
+      "type": "object"
+    },
+    "PeriodCandidateDto": {
+      "properties": {
+        "acf": {
+          "format": "double",
+          "type": "number"
+        },
+        "bin": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "period": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "power": {
+          "format": "double",
+          "type": "number"
+        },
+        "power_share": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "period",
+        "acf",
+        "bin",
+        "power",
+        "power_share"
+      ],
+      "type": "object"
+    },
+    "QQPlotDto": {
+      "properties": {
+        "sample": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "theoretical": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "theoretical",
+        "sample"
+      ],
+      "type": "object"
+    },
+    "RegressionDto": {
+      "description": "Regression analysis result.",
+      "properties": {
+        "adj_r_squared": {
+          "format": "double",
+          "type": "number"
+        },
+        "coefficients": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "f_p_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "fitted": {
+          "description": "Fitted values, one per observation in input order.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "p_values": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "predictor_names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "r_squared": {
+          "format": "double",
+          "type": "number"
+        },
+        "residuals": {
+          "description": "Residuals `y − ŷ`, one per observation in input order.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "target_name": {
+          "type": "string"
+        },
+        "vif": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "target_name",
+        "predictor_names",
+        "r_squared",
+        "adj_r_squared",
+        "coefficients",
+        "p_values",
+        "vif",
+        "f_p_value",
+        "fitted",
+        "residuals"
+      ],
+      "type": "object"
+    },
+    "RegressionInputDto": {
+      "additionalProperties": false,
+      "description": "Regression input: column-major predictors + target.",
+      "properties": {
+        "predictors": {
+          "additionalProperties": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Predictor columns: `{ \"x1\": [1,2,3], \"x2\": [4,5,6] }`.",
+          "type": "object"
+        },
+        "target": {
+          "description": "Target column values.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "target_name": {
+          "description": "Target column name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "predictors",
+        "target",
+        "target_name"
+      ],
+      "type": "object"
+    },
+    "SeasonalityDto": {
+      "properties": {
+        "acf_threshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/PeriodCandidateDto"
+          },
+          "type": "array"
+        },
+        "n": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "period": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "power_threshold": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "candidates",
+        "n",
+        "acf_threshold",
+        "power_threshold"
+      ],
+      "type": "object"
+    },
+    "SeasonalityInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "SilhouetteDto": {
+      "description": "Result of silhouette analysis.",
+      "properties": {
+        "avg": {
+          "format": "double",
+          "type": "number"
+        },
+        "per_sample": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "avg",
+        "per_sample"
+      ],
+      "type": "object"
+    },
+    "SpectralResidualDto": {
+      "properties": {
+        "anomalies": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/SrPointDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "points",
+        "anomalies"
+      ],
+      "type": "object"
+    },
+    "SpectralResidualInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "averaging_window": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "batch_size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "judgement_window": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_zscore": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sensitivity": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "threshold": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "SrPointDto": {
+      "properties": {
+        "expected": {
+          "format": "double",
+          "type": "number"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "is_anomaly": {
+          "type": "boolean"
+        },
+        "lower": {
+          "format": "double",
+          "type": "number"
+        },
+        "near_edge": {
+          "description": "Within kappa = 5 places of an end of the batch, where the\ntransform's own boundary handling moves the saliency most.",
+          "type": "boolean"
+        },
+        "saliency": {
+          "format": "double",
+          "type": "number"
+        },
+        "score": {
+          "format": "double",
+          "type": "number"
+        },
+        "upper": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "index",
+        "value",
+        "saliency",
+        "score",
+        "expected",
+        "lower",
+        "upper",
+        "is_anomaly",
+        "near_edge"
+      ],
+      "type": "object"
+    },
+    "TextStats": {
+      "description": "Summary statistics for a text column.",
+      "properties": {
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "distinct_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "empty_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_length": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mean_length": {
+          "description": "`undefined` with no valid values.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min_length": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "missing_pct": {
+          "format": "double",
+          "type": "number"
+        },
+        "null_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "null_count",
+        "missing_pct",
+        "distinct_count",
+        "min_length",
+        "max_length",
+        "empty_count"
+      ],
+      "type": "object"
+    },
+    "UnivariateOutlierDto": {
+      "properties": {
+        "center": {
+          "format": "double",
+          "type": "number"
+        },
+        "count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "indices": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "lower_fence": {
+          "format": "double",
+          "type": "number"
+        },
+        "method": {
+          "type": "string"
+        },
+        "pct": {
+          "format": "double",
+          "type": "number"
+        },
+        "scores": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "spread": {
+          "format": "double",
+          "type": "number"
+        },
+        "upper_fence": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "method",
+        "indices",
+        "scores",
+        "count",
+        "pct",
+        "lower_fence",
+        "upper_fence",
+        "center",
+        "spread"
+      ],
+      "type": "object"
+    },
+    "VifDto": {
+      "properties": {
+        "high_vif_columns": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "threshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "vif_per_column": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "vif_per_column",
+        "high_vif_columns",
+        "threshold",
+        "names"
+      ],
+      "type": "object"
+    },
+    "condition_number_diagnostic.input": {
+      "additionalProperties": false,
+      "description": "The arguments of condition_number_diagnostic(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "additionalProperties": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Numeric columns by name.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "condition_number_diagnostic.output": {
+      "$ref": "#/$defs/ConditionNumberDto"
+    },
+    "correlation_matrix.input": {
+      "additionalProperties": false,
+      "description": "The arguments of correlation_matrix(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "additionalProperties": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Numeric columns by name, and optionally _method (default \"pearson\").",
+          "properties": {
+            "_method": {
+              "enum": [
+                "pearson",
+                "spearman",
+                "kendall"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "correlation_matrix.output": {
+      "$ref": "#/$defs/CorrelationResult"
+    },
+    "dbscan.input": {
+      "additionalProperties": false,
+      "description": "The arguments of dbscan(data, config), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/DbscanConfigDto"
+        },
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data",
+        "config"
+      ],
+      "type": "object"
+    },
+    "dbscan.output": {
+      "$ref": "#/$defs/DbscanDto"
+    },
+    "describe.input": {
+      "additionalProperties": false,
+      "description": "The arguments of describe(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "additionalProperties": {
+            "items": {
+              "type": [
+                "number",
+                "string",
+                "boolean",
+                "null"
+              ]
+            },
+            "type": "array"
+          },
+          "description": "Columns by name; a column may mix numbers, strings, booleans and nulls.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "describe.output": {
+      "items": {
+        "$ref": "#/$defs/ColumnResult"
+      },
+      "type": "array"
+    },
+    "detect_univariate_outliers.input": {
+      "additionalProperties": false,
+      "description": "The arguments of detect_univariate_outliers(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/OutlierInputDto"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "detect_univariate_outliers.output": {
+      "$ref": "#/$defs/UnivariateOutlierDto"
+    },
+    "distribution_analysis.input": {
+      "additionalProperties": false,
+      "description": "The arguments of distribution_analysis(data, config), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/DistributionConfigDto"
+        },
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data",
+        "config"
+      ],
+      "type": "object"
+    },
+    "distribution_analysis.output": {
+      "$ref": "#/$defs/DistributionAnalysisDto"
+    },
+    "estimate_period.input": {
+      "additionalProperties": false,
+      "description": "The arguments of estimate_period(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SeasonalityInputDto"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "estimate_period.output": {
+      "$ref": "#/$defs/SeasonalityDto"
+    },
+    "feature_importance.input": {
+      "additionalProperties": false,
+      "description": "The arguments of feature_importance(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/FeatureImportanceInputDto"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "feature_importance.output": {
+      "$ref": "#/$defs/FeatureImportanceDto"
+    },
+    "hierarchical.input": {
+      "additionalProperties": false,
+      "description": "The arguments of hierarchical(data, config), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/HierarchicalConfigDto"
+        },
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data",
+        "config"
+      ],
+      "type": "object"
+    },
+    "hierarchical.output": {
+      "$ref": "#/$defs/HierarchicalDto"
+    },
+    "isolation_forest.input": {
+      "additionalProperties": false,
+      "description": "The arguments of isolation_forest(data, config), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/IsolationForestConfigDto"
+        },
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data",
+        "config"
+      ],
+      "type": "object"
+    },
+    "isolation_forest.output": {
+      "$ref": "#/$defs/IsolationForestDto"
+    },
+    "kmeans.input": {
+      "additionalProperties": false,
+      "description": "The arguments of kmeans(data, k), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "k": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "data",
+        "k"
+      ],
+      "type": "object"
+    },
+    "kmeans.output": {
+      "$ref": "#/$defs/KMeansDto"
+    },
+    "lof.input": {
+      "additionalProperties": false,
+      "description": "The arguments of lof(data, config), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/LofConfigDto"
+        },
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data",
+        "config"
+      ],
+      "type": "object"
+    },
+    "lof.output": {
+      "$ref": "#/$defs/LofDto"
+    },
+    "pca.input": {
+      "additionalProperties": false,
+      "description": "The arguments of pca(data, config), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/PcaConfigDto"
+        },
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data",
+        "config"
+      ],
+      "type": "object"
+    },
+    "pca.output": {
+      "$ref": "#/$defs/PcaDto"
+    },
+    "regression.input": {
+      "additionalProperties": false,
+      "description": "The arguments of regression(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/RegressionInputDto"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "regression.output": {
+      "$ref": "#/$defs/RegressionDto"
+    },
+    "silhouette.input": {
+      "additionalProperties": false,
+      "description": "The arguments of silhouette(data, labels, k), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "k": {
+          "format": "double",
+          "type": "number"
+        },
+        "labels": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data",
+        "labels",
+        "k"
+      ],
+      "type": "object"
+    },
+    "silhouette.output": {
+      "$ref": "#/$defs/SilhouetteDto"
+    },
+    "spectral_residual.input": {
+      "additionalProperties": false,
+      "description": "The arguments of spectral_residual(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SpectralResidualInputDto"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "spectral_residual.output": {
+      "$ref": "#/$defs/SpectralResidualDto"
+    },
+    "vif_diagnostic.input": {
+      "additionalProperties": false,
+      "description": "The arguments of vif_diagnostic(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "additionalProperties": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Numeric columns by name, and optionally _threshold (default 10).",
+          "properties": {
+            "_threshold": {
+              "type": "number"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "vif_diagnostic.output": {
+      "$ref": "#/$defs/VifDto"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "u-insight WebAssembly operations"
+}
