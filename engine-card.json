@@ -71,7 +71,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The mean, standard deviation, variance, extremes, quantiles (linear interpolation), adjusted skewness and adjusted excess kurtosis of a numeric column equal NumPy's and SciPy's (bias=False), and the same column in a unit 1e-9 or 1e6 times different gives the same shape statistics and scaled location statistics.",
+            "reference_kind": "reference_implementation",
+            "reference": "NumPy 2.4.6 mean, std(ddof=1), percentile; SciPy 1.17.1 skew and kurtosis with bias=False",
+            "method": "profiles the 60-value gamma draw of the distribution tests, also scaled",
+            "tolerance": "1e-12 (relative) moments and quantiles; 1e-9 skewness and kurtosis",
+            "test": "tests/reference_describe.rs::describe_matches_numpy_and_scipy_in_every_unit"
+          }
+        ],
+        "limits": [
+          "The numeric profile only; boolean, categorical and text profiles, the diagnostic flags and the missing-value handling are covered by unit tests."
+        ]
       },
       "performance": {
         "status": "none"
@@ -395,7 +408,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "Planted far points get the highest scores and are the ones flagged, the scores lie strictly between 0 and 1, a seed reproduces the scores exactly, and the same data in a unit 1e-9 or 1e6 times different gives the same flags and scores.",
+            "reference_kind": "literature",
+            "reference": "Liu, Ting & Zhou (2008), Isolation Forest, ICDM -- the score 2^(-E[h]/c(n)) lies in (0, 1) and ranks isolated points highest",
+            "method": "scores a 123-point cloud with three planted points at several scales",
+            "tolerance": "exact flags; 1e-12 scores",
+            "test": "tests/reference_anomaly.rs::isolation_forest_scores_rank_the_planted_points_first"
+          }
+        ],
+        "limits": [
+          "The forest is randomised with this crate's generator, so its scores are not compared with scikit-learn's IsolationForest."
+        ]
       },
       "performance": {
         "status": "none"
@@ -583,7 +609,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The ANOVA F statistic and p-value of each feature equal SciPy's f_oneway and select the informative features; the mutual information equals the plug-in estimate on equal-frequency (Sturges) bins; the permutation importance ranks the features that generate the target above the others, whatever the unit of the target.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1 f_oneway; plug-in mutual information restated in NumPy 2.4.6 from its definition (scikit-learn's mutual_info_classif is a different, nearest-neighbour estimator)",
+            "method": "scores four features (two informative, one weak, one noise) of a 45-row, three-class draw",
+            "tolerance": "1e-9 (relative) F; 1e-6 p; 1e-9 mutual information",
+            "test": "tests/reference_features.rs::anova_f_and_p_match_scipy_f_oneway"
+          }
+        ],
+        "limits": [
+          "Mutual information is the binned estimate, so its values differ from scikit-learn's; permutation importance is randomised and is checked for structure, not values."
+        ]
       },
       "performance": {
         "status": "none"
@@ -770,7 +809,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The estimated period of a trended sine of period 7, 12 or 24 is that period; the periodogram and the dominant period are compared with NumPy in the engine that computes them.",
+            "reference_kind": "reference_implementation",
+            "reference": "series generated from a known period; NumPy 2.4.6 periodogram checked in u-analytics (`seasonality::numpy_reference`)",
+            "method": "estimates the period of three generated 120-point series",
+            "tolerance": "exact",
+            "test": "tests/reference_anomaly.rs::the_period_estimate_is_the_generating_period"
+          }
+        ],
+        "limits": [
+          "This checks that the operation reaches the verified engine, not the engine's numbers; series with several periods and noise-only series are covered in u-analytics."
+        ]
       },
       "performance": {
         "status": "none"
@@ -805,7 +857,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "A spike planted in a noisy sine is flagged (and not more than two other points); the saliency map and the scores equal the published method restated in NumPy in the engine that computes them.",
+            "reference_kind": "literature",
+            "reference": "Ren et al. (2019), Time-Series Anomaly Detection Service at Microsoft, KDD; NumPy 2.4.6 restatement checked in u-analytics (`detection::spectral_residual::numpy_reference`)",
+            "method": "analyses a 96-point series with a spike at index 60",
+            "tolerance": "exact (flagged index)",
+            "test": "tests/reference_anomaly.rs::the_spectral_residual_flags_a_planted_spike"
+          }
+        ],
+        "limits": [
+          "This checks that the operation reaches the verified engine, not the engine's numbers."
+        ]
       },
       "performance": {
         "status": "none"
