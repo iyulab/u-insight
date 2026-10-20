@@ -478,7 +478,29 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The Shapiro-Wilk, Jarque-Bera, Kolmogorov-Smirnov and Anderson-Darling statistics and p-values equal SciPy's (Anderson-Darling is reported as the small-sample adjusted A*^2 with the D'Agostino-Stephens p-value).",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1 shapiro, jarque_bera, kstest, anderson",
+            "method": "tests a seeded gamma draw of 57 values with three planted extremes (n = 60), rounded to six places",
+            "tolerance": "1e-9 (relative) statistics; 1e-3 to 1e-7 p-values; KS p within 1 %",
+            "test": "tests/reference_dist.rs::normality_tests_match_scipy"
+          },
+          {
+            "claim": "The maximum-likelihood fits of the normal, exponential and log-normal distributions equal SciPy's, and the Weibull and gamma fits reach SciPy's parameters and a log-likelihood at least as high.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1 norm, expon, lognorm, weibull_min, gamma .fit with the location fixed at 0",
+            "method": "fits a seeded gamma draw of 57 values with three planted extremes (n = 60), rounded to six places",
+            "tolerance": "1e-9 (relative) closed-form fits; 1e-4 numerical fits",
+            "test": "tests/reference_dist.rs::fitted_distributions_match_scipy_maximum_likelihood"
+          }
+        ],
+        "limits": [
+          "The Kolmogorov-Smirnov p-value is a finite-sample corrected Kolmogorov approximation (within 1 % of SciPy's exact value at n = 60) and treats the sample mean and standard deviation as known, as SciPy does; a Lilliefors table is not used.",
+          "ECDF, histogram and Q-Q plot values, the AIC/BIC ranking and the Grubbs test are covered by unit tests, not compared with a library."
+        ]
       },
       "performance": {
         "status": "none"
@@ -692,7 +714,28 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The IQR fences (linear-interpolated quartiles, k = 1.5), the z-score fences (sample standard deviation, 3) and the modified z-score centre and MAD match the published definitions, with the same points flagged; the same data multiplied by 1e-9, 1e-6 and 1e6 gives fences scaled by the factor and the same flags.",
+            "reference_kind": "literature",
+            "reference": "Tukey (1977) fences; Iglewicz & Hoaglin (1993) modified z-score; NumPy 2.4.6 percentile and median",
+            "method": "detects outliers in a seeded gamma draw of 57 values with three planted extremes (n = 60), rounded to six places",
+            "tolerance": "1e-9 (relative)",
+            "test": "tests/reference_dist.rs::univariate_outlier_fences_match_the_definitions"
+          },
+          {
+            "claim": "Grubbs' statistic and critical value (t quantile at alpha/(2n)) equal the closed form, in any unit.",
+            "reference_kind": "literature",
+            "reference": "Grubbs (1969); NIST e-Handbook 1.3.5.17; SciPy 1.17.1 t.ppf",
+            "method": "tests the same data at alpha 0.05, also scaled by 1e-9, 1e-6 and 1e6",
+            "tolerance": "1e-9 (relative) statistic; 1e-6 critical value",
+            "test": "tests/reference_dist.rs::univariate_outliers_and_grubbs_do_not_depend_on_the_unit"
+          }
+        ],
+        "limits": [
+          "Constant or near-constant data (spread below 1e-15 in absolute terms) give no fences; the Hampel identifier is covered by unit tests."
+        ]
       },
       "performance": {
         "status": "none"
