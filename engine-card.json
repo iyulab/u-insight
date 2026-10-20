@@ -154,7 +154,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "On well-separated blobs the partition and the within-cluster sum of squares equal scikit-learn's best of ten restarts.",
+            "reference_kind": "reference_implementation",
+            "reference": "scikit-learn 1.9.1 KMeans(3, n_init=10)",
+            "method": "clusters a seeded NumPy draw of three Gaussian blobs of 20 points in 3 dimensions plus two far points, rounded to six places",
+            "tolerance": "1e-9 (relative) inertia; partition exact",
+            "test": "tests/reference_ml.rs::kmeans_finds_the_same_optimum_as_scikit_learn"
+          }
+        ],
+        "limits": [
+          "Only where the optimum is unique and easy to find; k-means is a local search, so overlapping clusters can end in different local optima."
+        ]
       },
       "performance": {
         "status": "none"
@@ -189,7 +202,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The mean silhouette and each point's silhouette equal scikit-learn's for the same labels.",
+            "reference_kind": "reference_implementation",
+            "reference": "scikit-learn 1.9.1 silhouette_score and silhouette_samples",
+            "method": "scores the k-means labels of a seeded NumPy draw of three Gaussian blobs of 20 points in 3 dimensions plus two far points, rounded to six places",
+            "tolerance": "1e-10 (relative) mean; 1e-9 per sample",
+            "test": "tests/reference_ml.rs::silhouette_matches_scikit_learn"
+          }
+        ],
+        "limits": [
+          "Euclidean distance; one data set, no singleton clusters."
+        ]
       },
       "performance": {
         "status": "none",
@@ -225,7 +251,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The eigenvalues, explained-variance ratios, loadings (up to sign) and scores (up to sign) equal scikit-learn's PCA; with auto_scale the eigenvalues equal the eigenvalues of the correlation matrix.",
+            "reference_kind": "reference_implementation",
+            "reference": "scikit-learn 1.9.1 PCA; NumPy 2.4.6 linalg.eigvalsh(corrcoef)",
+            "method": "fits three components of a seeded NumPy draw of three Gaussian blobs of 20 points in 3 dimensions plus two far points, rounded to six places",
+            "tolerance": "1e-9 (relative) eigenvalues and ratios; 1e-6 loadings and scores",
+            "test": "tests/reference_ml.rs::pca_matches_scikit_learn_and_the_correlation_eigenvalues"
+          }
+        ],
+        "limits": [
+          "Full-rank data; component signs are compared by magnitude."
+        ]
       },
       "performance": {
         "status": "none"
@@ -260,7 +299,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The cluster labels (numbered by first appearance), the noise points and the core points equal scikit-learn's DBSCAN.",
+            "reference_kind": "reference_implementation",
+            "reference": "scikit-learn 1.9.1 DBSCAN(eps=1.4, min_samples=4)",
+            "method": "clusters a seeded NumPy draw of three Gaussian blobs of 20 points in 3 dimensions plus two far points, rounded to six places (4 labels including 8 noise points)",
+            "tolerance": "exact",
+            "test": "tests/reference_ml.rs::dbscan_matches_scikit_learn"
+          }
+        ],
+        "limits": [
+          "A border point reachable from two clusters is assigned to the first by index order, as scikit-learn does; one data set."
+        ]
       },
       "performance": {
         "status": "none"
@@ -295,7 +347,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The merge heights of Ward, single, complete and average linkage equal SciPy's, and the cut into three clusters is the same partition.",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1 cluster.hierarchy.linkage and fcluster(maxclust)",
+            "method": "links a seeded NumPy draw of three Gaussian blobs of 20 points in 3 dimensions plus two far points, rounded to six places",
+            "tolerance": "1e-9 (relative)",
+            "test": "tests/reference_ml.rs::hierarchical_merge_heights_and_cuts_match_scipy"
+          }
+        ],
+        "limits": [
+          "Euclidean distance; centroid and median linkage are not offered; distance-threshold cuts are not compared."
+        ]
       },
       "performance": {
         "status": "none"
@@ -365,7 +430,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The local outlier factor of every point equals scikit-learn's LocalOutlierFactor.",
+            "reference_kind": "reference_implementation",
+            "reference": "scikit-learn 1.9.1 LocalOutlierFactor(n_neighbors=8)",
+            "method": "scores a seeded NumPy draw of three Gaussian blobs of 20 points in 3 dimensions plus two far points, rounded to six places",
+            "tolerance": "1e-9 (relative)",
+            "test": "tests/reference_ml.rs::lof_scores_match_scikit_learn"
+          }
+        ],
+        "limits": [
+          "One data set without duplicate points; the anomaly flags (threshold, contamination) are not compared."
+        ]
       },
       "performance": {
         "status": "none"
