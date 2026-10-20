@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.36.2] - 2026-10-20
+
+Depends on u-numflow 0.15 and u-analytics 0.27.2.
+
 ### Fixed
 
 - `condition_number_diagnostic` no longer reports infinity, and `vif_diagnostic`

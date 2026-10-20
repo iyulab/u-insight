@@ -1,6 +1,6 @@
 [package]
 name = "u-insight"
-version = "0.36.1"
+version = "0.36.2"
 rust-version = "1.85"
 edition = "2021"
 authors = ["iyulab"]
