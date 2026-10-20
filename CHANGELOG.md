@@ -8,6 +8,14 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- `condition_number_diagnostic` no longer reports infinity, and `vif_diagnostic`
+  and `regression` no longer fail or report `NaN` VIFs, for columns in a small
+  unit (1e-9): the fixes are in u-analytics' `condition_number` and
+  `multiple_linear_regression`; this release's tests compare both, and the same
+  data in other units, with NumPy and statsmodels.
+
 ## [0.36.1] - 2026-10-20
 
 Depends on u-numflow 0.15 and u-analytics 0.27.1.

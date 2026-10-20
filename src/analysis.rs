@@ -466,7 +466,7 @@ pub(crate) fn check_vif_threshold(name: &str, value: f64) -> Result<(), InsightE
 /// Computes the 2-norm condition number of the sample covariance matrix.
 ///
 /// Returns `f64::INFINITY` for numerically singular input (smallest
-/// eigenvalue below 1e-15). Standard threshold: `cond > 30` indicates
+/// eigenvalue at most `p * f64::EPSILON` times the largest). Standard threshold: `cond > 30` indicates
 /// multicollinearity (Belsley 1991).
 ///
 /// # Errors

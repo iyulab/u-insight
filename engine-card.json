@@ -106,7 +106,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The Pearson, Spearman and Kendall (tau-b) coefficients equal SciPy's, and the pair p-values equal SciPy's (Kendall's: the asymptotic normal approximation, SciPy method='asymptotic').",
+            "reference_kind": "reference_implementation",
+            "reference": "SciPy 1.17.1 pearsonr, spearmanr, kendalltau",
+            "method": "compares all six pairs of four columns for each method on a seeded NumPy draw, 30 rows by 4 correlated columns (and a target), rounded to six places",
+            "tolerance": "1e-10 (relative) on r; 1e-6 (relative) on p",
+            "test": "tests/reference_stats.rs::correlation_matrices_and_p_values_match_scipy"
+          }
+        ],
+        "limits": [
+          "Kendall's p-value is the normal approximation; SciPy's default is the exact distribution for n <= 33 without ties, which differs (6.6e-4 against 4.9e-4 at n = 30, tau 0.43). Data with ties are not covered."
+        ]
       },
       "performance": {
         "status": "none"
@@ -422,7 +435,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The coefficients, their p-values, R^2, adjusted R^2, the F p-value, the fitted values, the residuals and the VIF of each predictor equal statsmodels' OLS.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0 OLS with a constant, variance_inflation_factor",
+            "method": "regresses the target on four predictors of a seeded NumPy draw, 30 rows by 4 correlated columns (and a target), rounded to six places",
+            "tolerance": "1e-9 (relative) on estimates and fitted values; 1e-7 on p-values",
+            "test": "tests/reference_stats.rs::regression_matches_statsmodels_ols"
+          }
+        ],
+        "limits": [
+          "One data set; heteroscedasticity-robust errors and weights are not offered. In another unit the predictors give the same fit (the intercept and R^2 unchanged, slopes scaled), checked in u-analytics."
+        ]
       },
       "performance": {
         "status": "none"
@@ -492,7 +518,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The variance inflation factor of each column equals statsmodels' variance_inflation_factor, and equals the same data in a unit a billion times smaller or a million times larger.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0 variance_inflation_factor on the design with a constant",
+            "method": "four correlated columns of a seeded NumPy draw, 30 rows by 4 correlated columns (and a target), rounded to six places, and the same columns multiplied by 1e-9, 1e-6 and 1e6",
+            "tolerance": "1e-9 (relative); 1e-7 across units",
+            "test": "tests/reference_stats.rs::vif_and_condition_number_match_statsmodels_and_numpy"
+          }
+        ],
+        "limits": [
+          "One data set; exact collinearity (infinity) is covered by unit tests."
+        ]
       },
       "performance": {
         "status": "none"
@@ -527,7 +566,20 @@
         "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
       },
       "validation": {
-        "status": "none"
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The condition number of the sample covariance matrix equals NumPy's cond(cov), and the same data in another unit report the same number (not infinity).",
+            "reference_kind": "reference_implementation",
+            "reference": "NumPy 2.4.6 linalg.cond(cov(X.T))",
+            "method": "four correlated columns of a seeded NumPy draw, 30 rows by 4 correlated columns (and a target), rounded to six places, also multiplied by 1e-9, 1e-6 and 1e6",
+            "tolerance": "1e-9 (relative); 1e-7 across units",
+            "test": "tests/reference_stats.rs::vif_and_condition_number_match_statsmodels_and_numpy"
+          }
+        ],
+        "limits": [
+          "Uniform scaling only: columns in different units change the covariance's conditioning, as they should."
+        ]
       },
       "performance": {
         "status": "none"
