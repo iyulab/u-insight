@@ -468,7 +468,11 @@ fn compute_r2_multiple(target: &[f64], predictors: &[&[f64]], n: usize) -> f64 {
         ss_tot += (y - y_mean) * (y - y_mean);
     }
 
-    if ss_tot < 1e-15 {
+    // No variation in the target: nothing above the rounding of its mean,
+    // judged against its own size (a fixed number would call a target in small
+    // units constant and report every importance as 0).
+    let target_size: f64 = target.iter().map(|y| y * y).sum();
+    if ss_tot <= 1e-20 * target_size {
         return 0.0;
     }
     1.0 - ss_res / ss_tot

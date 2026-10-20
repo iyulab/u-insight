@@ -222,7 +222,11 @@ pub fn mahalanobis(
     // A column with variance ≈ 0 makes the covariance matrix singular and
     // is the most common cause of Mahalanobis failure on real-world data.
     let zero_var_cols: Vec<usize> = (0..p)
-        .filter(|&c| cov_data[c * p + c].abs() < 1e-12)
+        // Judged against the column's own size: a column in small units has a
+        // small variance and is not constant for that. Rounding the mean leaves
+        // a variance of about (1e-16 * mean)^2, so below (1e-12 * mean)^2 there
+        // is nothing but rounding.
+        .filter(|&c| cov_data[c * p + c] <= 1e-24 * mean[c] * mean[c])
         .collect();
     if !zero_var_cols.is_empty() {
         return Err(InsightError::DegenerateData {

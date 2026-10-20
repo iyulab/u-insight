@@ -15,6 +15,16 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   Restart `i` now starts from the default seed plus `i`, as a given seed's
   restarts already did. An unseeded run can return a different clustering --
   never one with a higher WCSS, since the first restart is unchanged.
+- `pca`, `mahalanobis` and `permutation_importance` no longer depend on the unit
+  of the data. They compared a variance, or a sum of squares, with fixed numbers
+  (1e-15, 1e-12): data in units near 1e-9 got explained-variance ratios of 0, a
+  `DegenerateData` refusal for every column ("near-zero variance"), or
+  importances of 0. They now judge against the data's own size. `pca` also needs
+  a u-numflow whose `eigen_symmetric` rotates a matrix of small entries (before
+  that it returned the covariance's diagonal as the eigenvalues).
+- The spectral residual scores near both ends of a series differ from before:
+  the estimated points appended before the transform now follow the published
+  equation (u-analytics fixes the base of the extension).
 
 ## [0.36.0] - 2026-10-17
 

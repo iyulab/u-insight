@@ -167,13 +167,18 @@ pub fn pca(data: &[Vec<f64>], config: &PcaConfig) -> Result<PcaResult, InsightEr
             }
         }
         vars.iter()
-            .map(|&v| {
+            .enumerate()
+            .map(|(j, &v)| {
                 let s = (v / (n - 1) as f64).sqrt();
-                if s < 1e-15 {
+                // Constant feature (a spread of rounding noise about its mean,
+                // or none): scale by 1 rather than divide by zero. Judged
+                // against the mean, not a fixed number, so a feature in small
+                // units is not taken for a constant.
+                if s <= 1e-12 * means[j].abs() {
                     1.0
                 } else {
                     s
-                } // avoid division by zero for constant features
+                }
             })
             .collect::<Vec<f64>>()
     } else {
@@ -225,7 +230,10 @@ pub fn pca(data: &[Vec<f64>], config: &PcaConfig) -> Result<PcaResult, InsightEr
     let total_variance: f64 = eigenvalues.iter().sum();
 
     let retained_eigenvalues: Vec<f64> = eigenvalues[..k].to_vec();
-    let explained_variance_ratio: Vec<f64> = if total_variance > 1e-15 {
+    // No variance to share out: nothing above the rounding noise of the means
+    // (a fixed number would call a feature set in small units variance-free).
+    let mean_square: f64 = means.iter().map(|m| m * m).sum();
+    let explained_variance_ratio: Vec<f64> = if total_variance > 1e-30 * mean_square {
         retained_eigenvalues
             .iter()
             .map(|&ev| ev / total_variance)
