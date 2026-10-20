@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-10-20
+
+Depends on u-numflow 0.15 and u-analytics 0.27.1.
+
 ### Fixed
 
 - `kmeans` with `seed: None` ran all `n_init` restarts from the same seed, so

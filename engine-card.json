@@ -4,7 +4,7 @@
   "engine": {
     "id": "u-insight",
     "summary": "Statistical analysis of tabular data: column profiles, correlation, clustering (k-means, DBSCAN, hierarchical), PCA, anomaly detection (isolation forest, LOF, univariate outlier rules), distribution analysis with normality tests and fits, OLS regression, feature importance, multicollinearity diagnostics and univariate time-series period and anomaly scoring.",
-    "version": "0.36.0",
+    "version": "0.36.1",
     "license": "MIT",
     "repository": "https://github.com/iyulab/u-insight"
   },
@@ -12,15 +12,15 @@
     {
       "kind": "crate",
       "name": "u-insight",
-      "package_version": "0.36.0",
-      "engine_version": "0.36.0",
+      "package_version": "0.36.1",
+      "engine_version": "0.36.1",
       "error_shape": "Err(InsightError), whose variant names the reason and holds the values behind it."
     },
     {
       "kind": "npm",
       "name": "@iyulab/u-insight",
-      "package_version": "0.36.0",
-      "engine_version": "0.36.0",
+      "package_version": "0.36.1",
+      "engine_version": "0.36.1",
       "wasm": true,
       "note": "Native JS values in and out, typed in the .d.ts; column-major inputs are objects keyed by column name. Bundler and Node targets; no bundler-less browser build.",
       "error_shape": "A thrown Error whose code property is the code, with the fields (parameter, index, min, max, got, expected, ...) as its other properties."
@@ -28,8 +28,8 @@
     {
       "kind": "nuget",
       "name": "UInsight",
-      "package_version": "0.36.0",
-      "engine_version": "0.36.0",
+      "package_version": "0.36.1",
+      "engine_version": "0.36.1",
       "note": "C ABI wrapper over C structs (the cbindgen header), versioned with the crate.",
       "error_shape": "An InsightException whose ErrorCode is the code, Parameter and Index the fields of those names, and Details the rest."
     }
