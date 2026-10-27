@@ -8,6 +8,24 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Added
+
+- STL seasonal-trend decomposition (Cleveland et al. 1990) on the WebAssembly, C
+  and .NET surfaces, computed by u-analytics' `decomposition::Stl`:
+  - WASM `stl({ data, period, seasonal?, trend?, low_pass?, seasonal_degree?,
+    trend_degree?, low_pass_degree?, robust?, inner_iterations?, outer_iterations? })`
+    → `{ trend, seasonal, residual, weights, trend_strength, seasonal_strength,
+    period, seasonal_span, trend_span, low_pass_span }`, typed in the .d.ts and
+    listed in the engine card.
+  - C ABI `insight_stl` / `insight_free_stl_result` (`CStlResult`). Each option is
+    a pointer, null for its default, so no value is reserved to mean "absent".
+  - .NET `InsightClient.Stl` with `StlResult`.
+
+  Options and defaults are statsmodels' `STL`'s. A span not above the period
+  (`trend`, `low_pass`) is `parameter_out_of_range` with `exclusive_min`; an even
+  span is `invalid_option`; a negative count is `parameter_out_of_range` with the
+  option's domain; fewer than two full cycles is `insufficient_data`.
+
 ## [0.37.0] - 2026-10-27
 
 Depends on u-numflow 0.15 and u-analytics 0.28.0.

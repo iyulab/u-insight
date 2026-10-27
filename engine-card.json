@@ -1067,6 +1067,55 @@
       "performance": {
         "status": "none"
       }
+    },
+    {
+      "id": "stl",
+      "summary": "Seasonal-trend decomposition by Loess (STL) of a series with a known period: trend, seasonal and remainder components, the robustness weights of the outer loop, the strengths of trend and seasonality, and the smoother spans used.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/stl.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/stl.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The components, weights, strengths and spans are those of the u-analytics decomposition the request layer calls, which matches statsmodels' STL; every option reaches it unchanged.",
+            "reference_kind": "reference_implementation",
+            "reference": "u-analytics decomposition::Stl, itself checked against statsmodels 0.15.0 tsa.seasonal.STL on six series (1e-10 relative)",
+            "method": "decomposes a 48-point seasonal series with default options and with every option set, through the request layer both transports share",
+            "tolerance": "exact (bitwise equal)",
+            "test": "src/time_series.rs::tests::stl_is_the_engines_decomposition"
+          }
+        ],
+        "limits": [
+          "The numerical reference is the engine's own check against statsmodels; this crate checks that it hands the request through.",
+          "When the remainder is at the data's rounding level (for example two full cycles, which the seasonal smoother interpolates) the robustness weights stay 1; statsmodels marks that rounding noise as outliers, so the weights differ from statsmodels' there."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
     }
   ]
 }

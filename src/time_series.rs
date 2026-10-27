@@ -1,14 +1,16 @@
-//! Autocorrelation and unit-root testing of a univariate series: the request
-//! rules both transports apply before handing a series to `u-analytics`.
+//! Autocorrelation, unit-root and stationarity testing, and seasonal-trend
+//! decomposition of a univariate series: the request rules both transports
+//! apply before handing a series to `u-analytics`.
 //!
 //! The statistics are `u-analytics`' own (`correlation::acf` / `pacf`,
-//! `testing::adf_test`); what lives here is the part a request adds -- the
-//! default and the admissible range of a lag option, the fewest values each
-//! statistic is defined for, and the refusal for a series that does not vary --
-//! so the WebAssembly binding and the C ABI cannot give the same request two
-//! answers.
+//! `testing::adf_test` / `kpss_test`, `decomposition::Stl`); what lives here is
+//! the part a request adds -- the default and the admissible range of an
+//! option, the fewest values each statistic is defined for, and the refusal
+//! for a series that does not vary -- so the WebAssembly binding and the C ABI
+//! cannot give the same request two answers.
 
 use u_analytics::correlation::{AcfResult, PacfResult};
+use u_analytics::decomposition::{Stl, StlError, StlResult};
 use u_analytics::testing::{AdfLags, AdfModel, AdfResult, KpssLags, KpssModel, KpssResult};
 
 use crate::error::{Bound, InsightError};
@@ -190,6 +192,170 @@ pub(crate) fn kpss(
                      statistic is undefined"
             .into(),
     })
+}
+
+/// The options of an STL request, each a whole number already read (`None`:
+/// statsmodels' default) except `robust`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct StlOptions {
+    /// Span of the seasonal smoother: odd, at least 3 (default 7).
+    pub(crate) seasonal: Option<f64>,
+    /// Span of the trend smoother: odd, above the period.
+    pub(crate) trend: Option<f64>,
+    /// Span of the low-pass smoother: odd, above the period.
+    pub(crate) low_pass: Option<f64>,
+    /// Degree of the seasonal Loess, 0 or 1 (default 1).
+    pub(crate) seasonal_degree: Option<f64>,
+    /// Degree of the trend Loess, 0 or 1 (default 1).
+    pub(crate) trend_degree: Option<f64>,
+    /// Degree of the low-pass Loess, 0 or 1 (default 1).
+    pub(crate) low_pass_degree: Option<f64>,
+    /// Down-weight outliers with the outer loop.
+    pub(crate) robust: bool,
+    /// Passes of the inner loop, at least 1 (default 5, or 2 when robust).
+    pub(crate) inner_iterations: Option<f64>,
+    /// Passes of the outer loop, at least 0 (default 0, or 15 when robust).
+    pub(crate) outer_iterations: Option<f64>,
+}
+
+impl From<StlError> for InsightError {
+    fn from(error: StlError) -> Self {
+        let message = error.to_string();
+        match error {
+            StlError::OptionOutOfRange {
+                option,
+                got,
+                min,
+                exclusive_min,
+                max,
+                ..
+            } => InsightError::ParameterOutOfRange {
+                name: option.into(),
+                low: match (min, exclusive_min) {
+                    (Some(v), _) => Bound::Closed(v),
+                    (None, Some(v)) => Bound::Open(v),
+                    (None, None) => Bound::Unbounded,
+                },
+                high: max.map_or(Bound::Unbounded, Bound::Closed),
+                got,
+            },
+            // Oddness is not an interval: the refusal names the option only.
+            StlError::EvenSpan { option, .. } => InsightError::InvalidParameter {
+                name: option.into(),
+                message,
+            },
+            StlError::TooFewObservations { needed, got } => {
+                InsightError::too_few("data", needed, got)
+            }
+            StlError::ValueNotFinite { index } => InsightError::ValueNotFinite {
+                column: "data".into(),
+                index,
+            },
+        }
+    }
+}
+
+/// STL decomposition of `data` with period `period` (a whole number already
+/// read). The engine checks the options, in its own order, before the data;
+/// a negative count -- which the engine's counts cannot hold -- is refused
+/// with the domain the engine states for that option.
+pub(crate) fn stl(
+    data: &[f64],
+    period: f64,
+    options: &StlOptions,
+) -> Result<StlResult, InsightError> {
+    type Set = fn(Stl, usize) -> Stl;
+    // `probe` is the builder with a value it refuses on the same side as the
+    // negative one (`0`, or `2` for a degree); its refusal is reported with the
+    // value the caller sent. A refusal of an option checked earlier comes
+    // first, as it would from the engine.
+    let below_zero = |probe: Stl, option: &'static str, got: f64| -> InsightError {
+        match probe.decompose(&[]) {
+            Err(StlError::OptionOutOfRange {
+                option: o,
+                requirement,
+                min,
+                exclusive_min,
+                max,
+                ..
+            }) if o == option => StlError::OptionOutOfRange {
+                option,
+                requirement,
+                got,
+                min,
+                exclusive_min,
+                max,
+            }
+            .into(),
+            Err(other @ (StlError::OptionOutOfRange { .. } | StlError::EvenSpan { .. })) => {
+                other.into()
+            }
+            _ => InsightError::ParameterOutOfRange {
+                name: option.into(),
+                low: Bound::Closed(0.0),
+                high: Bound::Unbounded,
+                got,
+            },
+        }
+    };
+    if period < 0.0 {
+        return Err(below_zero(Stl::new(0), "period", period));
+    }
+    // In the order the engine checks them; the value it refuses below its
+    // domain (`None`: every count is in it).
+    let counts: [(&'static str, Option<f64>, Set, Option<usize>); 8] = [
+        ("seasonal", options.seasonal, Stl::seasonal, Some(0)),
+        ("trend", options.trend, Stl::trend, Some(0)),
+        ("low_pass", options.low_pass, Stl::low_pass, Some(0)),
+        (
+            "seasonal_degree",
+            options.seasonal_degree,
+            Stl::seasonal_degree,
+            Some(2),
+        ),
+        (
+            "trend_degree",
+            options.trend_degree,
+            Stl::trend_degree,
+            Some(2),
+        ),
+        (
+            "low_pass_degree",
+            options.low_pass_degree,
+            Stl::low_pass_degree,
+            Some(2),
+        ),
+        (
+            "inner_iterations",
+            options.inner_iterations,
+            Stl::inner_iterations,
+            Some(0),
+        ),
+        (
+            "outer_iterations",
+            options.outer_iterations,
+            Stl::outer_iterations,
+            None,
+        ),
+    ];
+    // Every count the caller sent first, so a negative one is judged against
+    // the builder as configured (a trend span's floor is the period).
+    let mut stl = Stl::new(period as usize).robust(options.robust);
+    for (_, value, set, _) in &counts {
+        if let Some(v) = value.filter(|v| *v >= 0.0) {
+            stl = set(stl, v as usize);
+        }
+    }
+    for (option, value, set, refused) in counts {
+        if let Some(v) = value.filter(|v| *v < 0.0) {
+            let probe = match refused {
+                Some(r) => set(stl.clone(), r),
+                None => stl.clone(),
+            };
+            return Err(below_zero(probe, option, v));
+        }
+    }
+    Ok(stl.decompose(data)?)
 }
 
 #[cfg(test)]
@@ -560,6 +726,122 @@ mod tests {
         assert_eq!(
             fields(adf(&line, AdfModel::Constant, None, None).expect_err("deterministic")),
             serde_json::json!({ "code": "degenerate_data", "parameter": "data" })
+        );
+    }
+
+    /// A rising line plus a cycle of four, with a little seeded noise.
+    fn seasonal_line(n: usize) -> Vec<f64> {
+        let pattern = [2.0, -1.0, 0.5, -1.5];
+        (0..n)
+            .map(|i| 0.3 * i as f64 + pattern[i % 4] + 0.05 * (((i * 7919) % 13) as f64 - 6.0))
+            .collect()
+    }
+
+    /// The request layer hands the options to the engine unchanged: its result
+    /// is the engine's own.
+    #[test]
+    fn stl_is_the_engines_decomposition() {
+        let y = seasonal_line(48);
+        assert_eq!(
+            stl(&y, 4.0, &StlOptions::default()).expect("defined"),
+            Stl::new(4).decompose(&y).expect("defined")
+        );
+        let options = StlOptions {
+            seasonal: Some(9.0),
+            trend: Some(11.0),
+            low_pass: Some(7.0),
+            seasonal_degree: Some(0.0),
+            trend_degree: Some(1.0),
+            low_pass_degree: Some(0.0),
+            robust: true,
+            inner_iterations: Some(3.0),
+            outer_iterations: Some(4.0),
+        };
+        let engine = Stl::new(4)
+            .seasonal(9)
+            .trend(11)
+            .low_pass(7)
+            .seasonal_degree(0)
+            .trend_degree(1)
+            .low_pass_degree(0)
+            .robust(true)
+            .inner_iterations(3)
+            .outer_iterations(4);
+        assert_eq!(
+            stl(&y, 4.0, &options).expect("defined"),
+            engine.decompose(&y).expect("defined")
+        );
+    }
+
+    #[test]
+    fn stl_refusals_carry_the_shared_codes() {
+        let y = seasonal_line(48);
+        let with = |o: StlOptions| fields(stl(&y, 4.0, &o).expect_err("refused"));
+        // A span not above the period: an open bound, never `min`.
+        assert_eq!(
+            with(StlOptions {
+                trend: Some(3.0),
+                ..StlOptions::default()
+            }),
+            serde_json::json!({
+                "code": "parameter_out_of_range", "parameter": "trend",
+                "exclusive_min": 4.0, "got": 3.0,
+            })
+        );
+        // A negative count: the engine's domain, the value sent.
+        assert_eq!(
+            with(StlOptions {
+                low_pass: Some(-1.0),
+                ..StlOptions::default()
+            }),
+            serde_json::json!({
+                "code": "parameter_out_of_range", "parameter": "low_pass",
+                "exclusive_min": 4.0, "got": -1.0,
+            })
+        );
+        assert_eq!(
+            with(StlOptions {
+                trend_degree: Some(-1.0),
+                ..StlOptions::default()
+            }),
+            serde_json::json!({
+                "code": "parameter_out_of_range", "parameter": "trend_degree",
+                "min": 0.0, "max": 1.0, "got": -1.0,
+            })
+        );
+        assert_eq!(
+            with(StlOptions {
+                outer_iterations: Some(-3.0),
+                ..StlOptions::default()
+            }),
+            serde_json::json!({
+                "code": "parameter_out_of_range", "parameter": "outer_iterations",
+                "min": 0.0, "got": -3.0,
+            })
+        );
+        assert_eq!(
+            fields(stl(&y, -2.0, &StlOptions::default()).expect_err("negative period")),
+            serde_json::json!({
+                "code": "parameter_out_of_range", "parameter": "period",
+                "min": 2.0, "got": -2.0,
+            })
+        );
+        assert_eq!(
+            with(StlOptions {
+                seasonal: Some(8.0),
+                ..StlOptions::default()
+            }),
+            serde_json::json!({ "code": "invalid_option", "parameter": "seasonal" })
+        );
+        assert_eq!(
+            fields(stl(&y[..7], 4.0, &StlOptions::default()).expect_err("under two cycles")),
+            serde_json::json!({ "code": "insufficient_data", "parameter": "data", "min": 8, "got": 7 })
+        );
+        let mut bad = y.clone();
+        bad[5] = f64::INFINITY;
+        assert_eq!(
+            fields(stl(&bad, 4.0, &StlOptions::default()).expect_err("not finite")),
+            serde_json::json!({ "code": "value_not_finite", "parameter": "data", "index": 5 })
         );
     }
 }

@@ -1176,6 +1176,84 @@ public sealed class InsightClient : IDisposable
     }
 
     /// <summary>
+    /// Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990) of a series with a
+    /// known <paramref name="period"/>: <c>data = trend + seasonal + residual</c>, with the
+    /// defaults of statsmodels' <c>STL</c> for every argument left <c>null</c>. Spans are odd
+    /// (an even one: <c>invalid_option</c>); <paramref name="trend"/> and
+    /// <paramref name="lowPass"/> are above the period (<c>parameter_out_of_range</c> with
+    /// <c>exclusive_min</c>).
+    /// </summary>
+    /// <param name="data">Univariate series, all finite, at least two full cycles.</param>
+    /// <param name="period">Length of the seasonal cycle, at least 2.</param>
+    /// <param name="seasonal">Span of the seasonal smoother: odd, at least 3 (default 7).</param>
+    /// <param name="trend">Span of the trend smoother: odd, above the period.</param>
+    /// <param name="lowPass">Span of the low-pass smoother: odd, above the period.</param>
+    /// <param name="seasonalDegree">Degree of the seasonal Loess, 0 or 1 (default 1).</param>
+    /// <param name="trendDegree">Degree of the trend Loess, 0 or 1 (default 1).</param>
+    /// <param name="lowPassDegree">Degree of the low-pass Loess, 0 or 1 (default 1).</param>
+    /// <param name="robust">Down-weight outliers with the outer loop.</param>
+    /// <param name="innerIterations">Passes of the inner loop, at least 1 (default 5, or 2 when robust).</param>
+    /// <param name="outerIterations">Passes of the outer loop, at least 0 (default 0, or 15 when robust).</param>
+    public StlResult Stl(
+        double[] data,
+        int period,
+        int? seasonal = null,
+        int? trend = null,
+        int? lowPass = null,
+        int? seasonalDegree = null,
+        int? trendDegree = null,
+        int? lowPassDegree = null,
+        bool robust = false,
+        int? innerIterations = null,
+        int? outerIterations = null)
+    {
+        var native = new NativeStructs.CStlResult();
+        unsafe
+        {
+            int s = seasonal.GetValueOrDefault(), t = trend.GetValueOrDefault(), l = lowPass.GetValueOrDefault();
+            int sd = seasonalDegree.GetValueOrDefault(), td = trendDegree.GetValueOrDefault(),
+                ld = lowPassDegree.GetValueOrDefault();
+            int inner = innerIterations.GetValueOrDefault(), outer = outerIterations.GetValueOrDefault();
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_stl(
+                    ptr, (uint)data.Length, period,
+                    seasonal.HasValue ? &s : null,
+                    trend.HasValue ? &t : null,
+                    lowPass.HasValue ? &l : null,
+                    seasonalDegree.HasValue ? &sd : null,
+                    trendDegree.HasValue ? &td : null,
+                    lowPassDegree.HasValue ? &ld : null,
+                    robust ? (byte)1 : (byte)0,
+                    innerIterations.HasValue ? &inner : null,
+                    outerIterations.HasValue ? &outer : null,
+                    ref native));
+            }
+        }
+
+        try
+        {
+            return new StlResult
+            {
+                Trend = CopyF64Array(native.Trend, native.N),
+                Seasonal = CopyF64Array(native.Seasonal, native.N),
+                Residual = CopyF64Array(native.Residual, native.N),
+                Weights = CopyF64Array(native.Weights, native.N),
+                TrendStrength = native.TrendStrength,
+                SeasonalStrength = native.SeasonalStrength,
+                Period = native.Period,
+                SeasonalSpan = native.SeasonalSpan,
+                TrendSpan = native.TrendSpan,
+                LowPassSpan = native.LowPassSpan,
+            };
+        }
+        finally
+        {
+            Native.insight_free_stl_result(ref native);
+        }
+    }
+
+    /// <summary>
     /// Detect changepoints in multivariate (multi-channel) time-series data using PELT.
     /// </summary>
     /// <param name="data">
@@ -1934,6 +2012,34 @@ public class KpssResult
     public KpssPValueBound PValueBound { get; init; }
     /// <summary>1%, 2.5%, 5% and 10%, in that order.</summary>
     public KpssLevel[] Levels { get; init; } = [];
+}
+
+/// <summary>
+/// Result of <see cref="InsightClient.Stl"/>: <c>data[i] = Trend[i] + Seasonal[i] + Residual[i]</c>.
+/// </summary>
+public sealed record StlResult
+{
+    /// <summary>Trend component.</summary>
+    public double[] Trend { get; init; } = [];
+    /// <summary>Seasonal component.</summary>
+    public double[] Seasonal { get; init; } = [];
+    /// <summary>Remainder, data − trend − seasonal.</summary>
+    public double[] Residual { get; init; } = [];
+    /// <summary>Robustness weight of each point in the last pass, in [0, 1] (all 1 without the
+    /// outer loop); near 0 marks an outlier.</summary>
+    public double[] Weights { get; init; } = [];
+    /// <summary>Strength of the trend, max(0, 1 − Var(R)/Var(T + R)).</summary>
+    public double TrendStrength { get; init; }
+    /// <summary>Strength of the seasonality, max(0, 1 − Var(R)/Var(S + R)).</summary>
+    public double SeasonalStrength { get; init; }
+    /// <summary>The period decomposed.</summary>
+    public uint Period { get; init; }
+    /// <summary>Span of the seasonal smoother used.</summary>
+    public uint SeasonalSpan { get; init; }
+    /// <summary>Span of the trend smoother used.</summary>
+    public uint TrendSpan { get; init; }
+    /// <summary>Span of the low-pass smoother used.</summary>
+    public uint LowPassSpan { get; init; }
 }
 
 /// <summary>Mann-Kendall trend test result.</summary>

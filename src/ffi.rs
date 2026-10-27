@@ -3569,6 +3569,141 @@ pub unsafe extern "C" fn insight_kpss_test(
     }
 }
 
+/// C-compatible result of `insight_stl`: `data[i] = trend[i] + seasonal[i] +
+/// residual[i]`. The four arrays are `n` long; caller must free them with
+/// `insight_free_stl_result`.
+#[repr(C)]
+pub struct CStlResult {
+    /// Trend component.
+    pub trend: *mut f64,
+    /// Seasonal component.
+    pub seasonal: *mut f64,
+    /// Remainder `data - trend - seasonal`.
+    pub residual: *mut f64,
+    /// Robustness weight of each point in the last pass, in [0, 1] (all 1
+    /// without the outer loop); near 0 marks an outlier.
+    pub weights: *mut f64,
+    /// Length of each array (= the number of observations).
+    pub n: u32,
+    /// The period decomposed.
+    pub period: u32,
+    /// Span of the seasonal smoother used.
+    pub seasonal_span: u32,
+    /// Span of the trend smoother used.
+    pub trend_span: u32,
+    /// Span of the low-pass smoother used.
+    pub low_pass_span: u32,
+    /// Strength of the trend, `max(0, 1 - Var(R)/Var(T + R))`.
+    pub trend_strength: f64,
+    /// Strength of the seasonality, `max(0, 1 - Var(R)/Var(S + R))`.
+    pub seasonal_strength: f64,
+}
+
+/// Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990) of a
+/// series with a known period, with statsmodels' `STL` defaults.
+///
+/// `data`: `n` observations, all finite, at least two full cycles
+/// (`insufficient_data`). `period`: at least 2. Each option is a pointer, null
+/// for its default: `seasonal` (odd, at least 3; default 7), `trend` and
+/// `low_pass` (odd, above the period -- `parameter_out_of_range` with
+/// `exclusive_min` = period; defaults from the period), `seasonal_degree`,
+/// `trend_degree`, `low_pass_degree` (0 or 1; default 1), `inner_iterations`
+/// (at least 1; default 5, or 2 when robust), `outer_iterations` (at least 0;
+/// default 0, or 15 when robust). An even span is `INSIGHT_ERR_INVALID_PARAM`,
+/// `invalid_option`. `robust`: down-weight outliers with the outer loop.
+/// `out`: pointer to a `CStlResult`. Returns 0 on success, negative on error.
+/// Caller must free `out` with `insight_free_stl_result`.
+///
+/// # Safety
+/// `data` must point to `n` f64s. Every option pointer must be null or valid.
+/// `out` must be valid.
+// One pointer per option, null when absent, as the other C entry points read
+// their optional counts: no value is reserved to mean "default".
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub unsafe extern "C" fn insight_stl(
+    data: *const f64,
+    n: u32,
+    period: i32,
+    seasonal: *const i32,
+    trend: *const i32,
+    low_pass: *const i32,
+    seasonal_degree: *const i32,
+    trend_degree: *const i32,
+    low_pass_degree: *const i32,
+    robust: bool,
+    inner_iterations: *const i32,
+    outer_iterations: *const i32,
+    out: *mut CStlResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        let Some(raw) = (unsafe { series(data, n) }).filter(|_| !out.is_null()) else {
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
+        };
+        let options = unsafe {
+            crate::time_series::StlOptions {
+                seasonal: given(seasonal),
+                trend: given(trend),
+                low_pass: given(low_pass),
+                seasonal_degree: given(seasonal_degree),
+                trend_degree: given(trend_degree),
+                low_pass_degree: given(low_pass_degree),
+                robust,
+                inner_iterations: given(inner_iterations),
+                outer_iterations: given(outer_iterations),
+            }
+        };
+        match crate::time_series::stl(raw, f64::from(period), &options) {
+            Ok(r) => {
+                unsafe {
+                    (*out) = CStlResult {
+                        n: r.trend.len() as u32,
+                        trend: leak_f64s(r.trend),
+                        seasonal: leak_f64s(r.seasonal),
+                        residual: leak_f64s(r.residual),
+                        weights: leak_f64s(r.weights),
+                        period: r.period as u32,
+                        seasonal_span: r.seasonal_span as u32,
+                        trend_span: r.trend_span as u32,
+                        low_pass_span: r.low_pass_span as u32,
+                        trend_strength: r.trend_strength,
+                        seasonal_strength: r.seasonal_strength,
+                    };
+                }
+                INSIGHT_OK
+            }
+            Err(e) => fail(&e),
+        }
+    });
+    match result {
+        Ok(code) => code,
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_stl"),
+    }
+}
+
+/// Frees the arrays of a `CStlResult` allocated by `insight_stl`.
+///
+/// # Safety
+/// The result must have been allocated by that function and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_stl_result(result: *mut CStlResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &mut *result };
+    let n = r.n as usize;
+    unsafe {
+        free_f64s(r.trend, n);
+        free_f64s(r.seasonal, n);
+        free_f64s(r.residual, n);
+        free_f64s(r.weights, n);
+    }
+    r.trend = ptr::null_mut();
+    r.seasonal = ptr::null_mut();
+    r.residual = ptr::null_mut();
+    r.weights = ptr::null_mut();
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -5307,6 +5442,184 @@ mod tests {
                 INSIGHT_KPSS_LAGS_SCHWERT
             ],
             [0, 1, 0, 1]
+        );
+    }
+
+    #[test]
+    fn ffi_stl_carries_the_engine_result_and_the_shared_refusals() {
+        let pattern = [2.0, -1.0, 0.5, -1.5];
+        let x: Vec<f64> = (0..48)
+            .map(|i: usize| 0.3 * i as f64 + pattern[i % 4] + 0.05 * ((i * 7919 % 13) as f64 - 6.0))
+            .collect();
+        let empty = || CStlResult {
+            trend: ptr::null_mut(),
+            seasonal: ptr::null_mut(),
+            residual: ptr::null_mut(),
+            weights: ptr::null_mut(),
+            n: 0,
+            period: 0,
+            seasonal_span: 0,
+            trend_span: 0,
+            low_pass_span: 0,
+            trend_strength: 0.0,
+            seasonal_strength: 0.0,
+        };
+        let none: *const i32 = ptr::null();
+        let call = |period: i32, opts: [*const i32; 8], robust: bool, out: &mut CStlResult| unsafe {
+            insight_stl(
+                x.as_ptr(),
+                48,
+                period,
+                opts[0],
+                opts[1],
+                opts[2],
+                opts[3],
+                opts[4],
+                opts[5],
+                robust,
+                opts[6],
+                opts[7],
+                out,
+            )
+        };
+        let read = |p: *mut f64, n: u32| unsafe { slice::from_raw_parts(p, n as usize).to_vec() };
+
+        // Every option given: the engine's own decomposition.
+        let (s, t, l, d0, d1, inner, outer) = (9, 11, 7, 0, 1, 3, 4);
+        let mut out = empty();
+        let rc = call(
+            4,
+            [&s, &t, &l, &d0, &d1, &d0, &inner, &outer],
+            true,
+            &mut out,
+        );
+        assert_eq!(rc, INSIGHT_OK);
+        let want = u_analytics::decomposition::Stl::new(4)
+            .seasonal(9)
+            .trend(11)
+            .low_pass(7)
+            .seasonal_degree(0)
+            .trend_degree(1)
+            .low_pass_degree(0)
+            .robust(true)
+            .inner_iterations(3)
+            .outer_iterations(4)
+            .decompose(&x)
+            .expect("defined");
+        assert_eq!(out.n, 48);
+        assert_eq!(read(out.trend, out.n), want.trend);
+        assert_eq!(read(out.seasonal, out.n), want.seasonal);
+        assert_eq!(read(out.residual, out.n), want.residual);
+        assert_eq!(read(out.weights, out.n), want.weights);
+        assert_eq!(
+            (out.trend_strength, out.seasonal_strength),
+            (want.trend_strength, want.seasonal_strength)
+        );
+        assert_eq!(
+            (
+                out.period,
+                out.seasonal_span,
+                out.trend_span,
+                out.low_pass_span
+            ),
+            (4, 9, 11, 7)
+        );
+        unsafe { insight_free_stl_result(&mut out) };
+        assert!(out.trend.is_null() && out.weights.is_null());
+        unsafe { insight_free_stl_result(&mut out) };
+        unsafe { insight_free_stl_result(ptr::null_mut()) };
+
+        // No option: statsmodels' defaults.
+        let rc = call(4, [none; 8], false, &mut out);
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(
+            read(out.seasonal, out.n),
+            u_analytics::decomposition::Stl::new(4)
+                .decompose(&x)
+                .expect("defined")
+                .seasonal
+        );
+        assert_eq!((out.trend_span, out.low_pass_span), (9, 5));
+        unsafe { insight_free_stl_result(&mut out) };
+
+        // A span not above the period: an open bound.
+        let three = 3;
+        let mut opts = [none; 8];
+        opts[1] = &three;
+        assert_eq!(call(4, opts, false, &mut out), INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (
+                &body["code"],
+                &body["parameter"],
+                &body["exclusive_min"],
+                &body["got"]
+            ),
+            (
+                &serde_json::json!("parameter_out_of_range"),
+                &serde_json::json!("trend"),
+                &serde_json::json!(4.0),
+                &serde_json::json!(3.0)
+            )
+        );
+        assert!(body.get("min").is_none(), "{body}");
+        let minus = -1;
+        opts[1] = &minus;
+        assert_eq!(call(4, opts, false, &mut out), INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_body().expect("a body")["got"], -1.0);
+        let eight = 8;
+        let mut opts = [none; 8];
+        opts[0] = &eight;
+        assert_eq!(call(4, opts, false, &mut out), INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"]),
+            (
+                &serde_json::json!("invalid_option"),
+                &serde_json::json!("seasonal")
+            )
+        );
+        assert_eq!(
+            call(1, [none; 8], false, &mut out),
+            INSIGHT_ERR_INVALID_PARAM
+        );
+        assert_eq!(last_error_body().expect("a body")["parameter"], "period");
+        assert_eq!(
+            call(30, [none; 8], false, &mut out),
+            INSIGHT_ERR_INSUFFICIENT_DATA
+        );
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["min"], &body["got"]),
+            (&serde_json::json!(60), &serde_json::json!(48))
+        );
+        let mut bad = x.clone();
+        bad[5] = f64::NAN;
+        let rc = unsafe {
+            insight_stl(
+                bad.as_ptr(),
+                48,
+                4,
+                none,
+                none,
+                none,
+                none,
+                none,
+                none,
+                false,
+                none,
+                none,
+                &mut out,
+            )
+        };
+        assert_ne!(rc, INSIGHT_OK);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["index"]),
+            (
+                &serde_json::json!("value_not_finite"),
+                &serde_json::json!(5)
+            )
         );
     }
 

@@ -11,7 +11,7 @@
 - **Statistical Analysis**: Pearson correlation, simple linear regression, Cramer's V
 - **Distribution**: Normality testing (KS, Jarque-Bera, Shapiro-Wilk, Anderson-Darling)
 - **Feature Importance**: Composite scores, ANOVA F-test, Mutual Information, Permutation Importance
-- **Time Series**: Period estimation, spectral residual anomaly scoring, ACF (with Bartlett's limits), PACF, augmented Dickey-Fuller test, KPSS stationarity test
+- **Time Series**: Period estimation, spectral residual anomaly scoring, ACF (with Bartlett's limits), PACF, augmented Dickey-Fuller test, KPSS stationarity test, STL decomposition
 - **Cross-Platform**: Windows, Linux, and macOS support
 
 ## Installation
@@ -135,6 +135,9 @@ public sealed class InsightClient : IDisposable
     PacfResult Pacf(double[] data, int? maxLag = null);    // lags below n / 2
     AdfResult AdfTest(double[] data, AdfModel model = AdfModel.Constant, int? maxLags = null, int? lags = null);
     KpssResult KpssTest(double[] data, KpssModel model = KpssModel.Level, KpssLagRule? lagRule = null, int? lags = null);
+    StlResult Stl(double[] data, int period, int? seasonal = null, int? trend = null, int? lowPass = null,
+        int? seasonalDegree = null, int? trendDegree = null, int? lowPassDegree = null, bool robust = false,
+        int? innerIterations = null, int? outerIterations = null);  // null: statsmodels' STL default
 }
 ```
 

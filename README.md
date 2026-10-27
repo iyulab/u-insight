@@ -9,6 +9,10 @@ A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
 ## What's New (unreleased)
 
+- **STL seasonal-trend decomposition** on every surface: WASM `stl`, C ABI
+  `insight_stl`, and .NET `Stl` — trend, seasonal and remainder of a series with
+  a known period by Loess, with statsmodels' defaults, an optional robust outer
+  loop, and the strengths of trend and seasonality.
 - **Autocorrelation, partial autocorrelation, the augmented Dickey-Fuller
   test and the KPSS stationarity test** on every surface: WASM `acf` / `pacf` /
   `adf_test` / `kpss_test`, C ABI `insight_acf` / `insight_pacf` /
@@ -123,7 +127,7 @@ Built on `u-analytics` (statistical algorithms), `u-numflow` (math primitives).
 
 | Module | Description |
 |--------|-------------|
-| `ffi` | C FFI bindings — 54 functions, 34 `#[repr(C)]` structs, auto-generated C header via cbindgen |
+| `ffi` | C FFI bindings — 56 functions, 35 `#[repr(C)]` structs, auto-generated C header via cbindgen |
 
 ## Quick Start
 
@@ -245,6 +249,8 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_free_pacf_result` | Frees the array of a `CPacfResult` |
 | `insight_adf_test` | Augmented Dickey-Fuller test; `model` `INSIGHT_ADF_NONE` / `_CONSTANT` / `_CONSTANT_TREND`, `max_lags` / `lags` pointers (null = not given, at most one) |
 | `insight_kpss_test` | KPSS stationarity test; `model` `INSIGHT_KPSS_LEVEL` / `_TREND`, `lag_rule` (`INSIGHT_KPSS_LAGS_HOBIJN` / `_SCHWERT`) and `lags` pointers (null = not given, at most one); `p_value_bound` one of `INSIGHT_KPSS_P_*` |
+| `insight_stl` | STL seasonal-trend decomposition; `period` required, each option (`seasonal`, `trend`, `low_pass`, the three degrees, `inner_iterations`, `outer_iterations`) a pointer, null = default; `robust` a flag |
+| `insight_free_stl_result` | Frees the four arrays of a `CStlResult` |
 
 ### Trend & Density Estimation
 
@@ -331,7 +337,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 474 lib tests + 53 doc-tests = 527 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
-C header: auto-generated via cbindgen (34 structs, 54 functions)
+C header: auto-generated via cbindgen (35 structs, 56 functions)
 ```
 
 ## Scope & Non-Goals
@@ -766,6 +772,45 @@ Give at most one of `lag_rule` and `lags` (both: `invalid_option`,
 // statistic > critical_value. `p_value` is interpolated in that table and
 // clamped to [0.01, 0.10]: `p_value_bound` "at_most" / "at_least" says it is
 // the table's bound.
+```
+
+#### `stl(data) -> StlResult`
+
+Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990) of a series
+with a known period: `data = trend + seasonal + residual`, with the defaults of
+statsmodels' `STL`. With the ACF, ADF and KPSS it answers what a series is made
+of.
+
+**Input:**
+```json
+{ "data": [/* ... */], "period": 12, "seasonal": null, "trend": null, "low_pass": null,
+  "seasonal_degree": null, "trend_degree": null, "low_pass_degree": null,
+  "robust": false, "inner_iterations": null, "outer_iterations": null }
+```
+
+- `period`: the cycle length, a whole number of at least 2; at least two full
+  cycles of finite values (fewer: `insufficient_data` with `min`, `got`).
+- `seasonal`: odd span of the seasonal smoother, at least 3 (default 7).
+- `trend`, `low_pass`: odd spans above the period (`parameter_out_of_range`
+  with `exclusive_min` = period); default the smallest odd integer at least
+  `1.5 · period / (1 − 1.5 / seasonal)`, and the smallest odd integer above the
+  period.
+- `seasonal_degree`, `trend_degree`, `low_pass_degree`: 0 or 1 (default 1).
+- `robust`: an outer loop of bisquare weights from the remainder, so an outlier
+  lands in `residual` instead of bending the components (default `false`).
+- `inner_iterations` (at least 1) / `outer_iterations` (at least 0): default 5 /
+  0, or 2 / 15 when robust.
+
+An even span is `invalid_option` (`parameter` names it); a negative count is
+`parameter_out_of_range`.
+
+**Output:**
+```json
+{ "trend": [/* n */], "seasonal": [/* n */], "residual": [/* n */], "weights": [/* n */],
+  "trend_strength": 0.98, "seasonal_strength": 0.95,
+  "period": 12, "seasonal_span": 7, "trend_span": 23, "low_pass_span": 13 }
+// weights: the last pass's robustness weights, all 1 without `robust`.
+// Strengths: max(0, 1 − Var(R)/Var(C + R)) (Wang, Smith & Hyndman 2006).
 ```
 
 ## npm (WebAssembly)

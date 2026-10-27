@@ -316,6 +316,22 @@ internal static class NativeStructs
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct CStlResult
+    {
+        public IntPtr Trend;
+        public IntPtr Seasonal;
+        public IntPtr Residual;
+        public IntPtr Weights;
+        public uint N;
+        public uint Period;
+        public uint SeasonalSpan;
+        public uint TrendSpan;
+        public uint LowPassSpan;
+        public double TrendStrength;
+        public double SeasonalStrength;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct CMannKendallResult
     {
         public long SStatistic;

@@ -19,6 +19,7 @@
 //! - `acf(data)` / `pacf(data)` — (Partial) autocorrelation of a series
 //! - `adf_test(data)` — Augmented Dickey-Fuller unit-root test
 //! - `kpss_test(data)` — KPSS stationarity test
+//! - `stl(data)` — Seasonal-trend decomposition by Loess (STL)
 //!
 //! # Input Formats
 //!
@@ -2748,6 +2749,132 @@ pub fn kpss_test(
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
 }
 
+/// Input for `stl`. Every option but `period` is optional; absent or `null`
+/// takes statsmodels' default.
+#[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+struct StlInputDto {
+    data: Vec<f64>,
+    /// Length of the seasonal cycle, at least 2; at least two full cycles of
+    /// data.
+    #[tsify(type = "number")]
+    period: Whole,
+    /// Span of the seasonal smoother: odd, at least 3 (default 7).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    seasonal: Option<Whole>,
+    /// Span of the trend smoother: odd, above the period (default the smallest
+    /// odd integer at least `1.5 · period / (1 − 1.5 / seasonal)`).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    trend: Option<Whole>,
+    /// Span of the low-pass smoother: odd, above the period (default the
+    /// smallest odd integer above it).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    low_pass: Option<Whole>,
+    /// Degree of the seasonal Loess, 0 or 1 (default 1).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    seasonal_degree: Option<Whole>,
+    /// Degree of the trend Loess, 0 or 1 (default 1).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    trend_degree: Option<Whole>,
+    /// Degree of the low-pass Loess, 0 or 1 (default 1).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    low_pass_degree: Option<Whole>,
+    /// Down-weight outliers with the outer loop (default false).
+    #[serde(default)]
+    #[tsify(optional)]
+    robust: bool,
+    /// Passes of the inner loop, at least 1 (default 5, or 2 when robust).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    inner_iterations: Option<Whole>,
+    /// Passes of the outer loop, at least 0 (default 0, or 15 when robust).
+    #[serde(default)]
+    #[tsify(optional, type = "number | null")]
+    outer_iterations: Option<Whole>,
+}
+
+#[derive(Serialize, tsify::Tsify, Debug, PartialEq)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+struct StlDto {
+    trend: Vec<f64>,
+    seasonal: Vec<f64>,
+    /// `data − trend − seasonal`.
+    residual: Vec<f64>,
+    /// Robustness weight of each point in the last pass, in `[0, 1]` (all 1
+    /// without the outer loop); near 0 marks an outlier.
+    weights: Vec<f64>,
+    /// `max(0, 1 − Var(R)/Var(T + R))`.
+    trend_strength: f64,
+    /// `max(0, 1 − Var(R)/Var(S + R))`.
+    seasonal_strength: f64,
+    period: usize,
+    seasonal_span: usize,
+    trend_span: usize,
+    low_pass_span: usize,
+}
+
+/// The decomposition `stl` answers a request with.
+fn stl_dto(req: StlInputDto) -> Result<StlDto, crate::error::InsightError> {
+    let whole = |v: Option<Whole>| v.map(|Whole(v)| v);
+    let options = crate::time_series::StlOptions {
+        seasonal: whole(req.seasonal),
+        trend: whole(req.trend),
+        low_pass: whole(req.low_pass),
+        seasonal_degree: whole(req.seasonal_degree),
+        trend_degree: whole(req.trend_degree),
+        low_pass_degree: whole(req.low_pass_degree),
+        robust: req.robust,
+        inner_iterations: whole(req.inner_iterations),
+        outer_iterations: whole(req.outer_iterations),
+    };
+    let r = crate::time_series::stl(&req.data, req.period.0, &options)?;
+    Ok(StlDto {
+        trend: r.trend,
+        seasonal: r.seasonal,
+        residual: r.residual,
+        weights: r.weights,
+        trend_strength: r.trend_strength,
+        seasonal_strength: r.seasonal_strength,
+        period: r.period,
+        seasonal_span: r.seasonal_span,
+        trend_span: r.trend_span,
+        low_pass_span: r.low_pass_span,
+    })
+}
+
+/// Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990):
+/// `data = trend + seasonal + residual` for a known `period`.
+///
+/// # Input
+/// `{ data: number[], period: number, seasonal?, trend?, low_pass?,
+///    seasonal_degree?, trend_degree?, low_pass_degree?, robust?: boolean,
+///    inner_iterations?, outer_iterations? }` — `period` at least 2 and at
+/// least two full cycles of finite values (`insufficient_data`). The spans are
+/// odd (an even one: `invalid_option`): `seasonal` at least 3 (default 7),
+/// `trend` and `low_pass` above the period (`parameter_out_of_range` with
+/// `exclusive_min` = period), defaults as statsmodels' `STL`. Degrees 0 or 1
+/// (default 1). `robust` adds the outer loop that down-weights outliers; the
+/// iterations default to 5 inner / 0 outer, or 2 / 15 when robust.
+///
+/// # Output
+/// `{ trend, seasonal, residual, weights, trend_strength, seasonal_strength,
+///    period, seasonal_span, trend_span, low_pass_span }`.
+#[wasm_bindgen(unchecked_return_type = "StlDto")]
+pub fn stl(
+    #[wasm_bindgen(unchecked_param_type = "StlInputDto")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let req: StlInputDto = from_js(data, "data")?;
+    let dto = stl_dto(req).map_err(js_err)?;
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
 // ── Code catalog ─────────────────────────────────────────────────────
 
 /// A refusal reason: the `code` an `Error` carries and the fields that can
@@ -3477,6 +3604,68 @@ mod dto_strictness_tests {
         );
     }
 
+    /// `stl` reads its counts as whole numbers (a negative one reaches the
+    /// range check), refuses unknown keys, and answers with the engine's own
+    /// decomposition.
+    #[test]
+    fn the_stl_request_reads_as_documented_and_answers_with_the_engine() {
+        let pattern = [2.0, -1.0, 0.5, -1.5];
+        let data: Vec<f64> = (0..48)
+            .map(|i: usize| 0.3 * i as f64 + pattern[i % 4])
+            .collect();
+        let req: super::StlInputDto = super::from_json(
+            json!({ "data": data, "period": 4, "seasonal": null, "robust": true }),
+            "data",
+        )
+        .expect("defaults");
+        let dto = super::stl_dto(req).expect("defined");
+        let engine = u_analytics::decomposition::Stl::new(4)
+            .robust(true)
+            .decompose(&data)
+            .expect("defined");
+        assert_eq!(
+            (&dto.trend, &dto.seasonal, &dto.residual, &dto.weights),
+            (
+                &engine.trend,
+                &engine.seasonal,
+                &engine.residual,
+                &engine.weights
+            )
+        );
+        assert_eq!(
+            (dto.trend_strength, dto.seasonal_strength),
+            (engine.trend_strength, engine.seasonal_strength)
+        );
+        assert_eq!(
+            (
+                dto.period,
+                dto.seasonal_span,
+                dto.trend_span,
+                dto.low_pass_span
+            ),
+            (4, 7, 9, 5)
+        );
+        let req: super::StlInputDto =
+            super::from_json(json!({ "data": data, "period": 4, "trend": -1 }), "data")
+                .expect("a whole number reads");
+        let e = crate::refusal::Refusal::from(super::stl_dto(req).expect_err("negative"));
+        assert_eq!(
+            e.fields,
+            json!({
+                "code": "parameter_out_of_range", "parameter": "trend",
+                "exclusive_min": 4.0, "got": -1.0,
+            })
+        );
+        assert!(super::from_json::<super::StlInputDto>(
+            json!({ "data": [1, 2], "period": 2.5 }),
+            "data"
+        )
+        .is_err());
+        assert_rejects_unknown::<super::StlInputDto>(json!({
+            "data": [1, 2, 3], "period": 2, "seasonal_window": 7
+        }));
+    }
+
     #[test]
     fn a_negative_silhouette_label_is_out_of_range_where_it_sits() {
         let labels = super::from_json::<Vec<super::Whole>>(json!([0, -1, 1]), "labels")
@@ -3898,6 +4087,11 @@ mod engine_card_tests {
             "kpss_test",
             vec![arg("data", s.of::<KpssInputDto>())],
             s.of::<KpssDto>(),
+        );
+        s.op(
+            "stl",
+            vec![arg("data", s.of::<StlInputDto>())],
+            s.of::<StlDto>(),
         );
         s
     }

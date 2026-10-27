@@ -1006,6 +1006,59 @@ typedef struct CKpssResult {
 } CKpssResult;
 
 /**
+ * C-compatible result of `insight_stl`: `data[i] = trend[i] + seasonal[i] +
+ * residual[i]`. The four arrays are `n` long; caller must free them with
+ * `insight_free_stl_result`.
+ */
+typedef struct CStlResult {
+  /**
+   * Trend component.
+   */
+  double *trend;
+  /**
+   * Seasonal component.
+   */
+  double *seasonal;
+  /**
+   * Remainder `data - trend - seasonal`.
+   */
+  double *residual;
+  /**
+   * Robustness weight of each point in the last pass, in [0, 1] (all 1
+   * without the outer loop); near 0 marks an outlier.
+   */
+  double *weights;
+  /**
+   * Length of each array (= the number of observations).
+   */
+  uint32_t n;
+  /**
+   * The period decomposed.
+   */
+  uint32_t period;
+  /**
+   * Span of the seasonal smoother used.
+   */
+  uint32_t seasonal_span;
+  /**
+   * Span of the trend smoother used.
+   */
+  uint32_t trend_span;
+  /**
+   * Span of the low-pass smoother used.
+   */
+  uint32_t low_pass_span;
+  /**
+   * Strength of the trend, `max(0, 1 - Var(R)/Var(T + R))`.
+   */
+  double trend_strength;
+  /**
+   * Strength of the seasonality, `max(0, 1 - Var(R)/Var(S + R))`.
+   */
+  double seasonal_strength;
+} CStlResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1833,5 +1886,48 @@ int32_t insight_kpss_test(const double *data,
                           const uint32_t *lag_rule,
                           const int32_t *lags,
                           struct CKpssResult *out);
+
+/**
+ * Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990) of a
+ * series with a known period, with statsmodels' `STL` defaults.
+ *
+ * `data`: `n` observations, all finite, at least two full cycles
+ * (`insufficient_data`). `period`: at least 2. Each option is a pointer, null
+ * for its default: `seasonal` (odd, at least 3; default 7), `trend` and
+ * `low_pass` (odd, above the period -- `parameter_out_of_range` with
+ * `exclusive_min` = period; defaults from the period), `seasonal_degree`,
+ * `trend_degree`, `low_pass_degree` (0 or 1; default 1), `inner_iterations`
+ * (at least 1; default 5, or 2 when robust), `outer_iterations` (at least 0;
+ * default 0, or 15 when robust). An even span is `INSIGHT_ERR_INVALID_PARAM`,
+ * `invalid_option`. `robust`: down-weight outliers with the outer loop.
+ * `out`: pointer to a `CStlResult`. Returns 0 on success, negative on error.
+ * Caller must free `out` with `insight_free_stl_result`.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. Every option pointer must be null or valid.
+ * `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_stl(const double *data,
+                    uint32_t n,
+                    int32_t period,
+                    const int32_t *seasonal,
+                    const int32_t *trend,
+                    const int32_t *low_pass,
+                    const int32_t *seasonal_degree,
+                    const int32_t *trend_degree,
+                    const int32_t *low_pass_degree,
+                    bool robust,
+                    const int32_t *inner_iterations,
+                    const int32_t *outer_iterations,
+                    struct CStlResult *out);
+
+/**
+ * Frees the arrays of a `CStlResult` allocated by `insight_stl`.
+ *
+ * # Safety
+ * The result must have been allocated by that function and not yet freed.
+ */
+INSIGHT_API void insight_free_stl_result(struct CStlResult *result);
 
 #endif  /* U_INSIGHT_H */

@@ -569,6 +569,47 @@ public class ClientTests : IDisposable
         Assert.Equal("insufficient_data", ex.ErrorCode);
     }
 
+    /// <summary>A rising line plus a cycle of four, with a little seeded noise.</summary>
+    private static readonly double[] SeasonalLine =
+        [.. Enumerable.Range(0, 48).Select(i => 0.3 * i + new[] { 2.0, -1.0, 0.5, -1.5 }[i % 4] + 0.05 * (i * 7919 % 13 - 6.0))];
+
+    [Fact]
+    public void Stl_decomposes_with_the_engine_defaults_and_every_option()
+    {
+        var r = _client.Stl(SeasonalLine, 4);
+        Assert.Equal(48, r.Trend.Length);
+        Assert.Equal((4u, 7u, 9u, 5u), (r.Period, r.SeasonalSpan, r.TrendSpan, r.LowPassSpan));
+        for (var i = 0; i < SeasonalLine.Length; i++)
+            Assert.Equal(SeasonalLine[i], r.Trend[i] + r.Seasonal[i] + r.Residual[i], 12);
+        Assert.All(r.Weights, w => Assert.Equal(1.0, w));
+        Assert.True(r.SeasonalStrength > 0.9 && r.TrendStrength > 0.9);
+
+        var spiked = (double[])SeasonalLine.Clone();
+        spiked[21] += 50;
+        var robust = _client.Stl(spiked, 4, seasonal: 9, trend: 11, lowPass: 7, seasonalDegree: 0,
+            trendDegree: 1, lowPassDegree: 1, robust: true, innerIterations: 2, outerIterations: 15);
+        Assert.Equal((9u, 11u, 7u), (robust.SeasonalSpan, robust.TrendSpan, robust.LowPassSpan));
+        Assert.True(robust.Weights[21] < 0.01);
+        Assert.True(robust.Residual[21] > 45);
+    }
+
+    [Fact]
+    public void Stl_refuses_with_the_shared_codes()
+    {
+        var ex = Assert.Throws<InsightException>(() => _client.Stl(SeasonalLine, 4, trend: 3));
+        Assert.Equal("parameter_out_of_range", ex.ErrorCode);
+        Assert.Equal("trend", ex.Parameter);
+        Assert.Equal(4.0, ex.Details!.Value.GetProperty("exclusive_min").GetDouble());
+        ex = Assert.Throws<InsightException>(() => _client.Stl(SeasonalLine, 4, outerIterations: -1));
+        Assert.Equal("parameter_out_of_range", ex.ErrorCode);
+        Assert.Equal(-1.0, ex.Details!.Value.GetProperty("got").GetDouble());
+        ex = Assert.Throws<InsightException>(() => _client.Stl(SeasonalLine, 4, seasonal: 8));
+        Assert.Equal("invalid_option", ex.ErrorCode);
+        Assert.Equal("seasonal", ex.Parameter);
+        ex = Assert.Throws<InsightException>(() => _client.Stl(SeasonalLine[..7], 4));
+        Assert.Equal("insufficient_data", ex.ErrorCode);
+    }
+
     // ── Error Handling ──
 
     [Fact]

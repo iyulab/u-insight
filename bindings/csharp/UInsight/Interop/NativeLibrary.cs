@@ -290,6 +290,19 @@ internal static partial class NativeLibrary
         double* data, uint n, uint model, uint* lagRule, int* lags,
         ref NativeStructs.CKpssResult result);
 
+    // `robust` is a C `bool`: one byte, 0 or 1.
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_stl(
+        double* data, uint n, int period,
+        int* seasonal, int* trend, int* lowPass,
+        int* seasonalDegree, int* trendDegree, int* lowPassDegree,
+        byte robust, int* innerIterations, int* outerIterations,
+        ref NativeStructs.CStlResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_stl_result(
+        ref NativeStructs.CStlResult result);
+
     [LibraryImport(LibraryName)]
     public static unsafe partial int insight_mann_kendall(
         double* data, uint n,
