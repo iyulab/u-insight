@@ -41,8 +41,11 @@ pub struct KMeansConfig {
     pub k: usize,
     /// Maximum iterations, at least 1. Default: 300.
     pub max_iter: usize,
-    /// Convergence tolerance (centroid movement), a finite number `>= 0`;
-    /// 0 runs every iteration. Default: 1e-6.
+    /// Convergence tolerance, a finite number `>= 0`, **relative to the
+    /// data**: an iteration whose centroids move by a total squared distance
+    /// at most `tol` × the mean per-feature variance of the data ends the run
+    /// (scikit-learn's criterion), so the same data in another unit converges
+    /// at the same iteration. 0 runs until the centroids stop. Default: 1e-4.
     pub tol: f64,
     /// Number of random restarts (best result kept). Default: 10.
     pub n_init: usize,
@@ -58,7 +61,7 @@ impl KMeansConfig {
         Self {
             k,
             max_iter: 300,
-            tol: 1e-6,
+            tol: 1e-4,
             n_init: 10,
             seed: Some(42),
         }
@@ -185,9 +188,10 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
     // Each restart from its own seed -- `None` included, whose restarts all
     // started from the one default seed and so repeated the first.
     let base = config.seed.unwrap_or(DEFAULT_KMEANS_SEED);
+    let shift_limit = config.tol * mean_feature_variance(data, d);
     for init_idx in 0..config.n_init {
         let seed = Some(base.wrapping_add(init_idx as u64));
-        let result = kmeans_single(data, k, d, config.max_iter, config.tol, seed);
+        let result = kmeans_single(data, k, d, config.max_iter, shift_limit, seed);
 
         if best_result
             .as_ref()
@@ -200,6 +204,22 @@ pub fn kmeans(data: &[Vec<f64>], config: &KMeansConfig) -> Result<KMeansResult, 
     Ok(number_by_first_appearance(
         best_result.expect("n_init > 0 guarantees at least one result"),
     ))
+}
+
+/// The mean over features of each feature's population variance — the scale
+/// a relative convergence tolerance multiplies.
+fn mean_feature_variance(data: &[Vec<f64>], d: usize) -> f64 {
+    let n = data.len() as f64;
+    if d == 0 || data.is_empty() {
+        return 0.0;
+    }
+    (0..d)
+        .map(|j| {
+            let mean = data.iter().map(|p| p[j]).sum::<f64>() / n;
+            data.iter().map(|p| (p[j] - mean).powi(2)).sum::<f64>() / n
+        })
+        .sum::<f64>()
+        / d as f64
 }
 
 /// Refuses an iteration budget of none -- no assignment would ever be made --
@@ -514,7 +534,7 @@ fn kmeans_single(
     k: usize,
     d: usize,
     max_iter: usize,
-    tol: f64,
+    shift_limit: f64,
     seed: Option<u64>,
 ) -> KMeansResult {
     let n = data.len();
@@ -564,16 +584,16 @@ fn kmeans_single(
             }
         }
 
-        // Check convergence
-        let max_shift: f64 = centroids
+        // Check convergence: total squared movement against the data's spread
+        let shift: f64 = centroids
             .iter()
             .zip(new_centroids.iter())
-            .map(|(old, new)| euclidean_dist(old, new))
-            .fold(0.0f64, f64::max);
+            .map(|(old, new)| euclidean_dist_sq(old, new))
+            .sum();
 
         centroids = new_centroids;
 
-        if max_shift < tol {
+        if shift <= shift_limit {
             break;
         }
     }
@@ -635,7 +655,9 @@ fn kmeans_plus_plus(data: &[Vec<f64>], k: usize, _d: usize, seed: Option<u64>) -
 
         // Weighted random selection (distance² proportional)
         let total: f64 = min_dists.iter().sum();
-        if total < 1e-15 {
+        // Exactly 0 only when every point sits on a centroid; a fixed floor
+        // would call points in a small unit coincident (distances are squared).
+        if total <= 0.0 {
             // All points coincide: pick any remaining
             let idx = (next_rand() * n as f64) as usize % n;
             centroids.push(data[idx].clone());
@@ -2351,8 +2373,8 @@ pub struct MiniBatchKMeansConfig {
     pub batch_size: usize,
     /// Maximum iterations, at least 1. Default: 100.
     pub max_iter: usize,
-    /// Convergence tolerance (centroid movement), a finite number `>= 0`.
-    /// Default: 1e-4.
+    /// Convergence tolerance, a finite number `>= 0`, relative to the data as
+    /// [`KMeansConfig::tol`] is. Default: 1e-4.
     pub tol: f64,
     /// Random seed. Default: Some(42).
     pub seed: Option<u64>,
@@ -2420,6 +2442,7 @@ pub fn mini_batch_kmeans(
     if k > n {
         return Err(InsightError::too_few("data", k, n));
     }
+    let shift_limit = config.tol * mean_feature_variance(data, data[0].len());
 
     let d = data[0].len();
     for (i, point) in data.iter().enumerate() {
@@ -2485,14 +2508,14 @@ pub fn mini_batch_kmeans(
             }
         }
 
-        // Check convergence
-        let max_shift: f64 = centroids
+        // Check convergence, relative to the data's spread as `kmeans` does
+        let shift: f64 = centroids
             .iter()
             .zip(old_centroids.iter())
-            .map(|(new, old)| euclidean_dist(new, old))
-            .fold(0.0f64, f64::max);
+            .map(|(new, old)| euclidean_dist_sq(new, old))
+            .sum();
 
-        if max_shift < config.tol {
+        if shift <= shift_limit {
             break;
         }
     }

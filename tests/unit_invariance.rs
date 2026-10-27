@@ -86,3 +86,70 @@ fn permutation_importance_does_not_depend_on_the_unit_of_the_target() {
         );
     }
 }
+
+/// Two groups of the deterministic points, the second shifted away.
+fn two_groups() -> Vec<Vec<f64>> {
+    let mut data = points(40);
+    for p in data.iter_mut().skip(20) {
+        for v in p.iter_mut() {
+            *v += 12.0;
+        }
+    }
+    data
+}
+
+#[test]
+fn kmeans_converges_at_the_same_iteration_in_any_unit() {
+    use u_insight::clustering::{kmeans, mini_batch_kmeans, KMeansConfig, MiniBatchKMeansConfig};
+    let data = two_groups();
+    let base = kmeans(&data, &KMeansConfig::new(3)).expect("valid");
+    let mini = mini_batch_kmeans(&data, &MiniBatchKMeansConfig::new(3)).expect("valid");
+    for factor in [1e-9, 1e9] {
+        let r = kmeans(&scaled(&data, factor), &KMeansConfig::new(3)).expect("valid");
+        assert_eq!(r.labels, base.labels, "kmeans labels at ×{factor}");
+        assert_eq!(
+            r.iterations, base.iterations,
+            "kmeans iterations at ×{factor}"
+        );
+        let m = mini_batch_kmeans(&scaled(&data, factor), &MiniBatchKMeansConfig::new(3))
+            .expect("valid");
+        assert_eq!(m.labels, mini.labels, "mini-batch labels at ×{factor}");
+        assert_eq!(
+            m.iterations, mini.iterations,
+            "mini-batch iterations at ×{factor}"
+        );
+    }
+}
+
+#[test]
+fn isolation_forest_scores_do_not_depend_on_the_unit() {
+    use u_insight::isolation_forest::{isolation_forest, IsolationForestConfig};
+    let mut data = points(60);
+    data.push(vec![30.0, -20.0, 15.0]);
+    let config = IsolationForestConfig::default();
+    let base = isolation_forest(&data, &config).expect("valid");
+    let small = isolation_forest(&scaled(&data, 1e-18), &config).expect("valid");
+    assert_eq!(small.anomalies, base.anomalies);
+    for (s, b) in small.scores.iter().zip(&base.scores) {
+        assert!((s - b).abs() < 1e-12, "{s} vs {b}");
+    }
+}
+
+#[test]
+fn univariate_outlier_tests_do_not_depend_on_the_unit() {
+    use u_insight::distribution::grubbs_test;
+    use u_insight::profiling::{detect_outliers_slice, OutlierMethod};
+    let data = [10.1, 9.8, 10.3, 9.9, 10.0, 10.2, 9.7, 10.1, 14.5, 10.0];
+    let base = grubbs_test(&data, 0.05).expect("valid");
+    for factor in [1e-18, 1e18] {
+        let x: Vec<f64> = data.iter().map(|v| v * factor).collect();
+        let g = grubbs_test(&x, 0.05).expect("a small unit is not constant data");
+        assert_eq!(g.outlier_index, base.outlier_index);
+        assert!((g.statistic - base.statistic).abs() < 1e-9 * base.statistic);
+        for method in [OutlierMethod::Zscore, OutlierMethod::ModifiedZscore] {
+            let a = detect_outliers_slice(&data, method).expect("valid");
+            let b = detect_outliers_slice(&x, method).expect("valid");
+            assert_eq!(b.indices, a.indices, "{method:?} at ×{factor}");
+        }
+    }
+}

@@ -276,8 +276,9 @@ fn build_itree(data: &[&[f64]], d: usize, max_depth: usize, rng: &mut u64) -> IT
         }
     }
 
-    // All values identical for this feature
-    if (max_val - min_val).abs() < 1e-15 {
+    // All values identical for this feature (exactly: any spread, in any
+    // unit, has a split point strictly inside it)
+    if max_val <= min_val {
         return ITreeNode::External { size: n };
     }
 

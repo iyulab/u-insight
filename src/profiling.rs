@@ -869,7 +869,8 @@ fn detect_zscore(valid: &[(usize, f64)], vals: &[f64]) -> Option<OutlierResult> 
     let std = u_numflow::stats::std_dev(vals)?;
     let threshold = 3.0;
 
-    if std < 1e-15 {
+    // Against the data's own size, as the Grubbs test does.
+    if std <= 1e-12 * mean.abs() {
         // Zero variance: no outliers possible; fences undefined
         return Some(OutlierResult {
             method: OutlierMethod::Zscore,
@@ -929,7 +930,7 @@ fn detect_robust(
     abs_devs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mad = u_numflow::stats::median(&abs_devs)?;
 
-    if mad < 1e-15 {
+    if mad <= 1e-12 * median.abs() {
         return Some(OutlierResult {
             method,
             indices: Vec::new(),

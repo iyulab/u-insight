@@ -697,7 +697,9 @@ pub fn grubbs_test(data: &[f64], alpha: f64) -> Result<GrubbsResult, InsightErro
     let variance: f64 = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
     let std_dev = variance.sqrt();
 
-    if std_dev < 1e-15 {
+    // No spread beyond the rounding of the mean, judged against the data's
+    // own size -- a fixed floor would call data in a small unit constant.
+    if std_dev <= 1e-12 * mean.abs() {
         return Err(InsightError::DegenerateData {
             parameter: Some("data".into()),
             reason: "every value is the same: the Grubbs statistic is undefined".into(),

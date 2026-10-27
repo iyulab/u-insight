@@ -21,13 +21,25 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 - `compute_flags` raised `ZeroVariance` on an absolute standard deviation below
   1e-10; it now compares the standard deviation with the column's root mean
   square (`relative_std_threshold`, default 1e-5).
+- More fixed floors that made results depend on the unit of the data, each now
+  judged against the data's own size: `kmeans` / `mini_batch_kmeans` stopped
+  when centroids moved less than an absolute `tol` (data in a small unit stopped
+  after the first iteration) -- the tolerance is now relative, scikit-learn's
+  criterion (total squared centroid shift at most `tol` × the mean feature
+  variance; default 1e-4); k-means++ seeding treated points closer than 1e-15
+  (squared) as coincident; `isolation_forest` stopped splitting a feature whose
+  range was below 1e-15, so every point in a small unit scored alike; `grubbs_test`
+  refused data with a standard deviation below 1e-15 as constant; z-score and
+  modified z-score outlier detection reported none below the same floors.
 
 ### Changed
 
 - **Breaking** (Rust): `FeatureConfig::variance_threshold` is
   `relative_variance_threshold` (the same default number, now relative), and
   `LowVarianceFeature` gains `relative_variance`. `FlagThresholds::
-  zero_variance_threshold` is `relative_std_threshold`.
+  zero_variance_threshold` is `relative_std_threshold`. `KMeansConfig::tol` /
+  `MiniBatchKMeansConfig::tol` are relative to the data (the k-means default
+  1e-6 becomes 1e-4).
 
 ## [0.36.2] - 2026-10-20
 
