@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-28
+
+Depends on u-numflow 0.15 and u-analytics 0.29.0.
+
 ### Added
 
 - STL seasonal-trend decomposition (Cleveland et al. 1990) on the WebAssembly, C
