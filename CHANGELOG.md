@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-27
+
+Depends on u-numflow 0.15 and u-analytics 0.28.0.
+
 ### Added
 
 - Autocorrelation, partial autocorrelation, the augmented Dickey-Fuller
