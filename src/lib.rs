@@ -43,6 +43,14 @@
 //! assert_eq!(schema[2].1, DataType::Boolean);
 //! ```
 
+/// This crate's version, as published (`CARGO_PKG_VERSION`) — for a consumer
+/// that reports what it was built against without reading a lock file.
+///
+/// ```
+/// assert!(!u_insight::VERSION.is_empty());
+/// ```
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod analysis;
 pub mod clustering;
 pub mod csv_parser;
