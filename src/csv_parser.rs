@@ -29,6 +29,7 @@
 
 use crate::dataframe::{Column, DataFrame, DataType, ValidityBitmap};
 use crate::error::InsightError;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Standard null value markers recognized during parsing.
@@ -92,60 +93,94 @@ impl CsvParser {
     }
 
     /// Parses a CSV string into a DataFrame.
+    ///
+    /// One pass over the text collects each column's fields, borrowed from
+    /// `input` wherever the field is a contiguous slice of it (only a field
+    /// with an escaped `""` quote is copied); each column is then typed and
+    /// built, and its fields released before the next. Memory is the typed
+    /// columns plus one reference per field while parsing — not an owned
+    /// string per field, twice over, as a row-major parse followed by a
+    /// transpose would hold.
     pub fn parse_str(&self, input: &str) -> Result<DataFrame, InsightError> {
         // Strip BOM if present
         let input = input.strip_prefix('\u{feff}').unwrap_or(input);
 
-        // Parse into raw rows
-        let raw_rows = self.parse_raw(input)?;
-        if raw_rows.is_empty() {
-            return Ok(DataFrame::new());
-        }
-
-        // Extract header
-        let (headers, data_rows) = if self.has_header {
-            if raw_rows.is_empty() {
-                return Ok(DataFrame::new());
+        let mut records = Records::new(input, self.delimiter);
+        let mut record: Vec<Cow<'_, str>> = Vec::new();
+        let mut headers: Option<Vec<String>> = None;
+        let mut columns: Vec<Vec<Cow<'_, str>>> = Vec::new();
+        // All-empty rows are kept only when a non-empty row follows them;
+        // trailing ones are dropped. Held as (row index, field count) until
+        // then, so a blank line inside the data is refused for its width as
+        // any other row is.
+        let mut pending_empty: Vec<(usize, usize)> = Vec::new();
+        let mut row_idx = 0usize;
+        let line_of = |row_idx: usize| {
+            if self.has_header {
+                row_idx + 2
+            } else {
+                row_idx + 1
             }
-            let headers: Vec<String> = raw_rows[0].clone();
-            (headers, &raw_rows[1..])
-        } else {
-            let n_cols = raw_rows[0].len();
-            let headers: Vec<String> = (0..n_cols).map(|i| format!("col_{i}")).collect();
-            (headers, &raw_rows[..])
         };
 
-        if data_rows.is_empty() {
+        while records.next_into(&mut record) {
+            let all_empty = record.iter().all(|f| f.is_empty());
+            if headers.is_none() {
+                // Leading all-empty rows are skipped.
+                if all_empty {
+                    continue;
+                }
+                let n_cols = record.len();
+                columns = (0..n_cols).map(|_| Vec::new()).collect();
+                if self.has_header {
+                    headers = Some(record.drain(..).map(Cow::into_owned).collect());
+                    continue;
+                }
+                headers = Some((0..n_cols).map(|i| format!("col_{i}")).collect());
+            }
+            let n_cols = columns.len();
+            if all_empty {
+                pending_empty.push((row_idx, record.len()));
+                row_idx += 1;
+                continue;
+            }
+            for (at, len) in pending_empty.drain(..) {
+                if len != n_cols {
+                    return Err(InsightError::CsvParse {
+                        line: line_of(at),
+                        message: format!("expected {n_cols} fields, got {len}"),
+                    });
+                }
+                for column in &mut columns {
+                    column.push(Cow::Borrowed(""));
+                }
+            }
+            if record.len() != n_cols {
+                return Err(InsightError::CsvParse {
+                    line: line_of(row_idx),
+                    message: format!("expected {n_cols} fields, got {}", record.len()),
+                });
+            }
+            for (column, field) in columns.iter_mut().zip(record.drain(..)) {
+                column.push(field);
+            }
+            row_idx += 1;
+        }
+
+        let Some(headers) = headers else {
+            return Ok(DataFrame::new());
+        };
+        if columns.first().is_none_or(Vec::is_empty) {
             return Ok(DataFrame::new());
         }
 
-        let n_cols = headers.len();
-        let n_rows = data_rows.len();
-
-        // Transpose to column-major raw strings
-        let mut raw_columns: Vec<Vec<String>> = vec![Vec::with_capacity(n_rows); n_cols];
-        for (line_idx, row) in data_rows.iter().enumerate() {
-            if row.len() != n_cols {
-                return Err(InsightError::CsvParse {
-                    line: if self.has_header {
-                        line_idx + 2
-                    } else {
-                        line_idx + 1
-                    },
-                    message: format!("expected {n_cols} fields, got {}", row.len()),
-                });
-            }
-            for (col_idx, field) in row.iter().enumerate() {
-                raw_columns[col_idx].push(field.clone());
-            }
-        }
-
-        // Infer types and build columns
+        // Infer types and build columns, releasing each column's fields once
+        // it is built.
         let mut df = DataFrame::new();
-        for (col_idx, raw_col) in raw_columns.iter().enumerate() {
-            let col = self.build_column(raw_col);
-            df.add_column(headers[col_idx].clone(), col)
-                .expect("all columns same length");
+        for (name, raw) in headers.into_iter().zip(columns) {
+            let col = self.build_column(&raw);
+            drop(raw);
+            df.add_column(name, col).expect("all columns same length");
         }
 
         Ok(df)
@@ -159,83 +194,6 @@ impl CsvParser {
 
     // ── Internal parsing ─────────────────────────────────────────
 
-    /// Parses raw CSV text into rows of string fields.
-    fn parse_raw(&self, input: &str) -> Result<Vec<Vec<String>>, InsightError> {
-        let delim = self.delimiter as char;
-        let mut rows: Vec<Vec<String>> = Vec::new();
-        let mut current_row: Vec<String> = Vec::new();
-        let mut current_field = String::new();
-        let mut in_quotes = false;
-        let mut chars = input.chars().peekable();
-        let mut _line_num: usize = 1;
-
-        while let Some(c) = chars.next() {
-            if in_quotes {
-                if c == '"' {
-                    if chars.peek() == Some(&'"') {
-                        // Escaped quote ""
-                        chars.next();
-                        current_field.push('"');
-                    } else {
-                        // End of quoted field
-                        in_quotes = false;
-                    }
-                } else {
-                    if c == '\n' {
-                        _line_num += 1;
-                    }
-                    current_field.push(c);
-                }
-            } else if c == '"' && current_field.is_empty() {
-                in_quotes = true;
-            } else if c == delim {
-                current_row.push(std::mem::take(&mut current_field));
-            } else if c == '\n' {
-                // Handle \r\n: strip trailing \r from field
-                let field = if current_field.ends_with('\r') {
-                    current_field.truncate(current_field.len() - 1);
-                    std::mem::take(&mut current_field)
-                } else {
-                    std::mem::take(&mut current_field)
-                };
-                current_row.push(field);
-                if !current_row.iter().all(|f| f.is_empty()) || !rows.is_empty() {
-                    rows.push(std::mem::take(&mut current_row));
-                } else {
-                    current_row.clear();
-                }
-                _line_num += 1;
-            } else if c == '\r' {
-                // Standalone \r (old Mac style) - treat as newline
-                if chars.peek() != Some(&'\n') {
-                    current_row.push(std::mem::take(&mut current_field));
-                    if !current_row.iter().all(|f| f.is_empty()) || !rows.is_empty() {
-                        rows.push(std::mem::take(&mut current_row));
-                    } else {
-                        current_row.clear();
-                    }
-                    _line_num += 1;
-                }
-                // If \r\n, the \r is just ignored; \n handles the newline
-            } else {
-                current_field.push(c);
-            }
-        }
-
-        // Handle last field/row (no trailing newline)
-        if !current_field.is_empty() || !current_row.is_empty() {
-            current_row.push(current_field);
-            rows.push(current_row);
-        }
-
-        // Remove trailing empty rows
-        while rows.last().is_some_and(|r| r.iter().all(|f| f.is_empty())) {
-            rows.pop();
-        }
-
-        Ok(rows)
-    }
-
     /// Checks if a trimmed value is a null marker.
     fn is_null(&self, value: &str) -> bool {
         let trimmed = value.trim();
@@ -243,7 +201,7 @@ impl CsvParser {
     }
 
     /// Infers the column type and builds a typed Column.
-    fn build_column(&self, raw_values: &[String]) -> Column {
+    fn build_column(&self, raw_values: &[Cow<'_, str>]) -> Column {
         let n = raw_values.len();
         let trimmed: Vec<&str> = raw_values.iter().map(|s| s.trim()).collect();
         let null_flags: Vec<bool> = trimmed.iter().map(|s| self.is_null(s)).collect();
@@ -285,10 +243,14 @@ impl CsvParser {
             return DataType::Boolean;
         }
 
-        // Categorical vs Text: based on cardinality
+        // Categorical vs Text: based on cardinality. Past the dictionary cap
+        // the column is Text whatever the ratio, so counting stops there.
         let mut unique = std::collections::HashSet::new();
         for &v in &non_null {
             unique.insert(v);
+            if unique.len() > MAX_CATEGORICAL_UNIQUE {
+                return DataType::Text;
+            }
         }
         let ratio = unique.len() as f64 / non_null.len() as f64;
         if ratio < CATEGORICAL_THRESHOLD && unique.len() <= MAX_CATEGORICAL_UNIQUE {
@@ -384,6 +346,141 @@ impl CsvParser {
 impl Default for CsvParser {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Record tokenizer ──────────────────────────────────────────────────
+
+/// A field being read: nothing yet, a slice of the input, or — once its
+/// bytes stop being one contiguous slice (an escaped `""`, text after a
+/// closing quote) — an owned copy.
+enum Field {
+    Empty,
+    Slice { start: usize, end: usize },
+    Owned(Vec<u8>),
+}
+
+impl Field {
+    fn is_empty(&self) -> bool {
+        match self {
+            Field::Empty => true,
+            Field::Slice { start, end } => start == end,
+            Field::Owned(bytes) => bytes.is_empty(),
+        }
+    }
+
+    /// Appends `input[at..at + 1]`.
+    fn push(&mut self, input: &[u8], at: usize) {
+        match self {
+            Field::Empty => {
+                *self = Field::Slice {
+                    start: at,
+                    end: at + 1,
+                }
+            }
+            Field::Slice { start, end } if *end == at => *end = at + 1,
+            Field::Slice { start, end } => {
+                let mut bytes = input[*start..*end].to_vec();
+                bytes.push(input[at]);
+                *self = Field::Owned(bytes);
+            }
+            Field::Owned(bytes) => bytes.push(input[at]),
+        }
+    }
+
+    /// Drops one trailing `\r`, if there is one.
+    fn strip_cr(&mut self, input: &[u8]) {
+        match self {
+            Field::Slice { start, end } if *end > *start && input[*end - 1] == b'\r' => *end -= 1,
+            Field::Owned(bytes) if bytes.last() == Some(&b'\r') => {
+                bytes.pop();
+            }
+            _ => {}
+        }
+    }
+
+    fn take<'a>(&mut self, text: &'a str) -> Cow<'a, str> {
+        match std::mem::replace(self, Field::Empty) {
+            Field::Empty => Cow::Borrowed(""),
+            // Fields split only at ASCII bytes, so every boundary is a
+            // character boundary.
+            Field::Slice { start, end } => Cow::Borrowed(&text[start..end]),
+            Field::Owned(bytes) => Cow::Owned(
+                String::from_utf8(bytes).expect("the bytes of whole characters, in order"),
+            ),
+        }
+    }
+}
+
+/// The records of a CSV text, one at a time, fields borrowed from the text
+/// where they can be. Quoting follows RFC 4180: a field that starts with `"`
+/// runs to the matching quote, `""` inside it is one quote, and it may span
+/// lines. `\n`, `\r\n` and a lone `\r` end a record.
+struct Records<'a> {
+    text: &'a str,
+    pos: usize,
+    delimiter: u8,
+}
+
+impl<'a> Records<'a> {
+    fn new(text: &'a str, delimiter: u8) -> Self {
+        Self {
+            text,
+            pos: 0,
+            delimiter,
+        }
+    }
+
+    /// Reads the next record into `out` (cleared first); `false` at the end.
+    fn next_into(&mut self, out: &mut Vec<Cow<'a, str>>) -> bool {
+        out.clear();
+        let input = self.text.as_bytes();
+        if self.pos >= input.len() {
+            return false;
+        }
+        let mut field = Field::Empty;
+        let mut in_quotes = false;
+        while self.pos < input.len() {
+            let at = self.pos;
+            let b = input[at];
+            self.pos += 1;
+            if in_quotes {
+                if b == b'"' {
+                    if input.get(self.pos) == Some(&b'"') {
+                        // Escaped quote ""
+                        self.pos += 1;
+                        field.push(input, at + 1);
+                    } else {
+                        in_quotes = false;
+                    }
+                } else {
+                    field.push(input, at);
+                }
+            } else if b == b'"' && field.is_empty() {
+                in_quotes = true;
+            } else if b == self.delimiter {
+                out.push(field.take(self.text));
+            } else if b == b'\n' {
+                field.strip_cr(input);
+                out.push(field.take(self.text));
+                return true;
+            } else if b == b'\r' {
+                if input.get(self.pos) != Some(&b'\n') {
+                    // A lone \r (old Mac style) ends the record.
+                    out.push(field.take(self.text));
+                    return true;
+                }
+                // \r\n: the \n ends the record.
+            } else {
+                field.push(input, at);
+            }
+        }
+        // Last record, without a trailing newline.
+        if !field.is_empty() || !out.is_empty() {
+            out.push(field.take(self.text));
+            return true;
+        }
+        false
     }
 }
 
@@ -694,5 +791,61 @@ mod tests {
         let x = df.column_by_name("x").unwrap();
         assert_eq!(x.null_count(), 1);
         assert!(!x.is_valid(1));
+    }
+
+    // ── Tokenizer edge cases ─────────────────────────────────────
+
+    fn texts(df: &DataFrame, name: &str) -> Vec<String> {
+        let index = df.column_names().iter().position(|n| n == name).unwrap();
+        match df.column(index).unwrap() {
+            Column::Text { values, .. } => values.clone(),
+            Column::Categorical {
+                dictionary,
+                indices,
+                ..
+            } => indices
+                .iter()
+                .map(|&i| dictionary[i as usize].clone())
+                .collect(),
+            other => panic!("{name} is {:?}", other.data_type()),
+        }
+    }
+
+    #[test]
+    fn escaped_quotes_text_after_a_quote_and_unicode_survive() {
+        let csv = "a,b\n\"say \"\"hi\"\"\",\"ab\"cd\n\"日本\",é,\n";
+        let err = CsvParser::new().parse_str(csv).unwrap_err();
+        assert!(
+            matches!(err, InsightError::CsvParse { line: 3, .. }),
+            "{err:?}"
+        );
+        let csv = "a,b\n\"say \"\"hi\"\"\",\"ab\"cd\n\"日本\",é\nx,y\n";
+        let df = CsvParser::new().parse_str(csv).unwrap();
+        assert_eq!(texts(&df, "a"), ["say \"hi\"", "日本", "x"]);
+        assert_eq!(texts(&df, "b"), ["abcd", "é", "y"]);
+    }
+
+    #[test]
+    fn blank_rows_inside_data_are_refused_and_trailing_ones_dropped() {
+        // A blank line between rows is a one-field row: refused for its width.
+        let err = CsvParser::new().parse_str("a,b\n1,2\n\n3,4\n").unwrap_err();
+        assert!(
+            matches!(err, InsightError::CsvParse { line: 3, .. }),
+            "{err:?}"
+        );
+        // A row of empty fields between rows is a row of nulls.
+        let df = CsvParser::new().parse_str("a,b\n1,2\n,\n3,4\n").unwrap();
+        assert_eq!(df.row_count(), 3);
+        // Leading and trailing blank lines are not rows.
+        let df = CsvParser::new().parse_str("\n\na,b\n1,2\n\n\n,\n").unwrap();
+        assert_eq!(df.row_count(), 1);
+    }
+
+    #[test]
+    fn lone_carriage_returns_and_quoted_carriage_returns() {
+        let df = CsvParser::new().parse_str("a,b\r1,2\r3,4").unwrap();
+        assert_eq!(df.row_count(), 2);
+        let df = CsvParser::new().parse_str("a,b\r\n\"x\ry\",2\r\n").unwrap();
+        assert_eq!(texts(&df, "a"), ["x\ry"]);
     }
 }
