@@ -1,30 +1,21 @@
 //! Autocorrelation, unit-root and stationarity testing, and seasonal-trend
-//! decomposition of a univariate series: the request rules both transports
-//! apply before handing a series to `u-analytics`.
+//! decomposition of a univariate series: the request layer both transports
+//! share between a request and `u-analytics`.
 //!
-//! The statistics are `u-analytics`' own (`correlation::acf` / `pacf`,
-//! `testing::adf_test` / `kpss_test`, `decomposition::Stl`); what lives here is
-//! the part a request adds -- the default and the admissible range of an
-//! option, the fewest values each statistic is defined for, and the refusal
-//! for a series that does not vary -- so the WebAssembly binding and the C ABI
-//! cannot give the same request two answers.
-
+//! The statistics, their defaults, their domains and their refusals are
+//! `u-analytics`' own (`correlation::acf` / `pacf`, `testing::adf_test` /
+//! `kpss_test`, `decomposition::Stl`); what lives here is what a request adds
+//! -- a count option read as sent (a negative one is judged against the
+//! domain the statistic reports), a combination of options the request
+//! refuses, and the mapping of the statistic's refusal to [`InsightError`] --
+//! so the WebAssembly binding and the C ABI cannot give the same request two
+//! answers.
 use u_analytics::correlation::{AcfResult, PacfResult};
 use u_analytics::decomposition::{Stl, StlError, StlResult};
+use u_analytics::error::TimeSeriesError;
 use u_analytics::testing::{AdfLags, AdfModel, AdfResult, KpssLags, KpssModel, KpssResult};
 
 use crate::error::{Bound, InsightError};
-
-/// The fewest values `acf` takes: one lag needs a pair.
-pub(crate) const ACF_MIN: usize = 2;
-/// The fewest values `pacf` takes: lags below `n / 2` leave lag 1 from 4 on.
-pub(crate) const PACF_MIN: usize = 4;
-/// The fewest values `adf_test` takes.
-pub(crate) const ADF_MIN: usize = 10;
-/// The fewest values `kpss_test` takes.
-pub(crate) const KPSS_MIN: usize = 10;
-/// The fewest rows the ADF test regression is run on.
-const ADF_MIN_REGRESSION_ROWS: usize = 5;
 
 /// `adf_test`'s `model` names, in the order of the C ABI's `INSIGHT_ADF_*`.
 pub(crate) const ADF_MODELS: [(&str, AdfModel); 3] = [
@@ -42,101 +33,107 @@ pub(crate) const KPSS_MODELS: [(&str, KpssModel); 2] =
 pub(crate) const KPSS_LAG_RULES: [(&str, KpssLags); 2] =
     [("hobijn", KpssLags::Hobijn), ("schwert", KpssLags::Schwert)];
 
-/// The columns of the ADF regression besides the lags: the lagged level, and
-/// the deterministic terms of `model`.
-fn adf_fixed_columns(model: AdfModel) -> usize {
-    match model {
-        AdfModel::None => 1,
-        AdfModel::Constant => 2,
-        AdfModel::ConstantTrend => 3,
-    }
-}
-
-/// `data` when every value is finite and there are at least `min` of them.
-fn series(data: &[f64], min: usize) -> Result<(), InsightError> {
-    if let Some(index) = data.iter().position(|v| !v.is_finite()) {
-        return Err(InsightError::ValueNotFinite {
-            column: "data".into(),
-            index,
-        });
-    }
-    if data.len() < min {
-        return Err(InsightError::too_few("data", min, data.len()));
-    }
-    Ok(())
-}
-
-/// The largest lag of an autocorrelation request: `max_lag` within
-/// `[1, highest]`, absent = `min(⌊10·log₁₀ n⌋, highest)` (statsmodels'
-/// default), never below 1.
-fn max_lag(value: Option<f64>, n: usize, highest: usize) -> Result<usize, InsightError> {
-    match value {
-        None => Ok((((n as f64).log10() * 10.0).floor() as usize).clamp(1, highest)),
-        Some(k) => {
-            InsightError::check_range(
-                "max_lag",
-                k,
-                Bound::Closed(1.0),
-                Bound::Closed(highest as f64),
-            )?;
-            Ok(k as usize)
+impl From<TimeSeriesError> for InsightError {
+    fn from(error: TimeSeriesError) -> Self {
+        match error {
+            TimeSeriesError::ValueNotFinite { index } => InsightError::ValueNotFinite {
+                column: "data".into(),
+                index,
+            },
+            TimeSeriesError::TooFewObservations { needed, got } => {
+                InsightError::too_few("data", needed, got)
+            }
+            TimeSeriesError::OptionOutOfRange {
+                option,
+                got,
+                min,
+                max,
+            } => InsightError::ParameterOutOfRange {
+                name: option.into(),
+                low: Bound::Closed(min),
+                high: Bound::Closed(max),
+                got,
+            },
+            TimeSeriesError::NoVariation | TimeSeriesError::DegenerateRegression => {
+                InsightError::DegenerateData {
+                    parameter: Some("data".into()),
+                    reason: error.to_string(),
+                }
+            }
+            // A reason this crate does not know yet is still a refusal of the data.
+            _ => InsightError::DegenerateData {
+                parameter: Some("data".into()),
+                reason: error.to_string(),
+            },
         }
     }
 }
 
-fn no_autocorrelation() -> InsightError {
-    InsightError::DegenerateData {
-        parameter: Some("data".into()),
-        reason: "the series does not vary, so its autocorrelation is undefined".into(),
+/// A count option of a time-series statistic, a whole number already read,
+/// whose domain the statistic states and which depends on the data.
+///
+/// The value is read as sent -- negative, or past what a count holds -- so it
+/// is judged here, against the domain the statistic itself reports: asked
+/// with a value it refuses (`usize::MAX`), it answers with the data's
+/// refusal, if the data has one, or the option's domain. Judging the option
+/// before the statistic runs keeps the data's refusals ahead of the
+/// option's, and the option's ahead of a combination of options this crate
+/// refuses (`lags` with `max_lags`).
+fn series_count<T>(
+    option: &'static str,
+    value: Option<f64>,
+    probe: impl FnOnce(usize) -> Result<T, TimeSeriesError>,
+) -> Result<Option<usize>, InsightError> {
+    let Some(v) = value else {
+        return Ok(None);
+    };
+    match probe(usize::MAX) {
+        Err(TimeSeriesError::OptionOutOfRange {
+            option: o,
+            min,
+            max,
+            ..
+        }) if o == option => {
+            InsightError::check_range(option, v, Bound::Closed(min), Bound::Closed(max))?;
+            Ok(Some(v as usize))
+        }
+        Err(other) => Err(other.into()),
+        // No count is refused by no domain: the value stands.
+        Ok(_) => Ok(Some(v as usize)),
     }
 }
 
 /// Sample autocorrelation for lags 0 to `max_lag` (a whole number, already
-/// read; `None` = the default). At least 2 finite values; `max_lag` in
-/// `[1, n − 1]`.
-pub(crate) fn acf(data: &[f64], max_lag_option: Option<f64>) -> Result<AcfResult, InsightError> {
-    series(data, ACF_MIN)?;
-    let n = data.len();
-    let lag = max_lag(max_lag_option, n, n - 1)?;
-    u_analytics::correlation::acf(data, lag).ok_or_else(no_autocorrelation)
+/// read; `None` = statsmodels' default).
+pub(crate) fn acf(data: &[f64], max_lag: Option<f64>) -> Result<AcfResult, InsightError> {
+    let lag = series_count("max_lag", max_lag, |k| {
+        u_analytics::correlation::acf(data, Some(k))
+    })?;
+    Ok(u_analytics::correlation::acf(data, lag)?)
 }
 
-/// Sample partial autocorrelation for lags 1 to `max_lag`. At least 4 finite
-/// values; `max_lag` in `[1, n / 2 − 1]` -- beyond `n / 2` (statsmodels'
-/// limit) the recursion runs on autocorrelations from too few pairs.
-pub(crate) fn pacf(data: &[f64], max_lag_option: Option<f64>) -> Result<PacfResult, InsightError> {
-    series(data, PACF_MIN)?;
-    let n = data.len();
-    let lag = max_lag(max_lag_option, n, n / 2 - 1)?;
-    u_analytics::correlation::pacf(data, lag).ok_or_else(no_autocorrelation)
+/// Sample partial autocorrelation for lags 1 to `max_lag` (below `n / 2`).
+pub(crate) fn pacf(data: &[f64], max_lag: Option<f64>) -> Result<PacfResult, InsightError> {
+    let lag = series_count("max_lag", max_lag, |k| {
+        u_analytics::correlation::pacf(data, Some(k))
+    })?;
+    Ok(u_analytics::correlation::pacf(data, lag)?)
 }
 
 /// The augmented Dickey-Fuller test of `data` under `model`. `max_lags`
 /// bounds the AIC search for the number of lagged differences (`None`:
 /// Schwert's rule); `lags` fixes it instead -- at most one of the two. Both
-/// are whole numbers already read, each in `[0, max]` where `max` leaves the
-/// regression at least 5 rows and a residual degree of freedom. At least 10
-/// finite values.
+/// are whole numbers already read.
 pub(crate) fn adf(
     data: &[f64],
     model: AdfModel,
     max_lags: Option<f64>,
     lags: Option<f64>,
 ) -> Result<AdfResult, InsightError> {
-    series(data, ADF_MIN)?;
-    // With p lags the regression keeps n - 1 - p rows (one value is lost to
-    // differencing, p to the lags) and has fixed + p columns.
-    let n = data.len();
-    let max = (n - 1 - ADF_MIN_REGRESSION_ROWS).min((n - 2 - adf_fixed_columns(model)) / 2);
-    let count = |name: &str, value: Option<f64>| -> Result<Option<usize>, InsightError> {
-        value
-            .map(|p| {
-                InsightError::check_range(name, p, Bound::Closed(0.0), Bound::Closed(max as f64))
-                    .map(|()| p as usize)
-            })
-            .transpose()
-    };
-    let lags = match (count("max_lags", max_lags)?, count("lags", lags)?) {
+    let run = |lags| u_analytics::testing::adf_test(data, model, lags);
+    let max_lags = series_count("max_lags", max_lags, |m| run(AdfLags::Aic { max: Some(m) }))?;
+    let lags = series_count("lags", lags, |p| run(AdfLags::Fixed(p)))?;
+    let lags = match (max_lags, lags) {
         (Some(_), Some(_)) => {
             return Err(InsightError::InvalidParameter {
                 name: "lags".into(),
@@ -148,33 +145,21 @@ pub(crate) fn adf(
         (_, Some(p)) => AdfLags::Fixed(p),
         (max, None) => AdfLags::Aic { max },
     };
-    u_analytics::testing::adf_test(data, model, lags).ok_or_else(|| InsightError::DegenerateData {
-        parameter: Some("data".into()),
-        reason: "the ADF test regression is singular, or an exact fit of the differences \
-                 (a deterministic series), so the t-ratio is undefined"
-            .into(),
-    })
+    Ok(run(lags)?)
 }
 
 /// The KPSS stationarity test of `data` under `model` (H₀: stationary
 /// around a level or a trend). The truncation lag of the long-run variance is
 /// chosen by `lag_rule` (`None`: Hobijn, Franses & Ooms) or fixed by `lags`, a
-/// whole number already read, in `[0, n − 1]` -- at most one of the two. At
-/// least 10 finite values.
+/// whole number already read -- at most one of the two.
 pub(crate) fn kpss(
     data: &[f64],
     model: KpssModel,
     lag_rule: Option<KpssLags>,
     lags: Option<f64>,
 ) -> Result<KpssResult, InsightError> {
-    series(data, KPSS_MIN)?;
-    let n = data.len();
-    let fixed = lags
-        .map(|l| {
-            InsightError::check_range("lags", l, Bound::Closed(0.0), Bound::Closed((n - 1) as f64))
-                .map(|()| l as usize)
-        })
-        .transpose()?;
+    let run = |lags| u_analytics::testing::kpss_test(data, model, lags);
+    let fixed = series_count("lags", lags, |l| run(KpssLags::Fixed(l)))?;
     let lags = match (lag_rule, fixed) {
         (Some(_), Some(_)) => {
             return Err(InsightError::InvalidParameter {
@@ -186,12 +171,7 @@ pub(crate) fn kpss(
         (Some(rule), None) => rule,
         (None, None) => KpssLags::Hobijn,
     };
-    u_analytics::testing::kpss_test(data, model, lags).ok_or_else(|| InsightError::DegenerateData {
-        parameter: Some("data".into()),
-        reason: "the series has no variation about its level (or trend), so the KPSS \
-                     statistic is undefined"
-            .into(),
-    })
+    Ok(run(lags)?)
 }
 
 /// The options of an STL request, each a whole number already read (`None`:
