@@ -11,7 +11,7 @@
 - **Statistical Analysis**: Pearson correlation, simple linear regression, Cramer's V
 - **Distribution**: Normality testing (KS, Jarque-Bera, Shapiro-Wilk, Anderson-Darling)
 - **Feature Importance**: Composite scores, ANOVA F-test, Mutual Information, Permutation Importance
-- **Time Series**: Period estimation, spectral residual anomaly scoring, ACF (with Bartlett's limits), PACF, augmented Dickey-Fuller test
+- **Time Series**: Period estimation, spectral residual anomaly scoring, ACF (with Bartlett's limits), PACF, augmented Dickey-Fuller test, KPSS stationarity test
 - **Cross-Platform**: Windows, Linux, and macOS support
 
 ## Installation
@@ -134,6 +134,7 @@ public sealed class InsightClient : IDisposable
     AcfResult Acf(double[] data, int? maxLag = null);      // null: min(floor(10 log10 n), n - 1)
     PacfResult Pacf(double[] data, int? maxLag = null);    // lags below n / 2
     AdfResult AdfTest(double[] data, AdfModel model = AdfModel.Constant, int? maxLags = null, int? lags = null);
+    KpssResult KpssTest(double[] data, KpssModel model = KpssModel.Level, KpssLagRule? lagRule = null, int? lags = null);
 }
 ```
 

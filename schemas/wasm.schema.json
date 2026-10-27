@@ -1013,6 +1013,119 @@
       ],
       "type": "object"
     },
+    "KpssDto": {
+      "properties": {
+        "levels": {
+          "description": "1 %, 2.5 %, 5 % and 10 %, in that order (Kwiatkowski et al. 1992, Table 1).",
+          "items": {
+            "$ref": "#/$defs/KpssLevelDto"
+          },
+          "type": "array"
+        },
+        "n_lags": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "p_value": {
+          "description": "Interpolated in the table of critical values, clamped to [0.01, 0.10].",
+          "format": "double",
+          "type": "number"
+        },
+        "p_value_bound": {
+          "description": "`\"interpolated\"`, or `\"at_most\"` / `\"at_least\"` when the statistic is\nbeyond the table and `p_value` is its bound.",
+          "enum": [
+            "interpolated",
+            "at_most",
+            "at_least"
+          ],
+          "type": "string"
+        },
+        "statistic": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "statistic",
+        "n_lags",
+        "p_value",
+        "p_value_bound",
+        "levels"
+      ],
+      "type": "object"
+    },
+    "KpssInputDto": {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "lag_rule": {
+          "anyOf": [
+            {
+              "enum": [
+                "hobijn",
+                "schwert"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How the long-run variance's truncation lag is chosen. Not with `lags`."
+        },
+        "lags": {
+          "description": "Exactly this truncation lag, 0 to n − 1. Not with `lag_rule`.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "default": "level",
+          "description": "What the null says the series is stationary around.",
+          "enum": [
+            "level",
+            "trend"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "KpssLevelDto": {
+      "description": "One significance level of the KPSS test.",
+      "properties": {
+        "critical_value": {
+          "format": "double",
+          "type": "number"
+        },
+        "level": {
+          "format": "double",
+          "type": "number"
+        },
+        "rejected": {
+          "description": "`statistic > critical_value`: stationarity is rejected at this level.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level",
+        "critical_value",
+        "rejected"
+      ],
+      "type": "object"
+    },
     "LofConfigDto": {
       "additionalProperties": false,
       "description": "LOF configuration input.",
@@ -2335,6 +2448,22 @@
     },
     "kmeans.output": {
       "$ref": "#/$defs/KMeansDto"
+    },
+    "kpss_test.input": {
+      "additionalProperties": false,
+      "description": "The arguments of kpss_test(data), by name; the WebAssembly function takes them in that order.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/KpssInputDto"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "kpss_test.output": {
+      "$ref": "#/$defs/KpssDto"
     },
     "lof.input": {
       "additionalProperties": false,

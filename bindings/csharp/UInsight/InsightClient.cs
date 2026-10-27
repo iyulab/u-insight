@@ -1128,6 +1128,54 @@ public sealed class InsightClient : IDisposable
     }
 
     /// <summary>
+    /// The KPSS stationarity test of a series (H0: stationary around a level or a trend) —
+    /// the complement of <see cref="AdfTest"/>, whose null is the unit root. The truncation
+    /// lag of the long-run variance is chosen by <paramref name="lagRule"/> (<c>null</c>:
+    /// Hobijn) or fixed at <paramref name="lags"/> — give at most one (both:
+    /// <c>invalid_option</c> about <c>lags</c>).
+    /// </summary>
+    /// <param name="data">Univariate series, at least 10 finite values.</param>
+    /// <param name="model">What the null says the series is stationary around.</param>
+    /// <param name="lagRule">How the truncation lag is chosen.</param>
+    /// <param name="lags">Exactly this truncation lag, in [0, n − 1].</param>
+    public KpssResult KpssTest(
+        double[] data,
+        KpssModel model = KpssModel.Level,
+        KpssLagRule? lagRule = null,
+        int? lags = null)
+    {
+        var native = new NativeStructs.CKpssResult();
+        unsafe
+        {
+            var rule = (uint)lagRule.GetValueOrDefault();
+            var fixedLag = lags.GetValueOrDefault();
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_kpss_test(
+                    ptr, (uint)data.Length, (uint)model,
+                    lagRule.HasValue ? &rule : null,
+                    lags.HasValue ? &fixedLag : null,
+                    ref native));
+            }
+        }
+
+        return new KpssResult
+        {
+            Statistic = native.Statistic,
+            NLags = native.NLags,
+            PValue = native.PValue,
+            PValueBound = (KpssPValueBound)native.PValueBound,
+            Levels =
+            [
+                new KpssLevel { Level = 0.01, CriticalValue = native.CriticalValue1, Rejected = native.Rejected1 != 0 },
+                new KpssLevel { Level = 0.025, CriticalValue = native.CriticalValue25, Rejected = native.Rejected25 != 0 },
+                new KpssLevel { Level = 0.05, CriticalValue = native.CriticalValue5, Rejected = native.Rejected5 != 0 },
+                new KpssLevel { Level = 0.10, CriticalValue = native.CriticalValue10, Rejected = native.Rejected10 != 0 },
+            ],
+        };
+    }
+
+    /// <summary>
     /// Detect changepoints in multivariate (multi-channel) time-series data using PELT.
     /// </summary>
     /// <param name="data">
@@ -1822,6 +1870,70 @@ public class AdfResult
     public uint NObs { get; init; }
     /// <summary>1%, 5% and 10%, in that order.</summary>
     public AdfLevel[] Levels { get; init; } = [];
+}
+
+/// <summary>
+/// What the KPSS null says the series is stationary around. Numeric values match the
+/// native <c>INSIGHT_KPSS_*</c> constants.
+/// </summary>
+public enum KpssModel : uint
+{
+    /// <summary>A constant level.</summary>
+    Level = 0,
+    /// <summary>A linear trend.</summary>
+    Trend = 1,
+}
+
+/// <summary>
+/// How the KPSS truncation lag is chosen. Numeric values match the native
+/// <c>INSIGHT_KPSS_LAGS_*</c> constants.
+/// </summary>
+public enum KpssLagRule : uint
+{
+    /// <summary>Hobijn, Franses &amp; Ooms (1998), from the residuals' own autocovariances (the default).</summary>
+    Hobijn = 0,
+    /// <summary>Schwert (1989), ceil(12 (n/100)^(1/4)).</summary>
+    Schwert = 1,
+}
+
+/// <summary>
+/// Where a KPSS p-value stands relative to the table it is read from. Numeric values match
+/// the native <c>INSIGHT_KPSS_P_*</c> constants.
+/// </summary>
+public enum KpssPValueBound : uint
+{
+    /// <summary>Interpolated inside the table.</summary>
+    Interpolated = 0,
+    /// <summary>The statistic is beyond the 1% critical value: the p-value is at most 0.01.</summary>
+    AtMost = 1,
+    /// <summary>The statistic is below the 10% critical value: the p-value is at least 0.10.</summary>
+    AtLeast = 2,
+}
+
+/// <summary>One significance level of <see cref="InsightClient.KpssTest"/>.</summary>
+public class KpssLevel
+{
+    /// <summary>Significance level: 0.01, 0.025, 0.05 or 0.10.</summary>
+    public double Level { get; init; }
+    /// <summary>Critical value at that level (Kwiatkowski et al. 1992, Table 1).</summary>
+    public double CriticalValue { get; init; }
+    /// <summary>Statistic &gt; critical value: stationarity is rejected at this level.</summary>
+    public bool Rejected { get; init; }
+}
+
+/// <summary>Result of <see cref="InsightClient.KpssTest"/>.</summary>
+public class KpssResult
+{
+    /// <summary>KPSS statistic.</summary>
+    public double Statistic { get; init; }
+    /// <summary>Truncation lag of the long-run variance.</summary>
+    public uint NLags { get; init; }
+    /// <summary>p-value interpolated in the table of critical values, clamped to [0.01, 0.10].</summary>
+    public double PValue { get; init; }
+    /// <summary>Whether <see cref="PValue"/> is interpolated or a bound of the table.</summary>
+    public KpssPValueBound PValueBound { get; init; }
+    /// <summary>1%, 2.5%, 5% and 10%, in that order.</summary>
+    public KpssLevel[] Levels { get; init; } = [];
 }
 
 /// <summary>Mann-Kendall trend test result.</summary>

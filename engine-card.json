@@ -1019,6 +1019,54 @@
       "performance": {
         "status": "none"
       }
+    },
+    {
+      "id": "kpss_test",
+      "summary": "The KPSS stationarity test of a series (around a level or a trend): the statistic, the truncation lag, the p-value interpolated in the table of critical values (or the table bound it lies beyond), and critical values with the verdict at 1 %, 2.5 %, 5 % and 10 %.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/kpss_test.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/kpss_test.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The KPSS statistic, truncation lag and p-value match the reference implementation for both models and each lag choice (Hobijn, Schwert, fixed).",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15 tsa.stattools.kpss; the same values u-analytics checks its kpss_test against",
+            "method": "tests a 60-point AR(1) and a 60-point random walk under six model and lag settings through the request layer both transports share",
+            "tolerance": "statistic 1e-10 (relative); p-value 1e-12; lag exact",
+            "test": "src/time_series.rs::tests::kpss_matches_statsmodels"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for two series; the critical values are Kwiatkowski et al.'s (1992) Table 1 and the p-value is clamped to [0.01, 0.10]."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
     }
   ]
 }

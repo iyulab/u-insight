@@ -9,7 +9,7 @@
 //! answers.
 
 use u_analytics::correlation::{AcfResult, PacfResult};
-use u_analytics::testing::{AdfLags, AdfModel, AdfResult};
+use u_analytics::testing::{AdfLags, AdfModel, AdfResult, KpssLags, KpssModel, KpssResult};
 
 use crate::error::{Bound, InsightError};
 
@@ -19,6 +19,8 @@ pub(crate) const ACF_MIN: usize = 2;
 pub(crate) const PACF_MIN: usize = 4;
 /// The fewest values `adf_test` takes.
 pub(crate) const ADF_MIN: usize = 10;
+/// The fewest values `kpss_test` takes.
+pub(crate) const KPSS_MIN: usize = 10;
 /// The fewest rows the ADF test regression is run on.
 const ADF_MIN_REGRESSION_ROWS: usize = 5;
 
@@ -28,6 +30,15 @@ pub(crate) const ADF_MODELS: [(&str, AdfModel); 3] = [
     ("constant", AdfModel::Constant),
     ("constant_trend", AdfModel::ConstantTrend),
 ];
+
+/// `kpss_test`'s `model` names, in the order of the C ABI's `INSIGHT_KPSS_*`.
+pub(crate) const KPSS_MODELS: [(&str, KpssModel); 2] =
+    [("level", KpssModel::Level), ("trend", KpssModel::Trend)];
+
+/// `kpss_test`'s `lag_rule` names, in the order of the C ABI's
+/// `INSIGHT_KPSS_LAGS_*`.
+pub(crate) const KPSS_LAG_RULES: [(&str, KpssLags); 2] =
+    [("hobijn", KpssLags::Hobijn), ("schwert", KpssLags::Schwert)];
 
 /// The columns of the ADF regression besides the lags: the lagged level, and
 /// the deterministic terms of `model`.
@@ -139,6 +150,44 @@ pub(crate) fn adf(
         parameter: Some("data".into()),
         reason: "the ADF test regression is singular, or an exact fit of the differences \
                  (a deterministic series), so the t-ratio is undefined"
+            .into(),
+    })
+}
+
+/// The KPSS stationarity test of `data` under `model` (H₀: stationary
+/// around a level or a trend). The truncation lag of the long-run variance is
+/// chosen by `lag_rule` (`None`: Hobijn, Franses & Ooms) or fixed by `lags`, a
+/// whole number already read, in `[0, n − 1]` -- at most one of the two. At
+/// least 10 finite values.
+pub(crate) fn kpss(
+    data: &[f64],
+    model: KpssModel,
+    lag_rule: Option<KpssLags>,
+    lags: Option<f64>,
+) -> Result<KpssResult, InsightError> {
+    series(data, KPSS_MIN)?;
+    let n = data.len();
+    let fixed = lags
+        .map(|l| {
+            InsightError::check_range("lags", l, Bound::Closed(0.0), Bound::Closed((n - 1) as f64))
+                .map(|()| l as usize)
+        })
+        .transpose()?;
+    let lags = match (lag_rule, fixed) {
+        (Some(_), Some(_)) => {
+            return Err(InsightError::InvalidParameter {
+                name: "lags".into(),
+                message: "lags fixes the truncation lag and lag_rule chooses it -- give one".into(),
+            })
+        }
+        (_, Some(l)) => KpssLags::Fixed(l),
+        (Some(rule), None) => rule,
+        (None, None) => KpssLags::Hobijn,
+    };
+    u_analytics::testing::kpss_test(data, model, lags).ok_or_else(|| InsightError::DegenerateData {
+        parameter: Some("data".into()),
+        reason: "the series has no variation about its level (or trend), so the KPSS \
+                     statistic is undefined"
             .into(),
     })
 }
@@ -330,6 +379,157 @@ mod tests {
             fields(acf(&[1.0, f64::NAN, 2.0], None).expect_err("NaN")),
             serde_json::json!({ "code": "value_not_finite", "parameter": "data", "index": 1 })
         );
+    }
+
+    /// statsmodels' reference series in `u-analytics` (`testing::kpss_reference`):
+    /// an AR(1) and a random walk.
+    const KPSS_AR: [f64; 60] = [
+        0.0, 0.299, -0.154, -0.953, -0.836, -1.326, -0.471, 1.152, -0.031, -0.633, 0.237, 0.452,
+        0.286, -0.816, -0.355, 0.553, -1.123, -0.907, -2.264, -2.196, -2.72, -1.323, -1.796,
+        -0.447, -0.022, -0.196, -2.595, -1.577, -0.68, -0.159, -1.594, -1.115, -1.425, -1.379,
+        0.509, -0.604, -0.275, 0.774, -0.274, -0.222, 0.021, 0.073, -1.196, -0.402, 1.198, -1.068,
+        0.432, 0.292, -0.524, 1.79, 1.478, -0.608, -0.168, 0.51, 0.015, 0.689, 0.209, 0.75, 1.739,
+        0.02,
+    ];
+    const KPSS_RW: [f64; 60] = [
+        0.001, 0.3, 0.026, -0.865, -1.32, -2.312, -2.252, -0.912, -1.404, -2.024, -1.534, -1.177,
+        -1.072, -2.002, -2.031, -1.336, -2.68, -3.138, -5.039, -6.329, -8.171, -8.406, -9.673,
+        -9.402, -9.245, -9.432, -11.949, -12.488, -12.537, -12.424, -13.954, -14.432, -15.411,
+        -16.22, -15.159, -15.967, -16.0, -15.116, -15.7, -15.812, -15.702, -15.638, -16.863,
+        -16.787, -15.428, -16.975, -16.116, -15.997, -16.638, -14.638, -13.876, -15.075, -15.0,
+        -14.423, -14.612, -13.929, -13.996, -13.329, -11.89, -12.566,
+    ];
+
+    /// statsmodels 0.15 `kpss(x, regression, nlags)` with `nlags` "auto"
+    /// (Hobijn), "legacy" (Schwert) or a number.
+    #[test]
+    fn kpss_matches_statsmodels() {
+        use u_analytics::testing::KpssPValue;
+        let hobijn = Some(KpssLags::Hobijn);
+        let schwert = Some(KpssLags::Schwert);
+        type Case = (
+            &'static [f64; 60],
+            KpssModel,
+            Option<KpssLags>,
+            Option<f64>,
+            f64,
+            f64,
+            usize,
+        );
+        let cases: [Case; 6] = [
+            (
+                &KPSS_AR,
+                KpssModel::Level,
+                hobijn,
+                None,
+                0.5229270606681895,
+                0.036502914263921285,
+                3,
+            ),
+            (
+                &KPSS_AR,
+                KpssModel::Level,
+                None,
+                None,
+                0.5229270606681895,
+                0.036502914263921285,
+                3,
+            ),
+            (
+                &KPSS_AR,
+                KpssModel::Level,
+                schwert,
+                None,
+                0.288001639308506,
+                0.1,
+                11,
+            ),
+            (
+                &KPSS_AR,
+                KpssModel::Trend,
+                None,
+                Some(4.0),
+                0.20574827757371436,
+                0.013844395909857114,
+                4,
+            ),
+            (
+                &KPSS_RW,
+                KpssModel::Level,
+                None,
+                Some(4.0),
+                1.09862199299003,
+                0.01,
+                4,
+            ),
+            (
+                &KPSS_RW,
+                KpssModel::Trend,
+                schwert,
+                None,
+                0.14468829763941088,
+                0.05242907844553539,
+                11,
+            ),
+        ];
+        for (data, model, rule, lags, statistic, p, n_lags) in cases {
+            let r = kpss(data, model, rule, lags).expect("defined");
+            let what = format!("{model:?} {rule:?} {lags:?}");
+            assert_eq!(r.n_lags, n_lags, "{what}");
+            assert!(
+                (r.statistic - statistic).abs() < 1e-10 * statistic,
+                "{what}"
+            );
+            assert!((r.p_value - p).abs() < 1e-12, "{what}: p {}", r.p_value);
+        }
+        let r = kpss(&KPSS_RW, KpssModel::Level, None, Some(4.0)).expect("defined");
+        assert_eq!(r.p_value_bound, KpssPValue::AtMost);
+        assert_eq!(r.rejected, [true; 4]);
+        let r = kpss(&KPSS_AR, KpssModel::Level, None, None).expect("defined");
+        assert_eq!(r.p_value_bound, KpssPValue::Interpolated);
+        assert_eq!(r.rejected, [true, true, false, false]);
+    }
+
+    #[test]
+    fn kpss_options_and_refusals() {
+        let e = kpss(&KPSS_AR, KpssModel::Level, None, Some(60.0)).expect_err("past n - 1");
+        assert_eq!(
+            fields(e),
+            serde_json::json!({
+                "code": "parameter_out_of_range", "parameter": "lags",
+                "min": 0.0, "max": 59.0, "got": 60.0,
+            })
+        );
+        assert_eq!(
+            fields(kpss(&KPSS_AR, KpssModel::Level, None, Some(-1.0)).expect_err("negative"))
+                ["got"],
+            -1.0
+        );
+        let e = kpss(
+            &KPSS_AR,
+            KpssModel::Level,
+            Some(KpssLags::Schwert),
+            Some(2.0),
+        )
+        .expect_err("both");
+        assert_eq!(
+            fields(e),
+            serde_json::json!({ "code": "invalid_option", "parameter": "lags" })
+        );
+        assert_eq!(
+            fields(kpss(&KPSS_AR[..9], KpssModel::Level, None, None).expect_err("nine")),
+            serde_json::json!({ "code": "insufficient_data", "parameter": "data", "min": 10, "got": 9 })
+        );
+        let line: Vec<f64> = (0..20).map(|i| 2.0 + 0.5 * f64::from(i)).collect();
+        for e in [
+            kpss(&[4.0; 20], KpssModel::Level, None, None).expect_err("constant"),
+            kpss(&line, KpssModel::Trend, None, None).expect_err("a line about its trend"),
+        ] {
+            assert_eq!(
+                fields(e),
+                serde_json::json!({ "code": "degenerate_data", "parameter": "data" })
+            );
+        }
     }
 
     #[test]

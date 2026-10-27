@@ -518,6 +518,57 @@ public class ClientTests : IDisposable
         Assert.Equal("model", ex.Parameter);
     }
 
+
+    /// <summary>An AR(1) of 60 — the series the engine checks its KPSS test against (statsmodels 0.15).</summary>
+    private static readonly double[] KpssAr =
+    [
+        0.0, 0.299, -0.154, -0.953, -0.836, -1.326, -0.471, 1.152, -0.031, -0.633, 0.237, 0.452,
+        0.286, -0.816, -0.355, 0.553, -1.123, -0.907, -2.264, -2.196, -2.72, -1.323, -1.796,
+        -0.447, -0.022, -0.196, -2.595, -1.577, -0.68, -0.159, -1.594, -1.115, -1.425, -1.379,
+        0.509, -0.604, -0.275, 0.774, -0.274, -0.222, 0.021, 0.073, -1.196, -0.402, 1.198, -1.068,
+        0.432, 0.292, -0.524, 1.79, 1.478, -0.608, -0.168, 0.51, 0.015, 0.689, 0.209, 0.75, 1.739,
+        0.02,
+    ];
+
+    [Fact]
+    public void KpssTest_matches_the_reference_values()
+    {
+        var r = _client.KpssTest(KpssAr);
+        Assert.Equal(0.5229270606681895, r.Statistic, 10);
+        Assert.Equal(0.036502914263921285, r.PValue, 12);
+        Assert.Equal(3u, r.NLags);
+        Assert.Equal(KpssPValueBound.Interpolated, r.PValueBound);
+        Assert.Equal([0.01, 0.025, 0.05, 0.10], r.Levels.Select(l => l.Level));
+        Assert.Equal([false, false, true, true], r.Levels.Select(l => l.Rejected));
+        Assert.All(r.Levels, l => Assert.Equal(r.Statistic > l.CriticalValue, l.Rejected));
+
+        var schwert = _client.KpssTest(KpssAr, lagRule: KpssLagRule.Schwert);
+        Assert.Equal(11u, schwert.NLags);
+        Assert.Equal(KpssPValueBound.AtLeast, schwert.PValueBound);
+        var trend = _client.KpssTest(KpssAr, KpssModel.Trend, lags: 4);
+        Assert.Equal(0.20574827757371436, trend.Statistic, 10);
+        Assert.Equal(4u, trend.NLags);
+    }
+
+    [Fact]
+    public void KpssTest_refuses_both_lag_options_a_lag_past_the_data_and_a_constant_series()
+    {
+        var ex = Assert.Throws<InsightException>(() =>
+            _client.KpssTest(KpssAr, lagRule: KpssLagRule.Hobijn, lags: 2));
+        Assert.Equal("invalid_option", ex.ErrorCode);
+        Assert.Equal("lags", ex.Parameter);
+        ex = Assert.Throws<InsightException>(() => _client.KpssTest(KpssAr, lags: 60));
+        Assert.Equal("parameter_out_of_range", ex.ErrorCode);
+        Assert.Equal(59.0, ex.Details!.Value.GetProperty("max").GetDouble());
+        ex = Assert.Throws<InsightException>(() => _client.KpssTest(KpssAr, lagRule: (KpssLagRule)5));
+        Assert.Equal("unknown_option", ex.ErrorCode);
+        Assert.Equal("lag_rule", ex.Parameter);
+        ex = Assert.Throws<InsightException>(() => _client.KpssTest(Enumerable.Repeat(4.0, 20).ToArray()));
+        Assert.Equal("degenerate_data", ex.ErrorCode);
+        ex = Assert.Throws<InsightException>(() => _client.KpssTest(KpssAr[..9]));
+        Assert.Equal("insufficient_data", ex.ErrorCode);
+    }
+
     // ── Error Handling ──
 
     [Fact]

@@ -108,6 +108,42 @@
 #define INSIGHT_ADF_CONSTANT_TREND 2
 
 /**
+ * KPSS null: stationary around a constant level.
+ */
+#define INSIGHT_KPSS_LEVEL 0
+
+/**
+ * KPSS null: stationary around a linear trend.
+ */
+#define INSIGHT_KPSS_TREND 1
+
+/**
+ * KPSS truncation lag by Hobijn, Franses & Ooms (1998), from the residuals'
+ * own autocovariances.
+ */
+#define INSIGHT_KPSS_LAGS_HOBIJN 0
+
+/**
+ * KPSS truncation lag by Schwert (1989), `ceil(12 (n/100)^(1/4))`.
+ */
+#define INSIGHT_KPSS_LAGS_SCHWERT 1
+
+/**
+ * The KPSS p-value is interpolated in the table of critical values.
+ */
+#define INSIGHT_KPSS_P_INTERPOLATED 0
+
+/**
+ * The statistic is beyond the 1% critical value: the p-value is at most 0.01.
+ */
+#define INSIGHT_KPSS_P_AT_MOST 1
+
+/**
+ * The statistic is below the 10% critical value: the p-value is at least 0.10.
+ */
+#define INSIGHT_KPSS_P_AT_LEAST 2
+
+/**
  * Opaque handle for a profiling context.
  * Holds the parsed DataFrame and computed profiles.
  */
@@ -915,6 +951,61 @@ typedef struct CAdfResult {
 } CAdfResult;
 
 /**
+ * C-compatible result of `insight_kpss_test`. The levels are 1%, 2.5%, 5%
+ * and 10% (Kwiatkowski et al. 1992, Table 1).
+ */
+typedef struct CKpssResult {
+  /**
+   * KPSS statistic.
+   */
+  double statistic;
+  /**
+   * Truncation lag of the long-run variance.
+   */
+  uint32_t n_lags;
+  /**
+   * How `p_value` stands: one of `INSIGHT_KPSS_P_*`.
+   */
+  uint32_t p_value_bound;
+  /**
+   * p-value interpolated in the table, clamped to [0.01, 0.10].
+   */
+  double p_value;
+  /**
+   * Critical value at 1%.
+   */
+  double critical_value_1;
+  /**
+   * Critical value at 2.5%.
+   */
+  double critical_value_2_5;
+  /**
+   * Critical value at 5%.
+   */
+  double critical_value_5;
+  /**
+   * Critical value at 10%.
+   */
+  double critical_value_10;
+  /**
+   * 1 when `statistic > critical_value_1`: stationarity is rejected at 1%.
+   */
+  bool rejected_1;
+  /**
+   * The same at 2.5%.
+   */
+  bool rejected_2_5;
+  /**
+   * The same at 5%.
+   */
+  bool rejected_5;
+  /**
+   * The same at 10%.
+   */
+  bool rejected_10;
+} CKpssResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1716,5 +1807,31 @@ int32_t insight_adf_test(const double *data,
                          const int32_t *max_lags,
                          const int32_t *lags,
                          struct CAdfResult *out);
+
+/**
+ * The KPSS stationarity test of a series (H0: stationary around a level or
+ * a trend) -- the complement of `insight_adf_test`.
+ *
+ * `data`: `n` observations (at least 10, all finite). `model`:
+ * `INSIGHT_KPSS_LEVEL` (0) or `INSIGHT_KPSS_TREND` (1). The truncation lag of
+ * the long-run variance is chosen by `*lag_rule` (`INSIGHT_KPSS_LAGS_HOBIJN` or
+ * `_SCHWERT`; `lag_rule` null: Hobijn) or fixed at `*lags`, in `[0, n - 1]`
+ * (outside: `parameter_out_of_range` with `min` / `max`) -- give at most one
+ * (both: `INSIGHT_ERR_INVALID_PARAM`, `invalid_option`, `parameter` `lags`). A
+ * selector that names nothing is `unknown_option`. A series with no variation
+ * about its level (or trend): `INSIGHT_ERR_DEGENERATE_DATA`. `out`: pointer to
+ * a `CKpssResult`. Returns 0 on success, negative on error.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `lag_rule` and `lags` must be null or valid.
+ * `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_kpss_test(const double *data,
+                          uint32_t n,
+                          uint32_t model,
+                          const uint32_t *lag_rule,
+                          const int32_t *lags,
+                          struct CKpssResult *out);
 
 #endif  /* U_INSIGHT_H */

@@ -299,6 +299,23 @@ internal static class NativeStructs
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct CKpssResult
+    {
+        public double Statistic;
+        public uint NLags;
+        public uint PValueBound;
+        public double PValue;
+        public double CriticalValue1;
+        public double CriticalValue25;
+        public double CriticalValue5;
+        public double CriticalValue10;
+        public byte Rejected1;
+        public byte Rejected25;
+        public byte Rejected5;
+        public byte Rejected10;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct CMannKendallResult
     {
         public long SStatistic;

@@ -286,6 +286,11 @@ internal static partial class NativeLibrary
         ref NativeStructs.CAdfResult result);
 
     [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_kpss_test(
+        double* data, uint n, uint model, uint* lagRule, int* lags,
+        ref NativeStructs.CKpssResult result);
+
+    [LibraryImport(LibraryName)]
     public static unsafe partial int insight_mann_kendall(
         double* data, uint n,
         ref NativeStructs.CMannKendallResult result);

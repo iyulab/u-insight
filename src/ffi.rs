@@ -3433,6 +3433,142 @@ pub unsafe extern "C" fn insight_adf_test(
     }
 }
 
+/// KPSS null: stationary around a constant level.
+pub const INSIGHT_KPSS_LEVEL: u32 = 0;
+/// KPSS null: stationary around a linear trend.
+pub const INSIGHT_KPSS_TREND: u32 = 1;
+/// KPSS truncation lag by Hobijn, Franses & Ooms (1998), from the residuals'
+/// own autocovariances.
+pub const INSIGHT_KPSS_LAGS_HOBIJN: u32 = 0;
+/// KPSS truncation lag by Schwert (1989), `ceil(12 (n/100)^(1/4))`.
+pub const INSIGHT_KPSS_LAGS_SCHWERT: u32 = 1;
+/// The KPSS p-value is interpolated in the table of critical values.
+pub const INSIGHT_KPSS_P_INTERPOLATED: u32 = 0;
+/// The statistic is beyond the 1% critical value: the p-value is at most 0.01.
+pub const INSIGHT_KPSS_P_AT_MOST: u32 = 1;
+/// The statistic is below the 10% critical value: the p-value is at least 0.10.
+pub const INSIGHT_KPSS_P_AT_LEAST: u32 = 2;
+
+/// C-compatible result of `insight_kpss_test`. The levels are 1%, 2.5%, 5%
+/// and 10% (Kwiatkowski et al. 1992, Table 1).
+#[repr(C)]
+pub struct CKpssResult {
+    /// KPSS statistic.
+    pub statistic: f64,
+    /// Truncation lag of the long-run variance.
+    pub n_lags: u32,
+    /// How `p_value` stands: one of `INSIGHT_KPSS_P_*`.
+    pub p_value_bound: u32,
+    /// p-value interpolated in the table, clamped to [0.01, 0.10].
+    pub p_value: f64,
+    /// Critical value at 1%.
+    pub critical_value_1: f64,
+    /// Critical value at 2.5%.
+    pub critical_value_2_5: f64,
+    /// Critical value at 5%.
+    pub critical_value_5: f64,
+    /// Critical value at 10%.
+    pub critical_value_10: f64,
+    /// 1 when `statistic > critical_value_1`: stationarity is rejected at 1%.
+    pub rejected_1: bool,
+    /// The same at 2.5%.
+    pub rejected_2_5: bool,
+    /// The same at 5%.
+    pub rejected_5: bool,
+    /// The same at 10%.
+    pub rejected_10: bool,
+}
+
+/// The KPSS stationarity test of a series (H0: stationary around a level or
+/// a trend) -- the complement of `insight_adf_test`.
+///
+/// `data`: `n` observations (at least 10, all finite). `model`:
+/// `INSIGHT_KPSS_LEVEL` (0) or `INSIGHT_KPSS_TREND` (1). The truncation lag of
+/// the long-run variance is chosen by `*lag_rule` (`INSIGHT_KPSS_LAGS_HOBIJN` or
+/// `_SCHWERT`; `lag_rule` null: Hobijn) or fixed at `*lags`, in `[0, n - 1]`
+/// (outside: `parameter_out_of_range` with `min` / `max`) -- give at most one
+/// (both: `INSIGHT_ERR_INVALID_PARAM`, `invalid_option`, `parameter` `lags`). A
+/// selector that names nothing is `unknown_option`. A series with no variation
+/// about its level (or trend): `INSIGHT_ERR_DEGENERATE_DATA`. `out`: pointer to
+/// a `CKpssResult`. Returns 0 on success, negative on error.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `lag_rule` and `lags` must be null or valid.
+/// `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_kpss_test(
+    data: *const f64,
+    n: u32,
+    model: u32,
+    lag_rule: *const u32,
+    lags: *const i32,
+    out: *mut CKpssResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        let Some(raw) = (unsafe { series(data, n) }).filter(|_| !out.is_null()) else {
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
+        };
+        let Some(&(_, kpss_model)) = crate::time_series::KPSS_MODELS.get(model as usize) else {
+            return unknown_selector(
+                "model",
+                model,
+                &[INSIGHT_KPSS_LEVEL, INSIGHT_KPSS_TREND],
+                format!("model must be 0 (level) or 1 (trend), got {model}"),
+            );
+        };
+        let rule = if lag_rule.is_null() {
+            None
+        } else {
+            let selector = unsafe { *lag_rule };
+            match crate::time_series::KPSS_LAG_RULES.get(selector as usize) {
+                Some(&(_, rule)) => Some(rule),
+                None => {
+                    return unknown_selector(
+                        "lag_rule",
+                        selector,
+                        &[INSIGHT_KPSS_LAGS_HOBIJN, INSIGHT_KPSS_LAGS_SCHWERT],
+                        format!("lag_rule must be 0 (Hobijn) or 1 (Schwert), got {selector}"),
+                    )
+                }
+            }
+        };
+        match crate::time_series::kpss(raw, kpss_model, rule, unsafe { given(lags) }) {
+            Ok(r) => {
+                use u_analytics::testing::KpssPValue as P;
+                // The core lists 10, 5, 2.5 and 1 %.
+                let [cv10, cv5, cv2_5, cv1] = r.critical_values;
+                let [rj10, rj5, rj2_5, rj1] = r.rejected;
+                unsafe {
+                    (*out) = CKpssResult {
+                        statistic: r.statistic,
+                        n_lags: r.n_lags as u32,
+                        p_value_bound: match r.p_value_bound {
+                            P::Interpolated => INSIGHT_KPSS_P_INTERPOLATED,
+                            P::AtMost => INSIGHT_KPSS_P_AT_MOST,
+                            P::AtLeast => INSIGHT_KPSS_P_AT_LEAST,
+                        },
+                        p_value: r.p_value,
+                        critical_value_1: cv1,
+                        critical_value_2_5: cv2_5,
+                        critical_value_5: cv5,
+                        critical_value_10: cv10,
+                        rejected_1: rj1,
+                        rejected_2_5: rj2_5,
+                        rejected_5: rj5,
+                        rejected_10: rj10,
+                    };
+                }
+                INSIGHT_OK
+            }
+            Err(e) => fail(&e),
+        }
+    });
+    match result {
+        Ok(code) => code,
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_kpss_test"),
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -5033,6 +5169,145 @@ mod tests {
         assert_eq!(rc, INSIGHT_OK);
         assert!((out.statistic - -4.652_930_484_4).abs() < 1e-8);
         assert_eq!((out.n_lags, out.n_obs), (3, 116));
+    }
+
+    #[test]
+    fn ffi_kpss_test_carries_the_engine_result_and_the_shared_refusals() {
+        // An AR(1) of 60 (statsmodels' reference series in u-analytics).
+        let x: Vec<f64> = vec![
+            0.0, 0.299, -0.154, -0.953, -0.836, -1.326, -0.471, 1.152, -0.031, -0.633, 0.237,
+            0.452, 0.286, -0.816, -0.355, 0.553, -1.123, -0.907, -2.264, -2.196, -2.72, -1.323,
+            -1.796, -0.447, -0.022, -0.196, -2.595, -1.577, -0.68, -0.159, -1.594, -1.115, -1.425,
+            -1.379, 0.509, -0.604, -0.275, 0.774, -0.274, -0.222, 0.021, 0.073, -1.196, -0.402,
+            1.198, -1.068, 0.432, 0.292, -0.524, 1.79, 1.478, -0.608, -0.168, 0.51, 0.015, 0.689,
+            0.209, 0.75, 1.739, 0.02,
+        ];
+        let empty = || CKpssResult {
+            statistic: 0.0,
+            n_lags: 0,
+            p_value_bound: 9,
+            p_value: 0.0,
+            critical_value_1: 0.0,
+            critical_value_2_5: 0.0,
+            critical_value_5: 0.0,
+            critical_value_10: 0.0,
+            rejected_1: false,
+            rejected_2_5: false,
+            rejected_5: false,
+            rejected_10: false,
+        };
+        let mut out = empty();
+        let rc = unsafe {
+            insight_kpss_test(
+                x.as_ptr(),
+                60,
+                INSIGHT_KPSS_LEVEL,
+                ptr::null(),
+                ptr::null(),
+                &mut out,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        // statsmodels 0.15 kpss(x, "c", nlags="auto").
+        assert!((out.statistic - 0.5229270606681895).abs() < 1e-10);
+        assert!((out.p_value - 0.036502914263921285).abs() < 1e-12);
+        assert_eq!(
+            (out.n_lags, out.p_value_bound),
+            (3, INSIGHT_KPSS_P_INTERPOLATED)
+        );
+        assert_eq!(
+            [
+                out.rejected_1,
+                out.rejected_2_5,
+                out.rejected_5,
+                out.rejected_10
+            ],
+            [false, false, true, true]
+        );
+        let want = crate::time_series::kpss(&x, u_analytics::testing::KpssModel::Level, None, None)
+            .expect("defined");
+        assert_eq!(
+            [
+                out.critical_value_10,
+                out.critical_value_5,
+                out.critical_value_2_5,
+                out.critical_value_1
+            ],
+            want.critical_values
+        );
+        // The selectors are the tables' positions.
+        for (selector, (name, _)) in crate::time_series::KPSS_LAG_RULES.iter().enumerate() {
+            let rule = selector as u32;
+            let rc = unsafe {
+                insight_kpss_test(
+                    x.as_ptr(),
+                    60,
+                    INSIGHT_KPSS_TREND,
+                    &rule,
+                    ptr::null(),
+                    &mut out,
+                )
+            };
+            assert_eq!(rc, INSIGHT_OK, "{name}");
+        }
+        assert_eq!(out.n_lags, 11, "Schwert at n = 60");
+        let rc = unsafe {
+            insight_kpss_test(
+                x.as_ptr(),
+                60,
+                INSIGHT_KPSS_TREND,
+                ptr::null(),
+                &4,
+                &mut out,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!((out.statistic - 0.20574827757371436).abs() < 1e-10);
+
+        let rule = INSIGHT_KPSS_LAGS_SCHWERT;
+        let rc = unsafe { insight_kpss_test(x.as_ptr(), 60, 0, &rule, &2, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"]),
+            (
+                &serde_json::json!("invalid_option"),
+                &serde_json::json!("lags")
+            )
+        );
+        let rc = unsafe { insight_kpss_test(x.as_ptr(), 60, 0, ptr::null(), &60, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_body().expect("a body")["max"], 59.0);
+        let bad = 2;
+        let rc = unsafe { insight_kpss_test(x.as_ptr(), 60, 0, &bad, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"]),
+            (
+                &serde_json::json!("unknown_option"),
+                &serde_json::json!("lag_rule")
+            )
+        );
+        let rc =
+            unsafe { insight_kpss_test(x.as_ptr(), 60, 2, ptr::null(), ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_body().expect("a body")["parameter"], "model");
+        let rc = unsafe { insight_kpss_test(x.as_ptr(), 9, 0, ptr::null(), ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+        let flat = [4.0; 20];
+        let rc =
+            unsafe { insight_kpss_test(flat.as_ptr(), 20, 0, ptr::null(), ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_DEGENERATE_DATA);
+        assert_eq!(
+            [
+                INSIGHT_KPSS_LEVEL,
+                INSIGHT_KPSS_TREND,
+                INSIGHT_KPSS_LAGS_HOBIJN,
+                INSIGHT_KPSS_LAGS_SCHWERT
+            ],
+            [0, 1, 0, 1]
+        );
     }
 
     #[test]

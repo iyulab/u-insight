@@ -18,6 +18,7 @@
 //! - `estimate_period(data)` / `spectral_residual(data)` — Period and anomaly scoring of a series
 //! - `acf(data)` / `pacf(data)` — (Partial) autocorrelation of a series
 //! - `adf_test(data)` — Augmented Dickey-Fuller unit-root test
+//! - `kpss_test(data)` — KPSS stationarity test
 //!
 //! # Input Formats
 //!
@@ -2638,6 +2639,115 @@ pub fn adf_test(
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
 }
 
+#[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+struct KpssInputDto {
+    data: Vec<f64>,
+    /// What the null says the series is stationary around.
+    #[serde(default = "default_kpss_model")]
+    #[tsify(optional)]
+    #[tsify(type = "\"level\" | \"trend\"")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::kpss_model"))]
+    model: String,
+    /// How the long-run variance's truncation lag is chosen. Not with `lags`.
+    #[serde(default)]
+    #[tsify(optional)]
+    #[tsify(type = "\"hobijn\" | \"schwert\" | null")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::kpss_lag_rule_or_null"))]
+    lag_rule: Option<String>,
+    /// Exactly this truncation lag, 0 to n − 1. Not with `lag_rule`.
+    #[serde(default)]
+    #[tsify(optional)]
+    #[tsify(type = "number | null")]
+    lags: Option<Whole>,
+}
+
+fn default_kpss_model() -> String {
+    "level".to_string()
+}
+
+/// One significance level of the KPSS test.
+#[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+struct KpssLevelDto {
+    level: f64,
+    critical_value: f64,
+    /// `statistic > critical_value`: stationarity is rejected at this level.
+    rejected: bool,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+struct KpssDto {
+    statistic: f64,
+    n_lags: usize,
+    /// Interpolated in the table of critical values, clamped to [0.01, 0.10].
+    p_value: f64,
+    /// `"interpolated"`, or `"at_most"` / `"at_least"` when the statistic is
+    /// beyond the table and `p_value` is its bound.
+    #[tsify(type = "\"interpolated\" | \"at_most\" | \"at_least\"")]
+    #[cfg_attr(test, schemars(extend("enum" = ["interpolated", "at_most", "at_least"])))]
+    p_value_bound: &'static str,
+    /// 1 %, 2.5 %, 5 % and 10 %, in that order (Kwiatkowski et al. 1992, Table 1).
+    levels: Vec<KpssLevelDto>,
+}
+
+/// The name a result reports a KPSS p-value's standing by.
+fn kpss_p_value_bound(bound: u_analytics::testing::KpssPValue) -> &'static str {
+    use u_analytics::testing::KpssPValue as P;
+    match bound {
+        P::Interpolated => "interpolated",
+        P::AtMost => "at_most",
+        P::AtLeast => "at_least",
+    }
+}
+
+/// The KPSS stationarity test of a series (H₀: stationary around a level or a
+/// trend) -- the complement of `adf_test`, whose null is the unit root.
+///
+/// # Input
+/// `{ data: number[], model?: "level" | "trend", lag_rule?: "hobijn" | "schwert"
+///    | null, lags?: number | null }` — at least 10 finite values; `model`
+/// defaults to `"level"`. The truncation lag of the long-run variance is chosen
+/// by `lag_rule` (absent: `"hobijn"`) or fixed by `lags`, a whole number in
+/// `[0, n − 1]` -- give at most one (both: `invalid_option`, `parameter: "lags"`).
+///
+/// # Output
+/// `{ statistic, n_lags, p_value, p_value_bound, levels: [{ level, critical_value,
+///    rejected }] }` with `levels` at 1 %, 2.5 %, 5 % and 10 %.
+#[wasm_bindgen(unchecked_return_type = "KpssDto")]
+pub fn kpss_test(
+    #[wasm_bindgen(unchecked_param_type = "KpssInputDto")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let req: KpssInputDto = from_js(data, "data")?;
+    let model =
+        named("model", &req.model, &crate::time_series::KPSS_MODELS, false).map_err(js_err)?;
+    let rule = req
+        .lag_rule
+        .as_deref()
+        .map(|name| named("lag_rule", name, &crate::time_series::KPSS_LAG_RULES, false))
+        .transpose()
+        .map_err(js_err)?;
+    let r = crate::time_series::kpss(&req.data, model, rule, req.lags.map(|Whole(l)| l))
+        .map_err(js_err)?;
+    let dto = KpssDto {
+        statistic: r.statistic,
+        n_lags: r.n_lags,
+        p_value: r.p_value,
+        p_value_bound: kpss_p_value_bound(r.p_value_bound),
+        levels: (0..4)
+            .rev()
+            .map(|k| KpssLevelDto {
+                level: u_analytics::testing::KPSS_LEVELS[k],
+                critical_value: r.critical_values[k],
+                rejected: r.rejected[k],
+            })
+            .collect(),
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
 // ── Code catalog ─────────────────────────────────────────────────────
 
 /// A refusal reason: the `code` an `Error` carries and the fields that can
@@ -3326,6 +3436,47 @@ mod dto_strictness_tests {
         );
     }
 
+    /// `kpss_test` reads `lag_rule` as a name or `null`, `lags` as a whole
+    /// number, and refuses unknown keys and names.
+    #[test]
+    fn the_kpss_request_reads_as_documented() {
+        let kpss: super::KpssInputDto =
+            serde_json::from_value(json!({ "data": [1, 2, 3], "lag_rule": null }))
+                .expect("defaults");
+        assert_eq!(kpss.model, "level");
+        assert_eq!((kpss.lag_rule, kpss.lags), (None, None));
+        let kpss = super::from_json::<super::KpssInputDto>(
+            json!({ "data": [1, 2, 3], "lags": -2 }),
+            "data",
+        )
+        .expect("a whole number reads");
+        assert_eq!(kpss.lags, Some(super::Whole(-2.0)));
+        assert_rejects_unknown::<super::KpssInputDto>(json!({
+            "data": [1, 2, 3], "nlags": "auto"
+        }));
+        let err = super::named(
+            "lag_rule",
+            "auto",
+            &crate::time_series::KPSS_LAG_RULES,
+            false,
+        )
+        .expect_err("unknown rule");
+        assert_eq!(
+            err.fields,
+            json!({
+                "code": "unknown_option",
+                "parameter": "lag_rule",
+                "got": "auto",
+                "expected": ["hobijn", "schwert"],
+            })
+        );
+        use u_analytics::testing::KpssPValue as P;
+        assert_eq!(
+            [P::Interpolated, P::AtMost, P::AtLeast].map(super::kpss_p_value_bound),
+            ["interpolated", "at_most", "at_least"]
+        );
+    }
+
     #[test]
     fn a_negative_silhouette_label_is_out_of_range_where_it_sits() {
         let labels = super::from_json::<Vec<super::Whole>>(json!([0, -1, 1]), "labels")
@@ -3524,6 +3675,16 @@ mod card_schema {
 
     pub(super) fn adf_model(_: &mut SchemaGenerator) -> Schema {
         names(&crate::time_series::ADF_MODELS)
+    }
+
+    pub(super) fn kpss_model(_: &mut SchemaGenerator) -> Schema {
+        names(&crate::time_series::KPSS_MODELS)
+    }
+
+    pub(super) fn kpss_lag_rule_or_null(_: &mut SchemaGenerator) -> Schema {
+        schema(json!({
+            "anyOf": [names(&crate::time_series::KPSS_LAG_RULES).to_value(), { "type": "null" }]
+        }))
     }
 
     pub(super) fn normality_test(_: &mut SchemaGenerator) -> Schema {
@@ -3732,6 +3893,11 @@ mod engine_card_tests {
             "adf_test",
             vec![arg("data", s.of::<AdfInputDto>())],
             s.of::<AdfDto>(),
+        );
+        s.op(
+            "kpss_test",
+            vec![arg("data", s.of::<KpssInputDto>())],
+            s.of::<KpssDto>(),
         );
         s
     }

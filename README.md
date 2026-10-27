@@ -9,12 +9,12 @@ A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
 ## What's New (unreleased)
 
-- **Autocorrelation, partial autocorrelation and the augmented Dickey-Fuller
-  test** on every surface: WASM `acf` / `pacf` / `adf_test`, C ABI
-  `insight_acf` / `insight_pacf` / `insight_adf_test`, and .NET
-  `Acf` / `Pacf` / `AdfTest` — with Bartlett's limits per lag beside the
-  white-noise threshold, and the same lag defaults, ranges and refusals on
-  every surface.
+- **Autocorrelation, partial autocorrelation, the augmented Dickey-Fuller
+  test and the KPSS stationarity test** on every surface: WASM `acf` / `pacf` /
+  `adf_test` / `kpss_test`, C ABI `insight_acf` / `insight_pacf` /
+  `insight_adf_test` / `insight_kpss_test`, and .NET `Acf` / `Pacf` / `AdfTest` /
+  `KpssTest` — with Bartlett's limits per lag beside the white-noise threshold,
+  and the same lag defaults, ranges and refusals on every surface.
 - **SPC control charts, process capability, sigma ↔ PPM and Weibull reliability
   are no longer in the C ABI or in `UInsight`.** They are the `u-analytics`
   crate's own surface, carried to .NET by `UAnalytics` and to JavaScript by
@@ -123,7 +123,7 @@ Built on `u-analytics` (statistical algorithms), `u-numflow` (math primitives).
 
 | Module | Description |
 |--------|-------------|
-| `ffi` | C FFI bindings — 53 functions, 33 `#[repr(C)]` structs, auto-generated C header via cbindgen |
+| `ffi` | C FFI bindings — 54 functions, 34 `#[repr(C)]` structs, auto-generated C header via cbindgen |
 
 ## Quick Start
 
@@ -244,6 +244,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_pacf` | Sample partial autocorrelation (Durbin-Levinson); `max_lag` null = default, lags below `n / 2` |
 | `insight_free_pacf_result` | Frees the array of a `CPacfResult` |
 | `insight_adf_test` | Augmented Dickey-Fuller test; `model` `INSIGHT_ADF_NONE` / `_CONSTANT` / `_CONSTANT_TREND`, `max_lags` / `lags` pointers (null = not given, at most one) |
+| `insight_kpss_test` | KPSS stationarity test; `model` `INSIGHT_KPSS_LEVEL` / `_TREND`, `lag_rule` (`INSIGHT_KPSS_LAGS_HOBIJN` / `_SCHWERT`) and `lags` pointers (null = not given, at most one); `p_value_bound` one of `INSIGHT_KPSS_P_*` |
 
 ### Trend & Density Estimation
 
@@ -330,7 +331,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 474 lib tests + 53 doc-tests = 527 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
-C header: auto-generated via cbindgen (33 structs, 53 functions)
+C header: auto-generated via cbindgen (34 structs, 54 functions)
 ```
 
 ## Scope & Non-Goals
@@ -729,6 +730,42 @@ deterministic series (an exact fit of the differences) is `degenerate_data`.
              { "level": 0.10, "critical_value": -2.58, "rejected": true }] }
 // Critical values from MacKinnon's (2010) response surfaces;
 // `rejected` = statistic <= critical_value.
+```
+
+#### `kpss_test(data) -> KpssResult`
+
+KPSS stationarity test (H₀: the series is stationary around a level or a trend)
+— the complement of `adf_test`, whose null is the unit root. At least 10 finite
+values.
+
+**Input:**
+```json
+{ "data": [/* ... */], "model": "level", "lag_rule": null, "lags": null }
+```
+
+- `model`: `"level"` (default) | `"trend"`; another name is `unknown_option`.
+- `lag_rule`: how the truncation lag of the long-run variance is chosen —
+  `"hobijn"` (Hobijn, Franses & Ooms 1998, from the residuals' own
+  autocovariances; the default when neither option is given) | `"schwert"`
+  (`⌈12·(n/100)^¼⌉`).
+- `lags`: exactly this truncation lag, a whole number in `[0, n − 1]` (outside:
+  `parameter_out_of_range` with `min: 0`, `max: n − 1`).
+
+Give at most one of `lag_rule` and `lags` (both: `invalid_option`,
+`parameter: "lags"`). A series with no variation about its level (or trend) is
+`degenerate_data`.
+
+**Output:**
+```json
+{ "statistic": 0.52, "n_lags": 3, "p_value": 0.037, "p_value_bound": "interpolated",
+  "levels": [{ "level": 0.01, "critical_value": 0.739, "rejected": false },
+             { "level": 0.025, "critical_value": 0.574, "rejected": false },
+             { "level": 0.05, "critical_value": 0.463, "rejected": true },
+             { "level": 0.1, "critical_value": 0.347, "rejected": true }] }
+// Critical values from Kwiatkowski et al. (1992), Table 1; `rejected` =
+// statistic > critical_value. `p_value` is interpolated in that table and
+// clamped to [0.01, 0.10]: `p_value_bound` "at_most" / "at_least" says it is
+// the table's bound.
 ```
 
 ## npm (WebAssembly)
