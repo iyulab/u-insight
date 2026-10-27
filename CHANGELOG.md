@@ -33,12 +33,26 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   `invalid_option` about `lags`). A series that does not vary -- or, for the ADF
   test, a deterministic one -- is `degenerate_data` about `data`.
 
+- C ABI `insight_profile_csv_file(path)` and .NET `InsightClient.ProfileCsvFile(path)`:
+  profile a CSV file the engine reads itself, so a caller that already has the
+  file neither loads the text nor marshals it as one string.
+
 - `VERSION`: the crate's own version (`CARGO_PKG_VERSION`) as a constant at the
   crate root, so a consumer can report what it was built against without
   reading a lock file -- which names the wrong version once the crate is linked
   from another package.
 
 ### Fixed
+
+- CSV parsing held every field twice: rows were built as owned strings, then each
+  field was cloned into its column while the rows were still alive. Fields are now
+  read once into their column, borrowed from the text unless an escaped quote
+  forces a copy, and each column's fields are released as soon as it is typed. On
+  1,000,000 rows × 6 columns (28 MB) peak memory for parse and profile falls from
+  644 MB to 201 MB, and time from about 4.4 s to 2.8 s.
+- .NET `ProfileCsv` / `ProfileJson` threw a bare "Failed to profile" on a refused
+  input; they now carry the engine's message, `ErrorCode` and fields (a CSV row of
+  the wrong width names its line).
 
 - `feature_analysis` flagged low-variance features against a fixed variance
   (1e-10), so every column of data recorded in a small unit was flagged and the

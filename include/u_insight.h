@@ -964,6 +964,19 @@ INSIGHT_API void insight_clear_error(void);
 INSIGHT_API struct ProfileContext *insight_profile_csv(const char *csv_data);
 
 /**
+ * Creates a profile context from a CSV file, read by the engine — the caller
+ * does not hold the text, nor marshal it as one string.
+ *
+ * `path` is a UTF-8 file path. Returns null on error (an unreadable file is a
+ * parse failure naming the path; see `insight_last_error`).
+ *
+ * # Safety
+ * - `path` must be a valid null-terminated UTF-8 string.
+ * - The returned handle must be freed with `insight_profile_free`.
+ */
+INSIGHT_API struct ProfileContext *insight_profile_csv_file(const char *path);
+
+/**
  * Creates a profile context from a column-major JSON string.
  *
  * Expected format: `{"col1": [v1, v2, ...], "col2": [...]}`

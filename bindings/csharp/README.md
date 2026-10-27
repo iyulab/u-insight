@@ -96,6 +96,7 @@ public sealed class InsightClient : IDisposable
 
     // Profiling
     ProfileResult ProfileCsv(string csvData);
+    ProfileResult ProfileCsvFile(string path);   // the engine reads the file
 
     // Clustering
     KMeansResult KMeans(double[,] data, uint k);

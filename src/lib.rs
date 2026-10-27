@@ -22,7 +22,7 @@
 //! - [`lof`] — Local Outlier Factor (LOF) density-based anomaly detection
 //! - [`mahalanobis`] — Mahalanobis distance multivariate outlier detection
 //! - [`feature_importance`] — Composite importance, ANOVA F-test, Mutual Information, Permutation Importance
-//! - [`ffi`] — C FFI bindings (52 functions, 33 structs, auto-generated C header via cbindgen)
+//! - [`ffi`] — C FFI bindings (53 functions, 33 structs, auto-generated C header via cbindgen)
 //! - [`error`] — Error types
 //!
 //! ## Quick Start

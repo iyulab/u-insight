@@ -64,6 +64,9 @@ internal static partial class NativeLibrary
     public static partial IntPtr insight_profile_csv(string csvData);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial IntPtr insight_profile_csv_file(string path);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial IntPtr insight_profile_json(string jsonData);
 
     [LibraryImport(LibraryName)]

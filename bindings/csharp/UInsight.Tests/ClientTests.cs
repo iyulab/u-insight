@@ -55,6 +55,28 @@ public class ClientTests : IDisposable
     }
 
     [Fact]
+    public void ProfileCsvFile_ReadsTheFileAndCarriesTheEngineRefusal()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, "name,value\nAlice,1.5\nBob,2.3\n");
+            var result = _client.ProfileCsvFile(path);
+            Assert.Equal(2, result.RowCount);
+            Assert.Equal(2, result.ColumnCount);
+
+            File.WriteAllText(path, "a,b\n1,2\n3\n");
+            var e = Assert.Throws<InsightException>(() => _client.ProfileCsvFile(path));
+            Assert.NotNull(e.ErrorCode);
+            Assert.Contains("3", e.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void ProfileCsv_UndefinedStatisticsAreNull()
     {
         // One row: the value column has a mean but no standard deviation;

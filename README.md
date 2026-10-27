@@ -123,7 +123,7 @@ Built on `u-analytics` (statistical algorithms), `u-numflow` (math primitives).
 
 | Module | Description |
 |--------|-------------|
-| `ffi` | C FFI bindings — 52 functions, 33 `#[repr(C)]` structs, auto-generated C header via cbindgen |
+| `ffi` | C FFI bindings — 53 functions, 33 `#[repr(C)]` structs, auto-generated C header via cbindgen |
 
 ## Quick Start
 
@@ -177,6 +177,7 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | Function | Description |
 |----------|-------------|
 | `insight_profile_csv` | Profile a CSV string → opaque context |
+| `insight_profile_csv_file` | Profile a CSV file read by the engine → opaque context |
 | `insight_profile_json` | Profile a JSON string → opaque context |
 | `insight_profile_free` | Free profile context |
 | `insight_profile_row_count` | Row count from profile |
@@ -329,7 +330,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 474 lib tests + 53 doc-tests = 527 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
-C header: auto-generated via cbindgen (33 structs, 52 functions)
+C header: auto-generated via cbindgen (33 structs, 53 functions)
 ```
 
 ## Scope & Non-Goals

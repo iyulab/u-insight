@@ -38,7 +38,21 @@ public sealed class InsightClient : IDisposable
     {
         var ctx = Native.insight_profile_csv(csvData);
         if (ctx == IntPtr.Zero)
-            throw new InsightException(-1, "Failed to profile CSV data");
+            throw RefusedProfile("Failed to profile CSV data");
+        return BuildProfileResult(ctx);
+    }
+
+    /// <summary>
+    /// Profiles a CSV file and returns column summaries. The engine reads the file itself, so the
+    /// caller neither loads the text nor marshals it as one string — prefer this to
+    /// <see cref="ProfileCsv"/> when the data is already on disk.
+    /// </summary>
+    public ProfileResult ProfileCsvFile(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        var ctx = Native.insight_profile_csv_file(path);
+        if (ctx == IntPtr.Zero)
+            throw RefusedProfile($"Failed to profile CSV file '{path}'");
         return BuildProfileResult(ctx);
     }
 
@@ -54,9 +68,17 @@ public sealed class InsightClient : IDisposable
     {
         var ctx = Native.insight_profile_json(jsonData);
         if (ctx == IntPtr.Zero)
-            throw new InsightException(-1, "Failed to profile JSON data");
+            throw RefusedProfile("Failed to profile JSON data");
         return BuildProfileResult(ctx);
     }
+
+    /// <summary>
+    /// The refusal behind a null profile handle: the engine's message, <c>code</c> and fields
+    /// (a CSV row of the wrong width names its line), not a bare failure.
+    /// </summary>
+    private static InsightException RefusedProfile(string fallback)
+        => InsightException.FromCode(-1, Native.GetLastError() ?? fallback,
+            Native.GetLastErrorParameter(), Native.GetLastErrorJson());
 
     private static ProfileResult BuildProfileResult(IntPtr ctx)
     {

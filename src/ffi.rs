@@ -308,6 +308,52 @@ pub unsafe extern "C" fn insight_profile_csv(csv_data: *const c_char) -> *mut Pr
     }
 }
 
+/// Creates a profile context from a CSV file, read by the engine — the caller
+/// does not hold the text, nor marshal it as one string.
+///
+/// `path` is a UTF-8 file path. Returns null on error (an unreadable file is a
+/// parse failure naming the path; see `insight_last_error`).
+///
+/// # Safety
+/// - `path` must be a valid null-terminated UTF-8 string.
+/// - The returned handle must be freed with `insight_profile_free`.
+#[no_mangle]
+pub unsafe extern "C" fn insight_profile_csv_file(path: *const c_char) -> *mut ProfileContext {
+    let result = panic::catch_unwind(|| {
+        if path.is_null() {
+            refuse(INSIGHT_ERR_NULL_PTR, "null path pointer");
+            return ptr::null_mut();
+        }
+        let path = match unsafe { CStr::from_ptr(path) }.to_str() {
+            Ok(s) => s,
+            Err(e) => {
+                refuse(INSIGHT_ERR_PARSE_FAILED, format!("invalid UTF-8 path: {e}"));
+                return ptr::null_mut();
+            }
+        };
+        let df = match CsvParser::new().parse_file(path) {
+            Ok(df) => df,
+            Err(e) => {
+                fail(&e);
+                return ptr::null_mut();
+            }
+        };
+        let profiles = profile_dataframe(&df);
+        Box::into_raw(Box::new(ProfileContext {
+            dataframe: df,
+            column_profiles: profiles,
+        }))
+    });
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(_) => {
+            refuse(INSIGHT_ERR_PANIC, "panic in insight_profile_csv_file");
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Creates a profile context from a column-major JSON string.
 ///
 /// Expected format: `{"col1": [v1, v2, ...], "col2": [...]}`
@@ -3475,6 +3521,32 @@ mod tests {
         assert!((summary.mean - 1.9).abs() < 0.01);
 
         unsafe { insight_profile_free(ctx) };
+    }
+
+    #[test]
+    fn ffi_profile_csv_file_reads_the_file_and_names_what_it_refuses() {
+        let path = std::env::temp_dir().join(format!("u-insight-{}.csv", std::process::id()));
+        std::fs::write(&path, "name,value\nAlice,1.5\nBob,2.3\n").unwrap();
+        let c_path = CString::new(path.to_str().unwrap()).unwrap();
+        let ctx = unsafe { insight_profile_csv_file(c_path.as_ptr()) };
+        assert!(!ctx.is_null());
+        assert_eq!(unsafe { insight_profile_row_count(ctx) }, 2);
+        unsafe { insight_profile_free(ctx) };
+
+        // A row of the wrong width is refused with its line, as from a string.
+        std::fs::write(&path, "a,b\n1,2\n3\n").unwrap();
+        assert!(unsafe { insight_profile_csv_file(c_path.as_ptr()) }.is_null());
+        let body = unsafe { CStr::from_ptr(insight_last_error_json()) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(body.contains("\"line\":3"), "{body}");
+        std::fs::remove_file(&path).unwrap();
+
+        // A missing file is refused, not a crash.
+        assert!(unsafe { insight_profile_csv_file(c_path.as_ptr()) }.is_null());
+        assert!(!insight_last_error().is_null());
+        assert!(unsafe { insight_profile_csv_file(ptr::null()) }.is_null());
     }
 
     #[test]
