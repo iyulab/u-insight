@@ -3092,6 +3092,301 @@ pub unsafe extern "C" fn insight_free_spectral_residual_result(
     }
 }
 
+// ── Time series: autocorrelation and unit-root test ─────────────────────
+
+/// Hands `values` to C as a pointer it frees with [`free_f64s`]: exactly
+/// `values.len()` long, whatever capacity the vector had.
+fn leak_f64s(values: Vec<f64>) -> *mut f64 {
+    if values.is_empty() {
+        return ptr::null_mut();
+    }
+    Box::into_raw(values.into_boxed_slice()).cast::<f64>()
+}
+
+/// Frees an array [`leak_f64s`] handed out, `len` long. Null is a no-op.
+///
+/// # Safety
+/// `values` must be null or come from [`leak_f64s`] with that length, not yet freed.
+unsafe fn free_f64s(values: *mut f64, len: usize) {
+    if !values.is_null() && len > 0 {
+        drop(unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(values, len)) });
+    }
+}
+
+/// The series behind `data` (`n` values), or null-pointer refusal.
+///
+/// # Safety
+/// `data` must be null or point to `n` f64s.
+unsafe fn series<'a>(data: *const f64, n: u32) -> Option<&'a [f64]> {
+    if data.is_null() {
+        None
+    } else {
+        Some(unsafe { slice::from_raw_parts(data, n as usize) })
+    }
+}
+
+/// An optional whole-number argument: null = not given.
+///
+/// # Safety
+/// `value` must be null or valid.
+unsafe fn given(value: *const i32) -> Option<f64> {
+    (!value.is_null()).then(|| f64::from(unsafe { *value }))
+}
+
+/// C-compatible result of `insight_acf`.
+#[repr(C)]
+pub struct CAcfResult {
+    /// Autocorrelations for lags 0 to `max_lag` (`max_lag + 1` values;
+    /// `acf[0]` is 1). Caller must free with `insight_free_acf_result`.
+    pub acf: *mut f64,
+    /// 95% limits for lags 1 to `max_lag` (`max_lag` values) by Bartlett's
+    /// formula: for lag k, under the hypothesis that the autocorrelation is
+    /// zero beyond lag k - 1 (an MA(k - 1) process).
+    pub bartlett_limits: *mut f64,
+    /// The largest lag computed.
+    pub max_lag: u32,
+    /// 95% white-noise threshold, `z / sqrt(n)`.
+    pub confidence_threshold: f64,
+}
+
+/// Sample autocorrelation of a series for lags 0 to `max_lag` (the biased
+/// estimator), with the 95% white-noise threshold and Bartlett's 95% limits.
+///
+/// `data`: `n` observations (at least 2, all finite). `max_lag`: null for
+/// `min(floor(10 log10 n), n - 1)`, or a pointer to a lag in `[1, n - 1]`
+/// (outside: `INSIGHT_ERR_INVALID_PARAM`, `parameter_out_of_range` with `min` /
+/// `max`). A series that does not vary: `INSIGHT_ERR_DEGENERATE_DATA`
+/// (`degenerate_data`, `data`). `out`: pointer to a `CAcfResult`. Returns 0 on
+/// success, negative on error. Caller must free `out` with
+/// `insight_free_acf_result`.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `max_lag` must be null or valid. `out`
+/// must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_acf(
+    data: *const f64,
+    n: u32,
+    max_lag: *const i32,
+    out: *mut CAcfResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        let Some(raw) = (unsafe { series(data, n) }).filter(|_| !out.is_null()) else {
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
+        };
+        match crate::time_series::acf(raw, unsafe { given(max_lag) }) {
+            Ok(r) => {
+                let lag = r.bartlett_limits.len() as u32;
+                unsafe {
+                    (*out) = CAcfResult {
+                        acf: leak_f64s(r.acf),
+                        bartlett_limits: leak_f64s(r.bartlett_limits),
+                        max_lag: lag,
+                        confidence_threshold: r.confidence_threshold,
+                    };
+                }
+                INSIGHT_OK
+            }
+            Err(e) => fail(&e),
+        }
+    });
+    match result {
+        Ok(code) => code,
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_acf"),
+    }
+}
+
+/// Frees the arrays of a `CAcfResult` allocated by `insight_acf`.
+///
+/// # Safety
+/// The result must have been allocated by that function and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_acf_result(result: *mut CAcfResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &mut *result };
+    let lag = r.max_lag as usize;
+    unsafe {
+        free_f64s(r.acf, lag + 1);
+        free_f64s(r.bartlett_limits, lag);
+    }
+    r.acf = ptr::null_mut();
+    r.bartlett_limits = ptr::null_mut();
+}
+
+/// C-compatible result of `insight_pacf`.
+#[repr(C)]
+pub struct CPacfResult {
+    /// Partial autocorrelations for lags 1 to `max_lag` (`max_lag` values).
+    /// Caller must free with `insight_free_pacf_result`.
+    pub pacf: *mut f64,
+    /// The largest lag computed.
+    pub max_lag: u32,
+    /// 95% threshold, `z / sqrt(n)` (Quenouille).
+    pub confidence_threshold: f64,
+}
+
+/// Sample partial autocorrelation of a series for lags 1 to `max_lag`
+/// (Durbin-Levinson on the biased autocorrelation), with the 95% threshold.
+///
+/// `data`: `n` observations (at least 4, all finite). `max_lag`: null for
+/// `min(floor(10 log10 n), n / 2 - 1)`, or a pointer to a lag in
+/// `[1, n / 2 - 1]`. Refusals as `insight_acf`. `out`: pointer to a
+/// `CPacfResult`. Returns 0 on success, negative on error. Caller must free
+/// `out` with `insight_free_pacf_result`.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `max_lag` must be null or valid. `out`
+/// must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_pacf(
+    data: *const f64,
+    n: u32,
+    max_lag: *const i32,
+    out: *mut CPacfResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        let Some(raw) = (unsafe { series(data, n) }).filter(|_| !out.is_null()) else {
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
+        };
+        match crate::time_series::pacf(raw, unsafe { given(max_lag) }) {
+            Ok(r) => {
+                let lag = r.pacf.len() as u32;
+                unsafe {
+                    (*out) = CPacfResult {
+                        pacf: leak_f64s(r.pacf),
+                        max_lag: lag,
+                        confidence_threshold: r.confidence_threshold,
+                    };
+                }
+                INSIGHT_OK
+            }
+            Err(e) => fail(&e),
+        }
+    });
+    match result {
+        Ok(code) => code,
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_pacf"),
+    }
+}
+
+/// Frees the array of a `CPacfResult` allocated by `insight_pacf`.
+///
+/// # Safety
+/// The result must have been allocated by that function and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn insight_free_pacf_result(result: *mut CPacfResult) {
+    if result.is_null() {
+        return;
+    }
+    let r = unsafe { &mut *result };
+    unsafe { free_f64s(r.pacf, r.max_lag as usize) };
+    r.pacf = ptr::null_mut();
+}
+
+/// ADF test regression without deterministic terms.
+pub const INSIGHT_ADF_NONE: u32 = 0;
+/// ADF test regression with a constant (the usual choice).
+pub const INSIGHT_ADF_CONSTANT: u32 = 1;
+/// ADF test regression with a constant and a linear trend.
+pub const INSIGHT_ADF_CONSTANT_TREND: u32 = 2;
+
+/// C-compatible result of `insight_adf_test`. The levels are 1%, 5% and 10%
+/// (MacKinnon 2010 response surfaces).
+#[repr(C)]
+pub struct CAdfResult {
+    /// ADF statistic (t-ratio of the lagged level).
+    pub statistic: f64,
+    /// Lagged differences in the regression.
+    pub n_lags: u32,
+    /// Observations the regression used.
+    pub n_obs: u32,
+    /// Critical value at 1%.
+    pub critical_value_1: f64,
+    /// Critical value at 5%.
+    pub critical_value_5: f64,
+    /// Critical value at 10%.
+    pub critical_value_10: f64,
+    /// 1 when `statistic <= critical_value_1`: the unit root is rejected at 1%.
+    pub rejected_1: bool,
+    /// The same at 5%.
+    pub rejected_5: bool,
+    /// The same at 10%.
+    pub rejected_10: bool,
+}
+
+/// The augmented Dickey-Fuller unit-root test of a series (H0: a unit root).
+///
+/// `data`: `n` observations (at least 10, all finite). `model`: one of
+/// `INSIGHT_ADF_NONE` (0) / `_CONSTANT` (1) / `_CONSTANT_TREND` (2). The
+/// number of lagged differences is chosen by AIC from 0 to `*max_lags`
+/// (`max_lags` null: Schwert's rule), or fixed at `*lags` -- give at most one
+/// (both: `INSIGHT_ERR_INVALID_PARAM`, `invalid_option`, `parameter` `lags`).
+/// Each is a count from 0 to the most the data leave room for (at least 5
+/// regression rows and a residual degree of freedom); outside:
+/// `parameter_out_of_range` with `min` / `max`. A deterministic series:
+/// `INSIGHT_ERR_DEGENERATE_DATA`. `out`: pointer to a `CAdfResult`. Returns 0
+/// on success, negative on error.
+///
+/// # Safety
+/// `data` must point to `n` f64s. `max_lags` and `lags` must be null or
+/// valid. `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn insight_adf_test(
+    data: *const f64,
+    n: u32,
+    model: u32,
+    max_lags: *const i32,
+    lags: *const i32,
+    out: *mut CAdfResult,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        let Some(raw) = (unsafe { series(data, n) }).filter(|_| !out.is_null()) else {
+            return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
+        };
+        let Some(&(_, adf_model)) = crate::time_series::ADF_MODELS.get(model as usize) else {
+            return unknown_selector(
+                "model",
+                model,
+                &[
+                    INSIGHT_ADF_NONE,
+                    INSIGHT_ADF_CONSTANT,
+                    INSIGHT_ADF_CONSTANT_TREND,
+                ],
+                format!(
+                    "model must be 0 (none), 1 (constant) or 2 (constant and trend), got {model}"
+                ),
+            );
+        };
+        match crate::time_series::adf(raw, adf_model, unsafe { given(max_lags) }, unsafe {
+            given(lags)
+        }) {
+            Ok(r) => {
+                unsafe {
+                    (*out) = CAdfResult {
+                        statistic: r.statistic,
+                        n_lags: r.n_lags as u32,
+                        n_obs: r.n_obs as u32,
+                        critical_value_1: r.critical_values[0],
+                        critical_value_5: r.critical_values[1],
+                        critical_value_10: r.critical_values[2],
+                        rejected_1: r.rejected[0],
+                        rejected_5: r.rejected[1],
+                        rejected_10: r.rejected[2],
+                    };
+                }
+                INSIGHT_OK
+            }
+            Err(e) => fail(&e),
+        }
+    });
+    match result {
+        Ok(code) => code,
+        Err(_) => refuse(INSIGHT_ERR_PANIC, "panic in insight_adf_test"),
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4485,6 +4780,232 @@ mod tests {
         assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
         let rc = unsafe { insight_estimate_period(ptr::null(), 40, &mut out) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    // ── ACF / PACF / ADF tests ───────────────────────────────────────
+
+    /// The series `u-analytics` checks its autocorrelations against
+    /// (statsmodels 0.15).
+    const ACF_SERIES: [f64; 24] = [
+        2.3, 3.1, 4.0, 3.6, 2.9, 2.2, 2.8, 3.9, 4.6, 4.1, 3.3, 2.5, 2.7, 3.8, 4.9, 4.4, 3.5, 2.6,
+        3.0, 4.2, 5.1, 4.5, 3.4, 2.9,
+    ];
+
+    fn empty_acf() -> CAcfResult {
+        CAcfResult {
+            acf: ptr::null_mut(),
+            bartlett_limits: ptr::null_mut(),
+            max_lag: 0,
+            confidence_threshold: 0.0,
+        }
+    }
+
+    #[test]
+    fn ffi_acf_carries_the_engine_result_and_frees_it() {
+        let want = crate::time_series::acf(&ACF_SERIES, Some(8.0)).expect("defined");
+        let mut out = empty_acf();
+        let rc = unsafe { insight_acf(ACF_SERIES.as_ptr(), 24, &8, &mut out) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(out.max_lag, 8);
+        let acf = unsafe { slice::from_raw_parts(out.acf, 9) };
+        let limits = unsafe { slice::from_raw_parts(out.bartlett_limits, 8) };
+        assert_eq!(acf, &want.acf[..]);
+        assert_eq!(limits, &want.bartlett_limits[..]);
+        assert_eq!(out.confidence_threshold, want.confidence_threshold);
+        unsafe { insight_free_acf_result(&mut out) };
+        assert!(out.acf.is_null() && out.bartlett_limits.is_null());
+        // Freeing twice, or a null result, is harmless.
+        unsafe { insight_free_acf_result(&mut out) };
+        unsafe { insight_free_acf_result(ptr::null_mut()) };
+
+        // Null max_lag: ⌊10·log₁₀ 24⌋ = 13.
+        let rc = unsafe { insight_acf(ACF_SERIES.as_ptr(), 24, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(out.max_lag, 13);
+        unsafe { insight_free_acf_result(&mut out) };
+    }
+
+    #[test]
+    fn ffi_acf_refusals_carry_the_shared_codes() {
+        let mut out = empty_acf();
+        for (lag, rc_want) in [
+            (0, INSIGHT_ERR_INVALID_PARAM),
+            (24, INSIGHT_ERR_INVALID_PARAM),
+        ] {
+            let rc = unsafe { insight_acf(ACF_SERIES.as_ptr(), 24, &lag, &mut out) };
+            assert_eq!(rc, rc_want);
+            let body = last_error_body().expect("a body");
+            assert_eq!(body["code"], "parameter_out_of_range");
+            assert_eq!(
+                (&body["parameter"], &body["min"], &body["max"], &body["got"]),
+                (
+                    &serde_json::json!("max_lag"),
+                    &serde_json::json!(1.0),
+                    &serde_json::json!(23.0),
+                    &serde_json::json!(f64::from(lag))
+                )
+            );
+            let p = unsafe { CStr::from_ptr(insight_last_error_parameter()) };
+            assert_eq!(p.to_str().unwrap(), "max_lag");
+        }
+        let flat = [3.0; 10];
+        let rc = unsafe { insight_acf(flat.as_ptr(), 10, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_DEGENERATE_DATA);
+        assert_eq!(last_error_body().expect("a body")["parameter"], "data");
+        let rc = unsafe { insight_acf(flat.as_ptr(), 1, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+        let nan = [1.0, f64::NAN, 2.0];
+        let rc = unsafe { insight_acf(nan.as_ptr(), 3, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+        assert_eq!(last_error_body().expect("a body")["index"], 1);
+        let rc = unsafe { insight_acf(ptr::null(), 3, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+        let rc = unsafe { insight_acf(nan.as_ptr(), 3, ptr::null(), ptr::null_mut()) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_pacf_carries_the_engine_result_and_frees_it() {
+        let want = crate::time_series::pacf(&ACF_SERIES, Some(8.0)).expect("defined");
+        let mut out = CPacfResult {
+            pacf: ptr::null_mut(),
+            max_lag: 0,
+            confidence_threshold: 0.0,
+        };
+        let rc = unsafe { insight_pacf(ACF_SERIES.as_ptr(), 24, &8, &mut out) };
+        assert_eq!(rc, INSIGHT_OK);
+        assert_eq!(out.max_lag, 8);
+        assert_eq!(
+            unsafe { slice::from_raw_parts(out.pacf, 8) },
+            &want.pacf[..]
+        );
+        assert_eq!(out.confidence_threshold, want.confidence_threshold);
+        unsafe { insight_free_pacf_result(&mut out) };
+        assert!(out.pacf.is_null());
+        // Lags below n / 2: 12 is refused with max 11.
+        let rc = unsafe { insight_pacf(ACF_SERIES.as_ptr(), 24, &12, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        assert_eq!(last_error_body().expect("a body")["max"], 11.0);
+        let rc = unsafe { insight_pacf(ACF_SERIES.as_ptr(), 3, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+        assert_eq!(last_error_body().expect("a body")["min"], 4);
+    }
+
+    fn empty_adf() -> CAdfResult {
+        CAdfResult {
+            statistic: 0.0,
+            n_lags: 0,
+            n_obs: 0,
+            critical_value_1: 0.0,
+            critical_value_5: 0.0,
+            critical_value_10: 0.0,
+            rejected_1: false,
+            rejected_5: false,
+            rejected_10: false,
+        }
+    }
+
+    #[test]
+    fn ffi_adf_test_carries_the_engine_result() {
+        let mut x = vec![0.0_f64; 120];
+        for t in 1..x.len() {
+            let e = ((t * 7919) % 101) as f64 / 50.0 - 1.0;
+            x[t] = 0.7 * x[t - 1] + e;
+        }
+        // The selectors are the table's positions.
+        for (selector, (name, model)) in crate::time_series::ADF_MODELS.iter().enumerate() {
+            let mut out = empty_adf();
+            let rc = unsafe {
+                insight_adf_test(x.as_ptr(), 120, selector as u32, &5, ptr::null(), &mut out)
+            };
+            assert_eq!(rc, INSIGHT_OK, "{name}");
+            let want = crate::time_series::adf(&x, *model, Some(5.0), None).expect("fits");
+            assert_eq!(out.statistic, want.statistic, "{name}");
+            assert_eq!(
+                (out.n_lags, out.n_obs),
+                (want.n_lags as u32, want.n_obs as u32)
+            );
+            assert_eq!(
+                [
+                    out.critical_value_1,
+                    out.critical_value_5,
+                    out.critical_value_10
+                ],
+                want.critical_values
+            );
+            assert_eq!(
+                [out.rejected_1, out.rejected_5, out.rejected_10],
+                want.rejected
+            );
+        }
+        assert_eq!(
+            [
+                INSIGHT_ADF_NONE,
+                INSIGHT_ADF_CONSTANT,
+                INSIGHT_ADF_CONSTANT_TREND
+            ],
+            [0, 1, 2]
+        );
+        let mut out = empty_adf();
+        // statsmodels 0.15 `adfuller(x, maxlag=3, autolag=None)`.
+        let rc = unsafe {
+            insight_adf_test(
+                x.as_ptr(),
+                120,
+                INSIGHT_ADF_CONSTANT,
+                ptr::null(),
+                &3,
+                &mut out,
+            )
+        };
+        assert_eq!(rc, INSIGHT_OK);
+        assert!((out.statistic - -4.652_930_484_4).abs() < 1e-8);
+        assert_eq!((out.n_lags, out.n_obs), (3, 116));
+    }
+
+    #[test]
+    fn ffi_adf_test_refusals_carry_the_shared_codes() {
+        let x: Vec<f64> = (0..20).map(|i| ((i * 37) % 11) as f64).collect();
+        let mut out = empty_adf();
+        let rc = unsafe { insight_adf_test(x.as_ptr(), 20, 3, ptr::null(), ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"], &body["expected"]),
+            (
+                &serde_json::json!("unknown_option"),
+                &serde_json::json!("model"),
+                &serde_json::json!([0, 1, 2])
+            )
+        );
+        let rc = unsafe { insight_adf_test(x.as_ptr(), 20, 1, &2, &2, &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["parameter"]),
+            (
+                &serde_json::json!("invalid_option"),
+                &serde_json::json!("lags")
+            )
+        );
+        let rc = unsafe { insight_adf_test(x.as_ptr(), 20, 1, &-1, ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_PARAM);
+        let body = last_error_body().expect("a body");
+        assert_eq!(
+            (&body["code"], &body["min"], &body["max"], &body["got"]),
+            (
+                &serde_json::json!("parameter_out_of_range"),
+                &serde_json::json!(0.0),
+                &serde_json::json!(8.0),
+                &serde_json::json!(-1.0)
+            )
+        );
+        let rc = unsafe { insight_adf_test(x.as_ptr(), 9, 1, ptr::null(), ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_INSUFFICIENT_DATA);
+        let line: Vec<f64> = (0..20).map(f64::from).collect();
+        let rc =
+            unsafe { insight_adf_test(line.as_ptr(), 20, 1, ptr::null(), ptr::null(), &mut out) };
+        assert_eq!(rc, INSIGHT_ERR_DEGENERATE_DATA);
     }
 
     #[test]

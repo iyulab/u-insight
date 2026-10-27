@@ -93,6 +93,21 @@
 #define INSIGHT_KDE_MANUAL 2
 
 /**
+ * ADF test regression without deterministic terms.
+ */
+#define INSIGHT_ADF_NONE 0
+
+/**
+ * ADF test regression with a constant (the usual choice).
+ */
+#define INSIGHT_ADF_CONSTANT 1
+
+/**
+ * ADF test regression with a constant and a linear trend.
+ */
+#define INSIGHT_ADF_CONSTANT_TREND 2
+
+/**
  * Opaque handle for a profiling context.
  * Holds the parsed DataFrame and computed profiles.
  */
@@ -813,6 +828,93 @@ typedef struct CSpectralResidualResult {
 } CSpectralResidualResult;
 
 /**
+ * C-compatible result of `insight_acf`.
+ */
+typedef struct CAcfResult {
+  /**
+   * Autocorrelations for lags 0 to `max_lag` (`max_lag + 1` values;
+   * `acf[0]` is 1). Caller must free with `insight_free_acf_result`.
+   */
+  double *acf;
+  /**
+   * 95% limits for lags 1 to `max_lag` (`max_lag` values) by Bartlett's
+   * formula: for lag k, under the hypothesis that the autocorrelation is
+   * zero beyond lag k - 1 (an MA(k - 1) process).
+   */
+  double *bartlett_limits;
+  /**
+   * The largest lag computed.
+   */
+  uint32_t max_lag;
+  /**
+   * 95% white-noise threshold, `z / sqrt(n)`.
+   */
+  double confidence_threshold;
+} CAcfResult;
+
+/**
+ * C-compatible result of `insight_pacf`.
+ */
+typedef struct CPacfResult {
+  /**
+   * Partial autocorrelations for lags 1 to `max_lag` (`max_lag` values).
+   * Caller must free with `insight_free_pacf_result`.
+   */
+  double *pacf;
+  /**
+   * The largest lag computed.
+   */
+  uint32_t max_lag;
+  /**
+   * 95% threshold, `z / sqrt(n)` (Quenouille).
+   */
+  double confidence_threshold;
+} CPacfResult;
+
+/**
+ * C-compatible result of `insight_adf_test`. The levels are 1%, 5% and 10%
+ * (MacKinnon 2010 response surfaces).
+ */
+typedef struct CAdfResult {
+  /**
+   * ADF statistic (t-ratio of the lagged level).
+   */
+  double statistic;
+  /**
+   * Lagged differences in the regression.
+   */
+  uint32_t n_lags;
+  /**
+   * Observations the regression used.
+   */
+  uint32_t n_obs;
+  /**
+   * Critical value at 1%.
+   */
+  double critical_value_1;
+  /**
+   * Critical value at 5%.
+   */
+  double critical_value_5;
+  /**
+   * Critical value at 10%.
+   */
+  double critical_value_10;
+  /**
+   * 1 when `statistic <= critical_value_1`: the unit root is rejected at 1%.
+   */
+  bool rejected_1;
+  /**
+   * The same at 5%.
+   */
+  bool rejected_5;
+  /**
+   * The same at 10%.
+   */
+  bool rejected_10;
+} CAdfResult;
+
+/**
  * Returns the last error message, or null if no error.
  * The returned string is valid until the next FFI call on this thread.
  *
@@ -1517,5 +1619,89 @@ int32_t insight_spectral_residual(const double *data,
  * The result must have been allocated by that function and not yet freed.
  */
 INSIGHT_API void insight_free_spectral_residual_result(struct CSpectralResidualResult *result);
+
+/**
+ * Sample autocorrelation of a series for lags 0 to `max_lag` (the biased
+ * estimator), with the 95% white-noise threshold and Bartlett's 95% limits.
+ *
+ * `data`: `n` observations (at least 2, all finite). `max_lag`: null for
+ * `min(floor(10 log10 n), n - 1)`, or a pointer to a lag in `[1, n - 1]`
+ * (outside: `INSIGHT_ERR_INVALID_PARAM`, `parameter_out_of_range` with `min` /
+ * `max`). A series that does not vary: `INSIGHT_ERR_DEGENERATE_DATA`
+ * (`degenerate_data`, `data`). `out`: pointer to a `CAcfResult`. Returns 0 on
+ * success, negative on error. Caller must free `out` with
+ * `insight_free_acf_result`.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `max_lag` must be null or valid. `out`
+ * must be valid.
+ */
+INSIGHT_API
+int32_t insight_acf(const double *data,
+                    uint32_t n,
+                    const int32_t *max_lag,
+                    struct CAcfResult *out);
+
+/**
+ * Frees the arrays of a `CAcfResult` allocated by `insight_acf`.
+ *
+ * # Safety
+ * The result must have been allocated by that function and not yet freed.
+ */
+INSIGHT_API void insight_free_acf_result(struct CAcfResult *result);
+
+/**
+ * Sample partial autocorrelation of a series for lags 1 to `max_lag`
+ * (Durbin-Levinson on the biased autocorrelation), with the 95% threshold.
+ *
+ * `data`: `n` observations (at least 4, all finite). `max_lag`: null for
+ * `min(floor(10 log10 n), n / 2 - 1)`, or a pointer to a lag in
+ * `[1, n / 2 - 1]`. Refusals as `insight_acf`. `out`: pointer to a
+ * `CPacfResult`. Returns 0 on success, negative on error. Caller must free
+ * `out` with `insight_free_pacf_result`.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `max_lag` must be null or valid. `out`
+ * must be valid.
+ */
+INSIGHT_API
+int32_t insight_pacf(const double *data,
+                     uint32_t n,
+                     const int32_t *max_lag,
+                     struct CPacfResult *out);
+
+/**
+ * Frees the array of a `CPacfResult` allocated by `insight_pacf`.
+ *
+ * # Safety
+ * The result must have been allocated by that function and not yet freed.
+ */
+INSIGHT_API void insight_free_pacf_result(struct CPacfResult *result);
+
+/**
+ * The augmented Dickey-Fuller unit-root test of a series (H0: a unit root).
+ *
+ * `data`: `n` observations (at least 10, all finite). `model`: one of
+ * `INSIGHT_ADF_NONE` (0) / `_CONSTANT` (1) / `_CONSTANT_TREND` (2). The
+ * number of lagged differences is chosen by AIC from 0 to `*max_lags`
+ * (`max_lags` null: Schwert's rule), or fixed at `*lags` -- give at most one
+ * (both: `INSIGHT_ERR_INVALID_PARAM`, `invalid_option`, `parameter` `lags`).
+ * Each is a count from 0 to the most the data leave room for (at least 5
+ * regression rows and a residual degree of freedom); outside:
+ * `parameter_out_of_range` with `min` / `max`. A deterministic series:
+ * `INSIGHT_ERR_DEGENERATE_DATA`. `out`: pointer to a `CAdfResult`. Returns 0
+ * on success, negative on error.
+ *
+ * # Safety
+ * `data` must point to `n` f64s. `max_lags` and `lags` must be null or
+ * valid. `out` must be valid.
+ */
+INSIGHT_API
+int32_t insight_adf_test(const double *data,
+                         uint32_t n,
+                         uint32_t model,
+                         const int32_t *max_lags,
+                         const int32_t *lags,
+                         struct CAdfResult *out);
 
 #endif  /* U_INSIGHT_H */

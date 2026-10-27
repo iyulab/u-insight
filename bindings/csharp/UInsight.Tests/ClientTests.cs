@@ -383,6 +383,119 @@ public class ClientTests : IDisposable
         Assert.True(result.BaselineScore != 0);
     }
 
+
+    // ── Time series ──
+
+    /// <summary>The series the engine checks its autocorrelations against (statsmodels 0.15).</summary>
+    private static readonly double[] AcfSeries =
+    [
+        2.3, 3.1, 4.0, 3.6, 2.9, 2.2, 2.8, 3.9, 4.6, 4.1, 3.3, 2.5, 2.7, 3.8, 4.9, 4.4, 3.5, 2.6,
+        3.0, 4.2, 5.1, 4.5, 3.4, 2.9,
+    ];
+
+    [Fact]
+    public void Acf_matches_the_reference_values()
+    {
+        var r = _client.Acf(AcfSeries, maxLag: 8);
+        Assert.Equal(9, r.Acf.Length);
+        Assert.Equal(8, r.BartlettLimits.Length);
+        Assert.Equal(1.0, r.Acf[0], 12);
+        Assert.Equal(0.486403576681892, r.Acf[1], 12);
+        Assert.Equal(-0.3171014941549895, r.Acf[8], 12);
+        Assert.Equal(0.40007597302960923, r.BartlettLimits[0], 12);
+        Assert.Equal(0.8200659919957791, r.BartlettLimits[7], 12);
+        Assert.Equal(0.40007597302960923, r.ConfidenceThreshold, 12);
+
+        // Default: min(floor(10 log10 24), 23) = 13.
+        Assert.Equal(14, _client.Acf(AcfSeries).Acf.Length);
+    }
+
+    [Fact]
+    public void Pacf_matches_the_reference_values()
+    {
+        var r = _client.Pacf(AcfSeries, maxLag: 8);
+        Assert.Equal(8, r.Pacf.Length);
+        Assert.Equal(0.486403576681892, r.Pacf[0], 12);
+        Assert.Equal(-0.7839238375815395, r.Pacf[1], 12);
+        Assert.Equal(0.03539504608148146, r.Pacf[7], 12);
+        Assert.Equal(11, _client.Pacf(AcfSeries).Pacf.Length);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(24)]
+    public void A_max_lag_outside_the_range_is_refused_with_its_bounds(int maxLag)
+    {
+        var ex = Assert.Throws<InsightException>(() => _client.Acf(AcfSeries, maxLag));
+        Assert.Equal(InsightErrorCategory.InvalidParameter, ex.Category);
+        Assert.Equal("parameter_out_of_range", ex.ErrorCode);
+        Assert.Equal("max_lag", ex.Parameter);
+        Assert.Equal(1.0, ex.Details!.Value.GetProperty("min").GetDouble());
+        Assert.Equal(23.0, ex.Details!.Value.GetProperty("max").GetDouble());
+        Assert.Equal(maxLag, ex.Details!.Value.GetProperty("got").GetDouble());
+    }
+
+    [Fact]
+    public void A_constant_or_short_series_is_refused()
+    {
+        var flat = Enumerable.Repeat(3.0, 10).ToArray();
+        var ex = Assert.Throws<InsightException>(() => _client.Pacf(flat));
+        Assert.Equal("degenerate_data", ex.ErrorCode);
+        Assert.Equal("data", ex.Details!.Value.GetProperty("parameter").GetString());
+        ex = Assert.Throws<InsightException>(() => _client.Acf([1.0]));
+        Assert.Equal("insufficient_data", ex.ErrorCode);
+        ex = Assert.Throws<InsightException>(() => _client.Acf([1.0, double.NaN, 2.0]));
+        Assert.Equal("value_not_finite", ex.ErrorCode);
+        Assert.Equal(1, ex.Index);
+    }
+
+    private static double[] Ar1Series()
+    {
+        var x = new double[120];
+        for (var t = 1; t < x.Length; t++)
+        {
+            var e = (t * 7919 % 101) / 50.0 - 1.0;
+            x[t] = 0.7 * x[t - 1] + e;
+        }
+        return x;
+    }
+
+    [Fact]
+    public void AdfTest_matches_the_reference_values()
+    {
+        // statsmodels 0.15 adfuller on the same series.
+        var r = _client.AdfTest(Ar1Series(), maxLags: 8);
+        Assert.Equal(-3.4360528948, r.Statistic, 8);
+        Assert.Equal(5u, r.NLags);
+        Assert.Equal(114u, r.NObs);
+        Assert.Equal([0.01, 0.05, 0.10], r.Levels.Select(l => l.Level));
+        Assert.All(r.Levels, l => Assert.Equal(r.Statistic <= l.CriticalValue, l.Rejected));
+
+        var trend = _client.AdfTest(Ar1Series(), AdfModel.ConstantTrend, maxLags: 6);
+        Assert.Equal(-3.5052470690, trend.Statistic, 8);
+        var fixedLags = _client.AdfTest(Ar1Series(), lags: 3);
+        Assert.Equal(-4.6529304844, fixedLags.Statistic, 8);
+        Assert.Equal(3u, fixedLags.NLags);
+        Assert.Equal(116u, fixedLags.NObs);
+    }
+
+    [Fact]
+    public void AdfTest_refuses_both_lag_options_and_a_count_outside_the_room()
+    {
+        var x = Enumerable.Range(0, 20).Select(i => (double)(i * 37 % 11)).ToArray();
+        var ex = Assert.Throws<InsightException>(() => _client.AdfTest(x, maxLags: 2, lags: 2));
+        Assert.Equal("invalid_option", ex.ErrorCode);
+        Assert.Equal("lags", ex.Parameter);
+        ex = Assert.Throws<InsightException>(() => _client.AdfTest(x, maxLags: -1));
+        Assert.Equal("parameter_out_of_range", ex.ErrorCode);
+        Assert.Equal("max_lags", ex.Parameter);
+        Assert.Equal(8.0, ex.Details!.Value.GetProperty("max").GetDouble());
+        ex = Assert.Throws<InsightException>(() => _client.AdfTest(x, (AdfModel)7));
+        Assert.Equal("unknown_option", ex.ErrorCode);
+        Assert.Equal("model", ex.Parameter);
+    }
+
     // ── Error Handling ──
 
     [Fact]

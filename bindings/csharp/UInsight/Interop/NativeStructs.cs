@@ -268,6 +268,37 @@ internal static class NativeStructs
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct CAcfResult
+    {
+        public IntPtr Acf;
+        public IntPtr BartlettLimits;
+        public uint MaxLag;
+        public double ConfidenceThreshold;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CPacfResult
+    {
+        public IntPtr Pacf;
+        public uint MaxLag;
+        public double ConfidenceThreshold;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct CAdfResult
+    {
+        public double Statistic;
+        public uint NLags;
+        public uint NObs;
+        public double CriticalValue1;
+        public double CriticalValue5;
+        public double CriticalValue10;
+        public byte Rejected1;
+        public byte Rejected5;
+        public byte Rejected10;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct CMannKendallResult
     {
         public long SStatistic;

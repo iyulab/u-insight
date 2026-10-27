@@ -10,6 +10,29 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Added
 
+- Autocorrelation, partial autocorrelation and the augmented Dickey-Fuller
+  unit-root test on the WebAssembly, C and .NET surfaces, beside `estimate_period`
+  and `spectral_residual`:
+  - WASM `acf({ data, max_lag? })` → `{ acf, confidence_threshold, bartlett_limits }`,
+    `pacf({ data, max_lag? })` → `{ pacf, confidence_threshold }` and
+    `adf_test({ data, model?, max_lags?, lags? })` →
+    `{ statistic, n_lags, n_obs, levels: [{ level, critical_value, rejected }] }`.
+  - C ABI `insight_acf` / `insight_free_acf_result` (`CAcfResult`), `insight_pacf` /
+    `insight_free_pacf_result` (`CPacfResult`) and `insight_adf_test` (`CAdfResult`,
+    `INSIGHT_ADF_NONE` / `_CONSTANT` / `_CONSTANT_TREND`). An optional lag is passed
+    as a pointer, null when not given, so every value -- 0 and negatives included --
+    reaches the range check.
+  - .NET `InsightClient.Acf(data, maxLag?)`, `Pacf(data, maxLag?)` and
+    `AdfTest(data, model, maxLags?, lags?)` with `AcfResult`, `PacfResult`,
+    `AdfResult` / `AdfLevel` and `AdfModel`.
+
+  `max_lag` defaults to `min(⌊10·log₁₀ n⌋, highest)` with `highest` = n − 1 for the
+  ACF and n / 2 − 1 for the PACF; outside `[1, highest]` it is
+  `parameter_out_of_range` with `min` / `max`. The ADF lag options are counts from 0
+  to the most the data leave room for, at most one of the two (both:
+  `invalid_option` about `lags`). A series that does not vary -- or, for the ADF
+  test, a deterministic one -- is `degenerate_data` about `data`.
+
 - `VERSION`: the crate's own version (`CARGO_PKG_VERSION`) as a constant at the
   crate root, so a consumer can report what it was built against without
   reading a lock file -- which names the wrong version once the crate is linked

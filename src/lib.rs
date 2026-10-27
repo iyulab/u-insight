@@ -22,7 +22,7 @@
 //! - [`lof`] — Local Outlier Factor (LOF) density-based anomaly detection
 //! - [`mahalanobis`] — Mahalanobis distance multivariate outlier detection
 //! - [`feature_importance`] — Composite importance, ANOVA F-test, Mutual Information, Permutation Importance
-//! - [`ffi`] — C FFI bindings (32 functions, 20 structs, auto-generated C header via cbindgen)
+//! - [`ffi`] — C FFI bindings (52 functions, 33 structs, auto-generated C header via cbindgen)
 //! - [`error`] — Error types
 //!
 //! ## Quick Start
@@ -69,6 +69,7 @@ pub mod mahalanobis;
 pub mod pca;
 pub mod profiling;
 mod refusal;
+mod time_series;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;

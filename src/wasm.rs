@@ -15,6 +15,9 @@
 //! - `distribution_analysis(data, config)` — Distribution analysis + normality tests
 //! - `regression(data)` — OLS regression (simple or multiple)
 //! - `feature_importance(data)` — Feature importance (permutation / ANOVA / mutual info)
+//! - `estimate_period(data)` / `spectral_residual(data)` — Period and anomaly scoring of a series
+//! - `acf(data)` / `pacf(data)` — (Partial) autocorrelation of a series
+//! - `adf_test(data)` — Augmented Dickey-Fuller unit-root test
 //!
 //! # Input Formats
 //!
@@ -2459,6 +2462,182 @@ pub fn spectral_residual(
     serde_wasm_bindgen::to_value(&dto).map_err(js_err)
 }
 
+#[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+struct AutocorrelationInputDto {
+    data: Vec<f64>,
+    /// Largest lag; absent = `min(⌊10·log₁₀ n⌋, n − 1)` for `acf`, and below
+    /// `n / 2` as well for `pacf` (statsmodels' defaults and limit).
+    #[serde(default)]
+    #[tsify(optional)]
+    #[tsify(type = "number | null")]
+    max_lag: Option<Whole>,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+struct AcfDto {
+    /// Lags 0 to `max_lag`; `acf[0]` is 1.
+    acf: Vec<f64>,
+    /// 95 % white-noise threshold, z / √n.
+    confidence_threshold: f64,
+    /// 95 % limits for lags 1 to `max_lag` by Bartlett's formula.
+    bartlett_limits: Vec<f64>,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+struct PacfDto {
+    /// Lags 1 to `max_lag`.
+    pacf: Vec<f64>,
+    /// 95 % threshold, z / √n.
+    confidence_threshold: f64,
+}
+
+/// Sample autocorrelation of a series for lags 0 to `max_lag` (the biased
+/// estimator), with the 95 % white-noise threshold and Bartlett's 95 % limits
+/// per lag -- the bands an ACF plot draws to choose an MA order.
+///
+/// # Input
+/// `{ data: number[], max_lag?: number | null }` — at least 2 finite values;
+/// `max_lag` a whole number in `[1, n − 1]`, absent = `min(⌊10·log₁₀ n⌋, n − 1)`.
+///
+/// # Output
+/// `{ acf: number[] (lags 0..=max_lag), confidence_threshold, bartlett_limits:
+///    number[] (lags 1..=max_lag) }`
+///
+/// A series that does not vary is `degenerate_data` (`parameter: "data"`).
+#[wasm_bindgen(unchecked_return_type = "AcfDto")]
+pub fn acf(
+    #[wasm_bindgen(unchecked_param_type = "AutocorrelationInputDto")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let req: AutocorrelationInputDto = from_js(data, "data")?;
+    let r = crate::time_series::acf(&req.data, req.max_lag.map(|Whole(k)| k)).map_err(js_err)?;
+    let dto = AcfDto {
+        acf: r.acf,
+        confidence_threshold: r.confidence_threshold,
+        bartlett_limits: r.bartlett_limits,
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
+/// Sample partial autocorrelation of a series for lags 1 to `max_lag`
+/// (Durbin-Levinson on the biased autocorrelation), with the 95 % threshold.
+///
+/// # Input
+/// `{ data: number[], max_lag?: number | null }` — at least 4 finite values;
+/// `max_lag` a whole number in `[1, n / 2 − 1]`, absent =
+/// `min(⌊10·log₁₀ n⌋, n / 2 − 1)`.
+///
+/// # Output
+/// `{ pacf: number[] (lags 1..=max_lag), confidence_threshold }`
+#[wasm_bindgen(unchecked_return_type = "PacfDto")]
+pub fn pacf(
+    #[wasm_bindgen(unchecked_param_type = "AutocorrelationInputDto")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let req: AutocorrelationInputDto = from_js(data, "data")?;
+    let r = crate::time_series::pacf(&req.data, req.max_lag.map(|Whole(k)| k)).map_err(js_err)?;
+    let dto = PacfDto {
+        pacf: r.pacf,
+        confidence_threshold: r.confidence_threshold,
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
+#[derive(Deserialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+struct AdfInputDto {
+    data: Vec<f64>,
+    /// Deterministic terms in the test regression.
+    #[serde(default = "default_adf_model")]
+    #[tsify(optional)]
+    #[tsify(type = "\"none\" | \"constant\" | \"constant_trend\"")]
+    #[cfg_attr(test, schemars(schema_with = "card_schema::adf_model"))]
+    model: String,
+    /// The largest number of lagged differences the AIC search considers;
+    /// absent or `null`: Schwert's rule. Not with `lags`.
+    #[serde(default)]
+    #[tsify(optional)]
+    #[tsify(type = "number | null")]
+    max_lags: Option<Whole>,
+    /// Exactly this many lagged differences, no search. Not with `max_lags`.
+    #[serde(default)]
+    #[tsify(optional)]
+    #[tsify(type = "number | null")]
+    lags: Option<Whole>,
+}
+
+fn default_adf_model() -> String {
+    "constant".to_string()
+}
+
+/// One significance level of the ADF test.
+#[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+struct AdfLevelDto {
+    level: f64,
+    critical_value: f64,
+    /// `statistic <= critical_value`: the unit root is rejected at this level.
+    rejected: bool,
+}
+
+#[derive(Serialize, tsify::Tsify)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+struct AdfDto {
+    statistic: f64,
+    n_lags: usize,
+    n_obs: usize,
+    /// 1 %, 5 % and 10 %, in that order (MacKinnon 2010 response surfaces).
+    levels: Vec<AdfLevelDto>,
+}
+
+/// The augmented Dickey-Fuller unit-root test of a series (H₀: a unit root).
+///
+/// # Input
+/// `{ data: number[], model?: "none" | "constant" | "constant_trend",
+///    max_lags?: number | null, lags?: number | null }` — at least 10 finite
+/// values; `model` defaults to `"constant"`. The number of lagged differences
+/// is chosen by AIC from 0 to `max_lags` (absent: Schwert's rule), or fixed by
+/// `lags` -- give at most one (both: `invalid_option`, `parameter: "lags"`).
+/// Each is a whole number from 0 to the most the data leave room for (at least
+/// 5 regression rows and a residual degree of freedom).
+///
+/// # Output
+/// `{ statistic, n_lags, n_obs, levels: [{ level, critical_value, rejected }] }`
+/// with `levels` at 1 %, 5 % and 10 %.
+#[wasm_bindgen(unchecked_return_type = "AdfDto")]
+pub fn adf_test(
+    #[wasm_bindgen(unchecked_param_type = "AdfInputDto")] data: JsValue,
+) -> Result<JsValue, JsValue> {
+    let req: AdfInputDto = from_js(data, "data")?;
+    let model =
+        named("model", &req.model, &crate::time_series::ADF_MODELS, false).map_err(js_err)?;
+    let r = crate::time_series::adf(
+        &req.data,
+        model,
+        req.max_lags.map(|Whole(p)| p),
+        req.lags.map(|Whole(p)| p),
+    )
+    .map_err(js_err)?;
+    let dto = AdfDto {
+        statistic: r.statistic,
+        n_lags: r.n_lags,
+        n_obs: r.n_obs,
+        levels: [0.01, 0.05, 0.10]
+            .iter()
+            .zip(r.critical_values.iter().zip(r.rejected.iter()))
+            .map(|(&level, (&critical_value, &rejected))| AdfLevelDto {
+                level,
+                critical_value,
+                rejected,
+            })
+            .collect(),
+    };
+    serde_wasm_bindgen::to_value(&dto).map_err(js_err)
+}
+
 // ── Code catalog ─────────────────────────────────────────────────────
 
 /// A refusal reason: the `code` an `Error` carries and the fields that can
@@ -3103,6 +3282,50 @@ mod dto_strictness_tests {
         assert!(feature_analysis(&columns, &names, &FeatureConfig::default()).is_ok());
     }
 
+    /// The time-series requests read their options as whole numbers -- a
+    /// negative one is out of range, not malformed; a fraction is malformed at
+    /// its path -- and refuse unknown keys and unknown models.
+    #[test]
+    fn time_series_requests_read_whole_number_options() {
+        let acf = super::from_json::<super::AutocorrelationInputDto>(
+            json!({ "data": [1, 2, 3], "max_lag": -1 }),
+            "data",
+        )
+        .expect("a whole number reads");
+        assert_eq!(acf.max_lag, Some(super::Whole(-1.0)));
+        let err = super::from_json::<super::AutocorrelationInputDto>(
+            json!({ "data": [1, 2, 3], "max_lag": 1.5 }),
+            "data",
+        )
+        .err()
+        .expect("a fraction");
+        assert_eq!(
+            (err.code(), &err.fields["parameter"]),
+            ("malformed_input", &json!("max_lag"))
+        );
+        assert_rejects_unknown::<super::AutocorrelationInputDto>(json!({
+            "data": [1, 2, 3], "lag": 2
+        }));
+        let adf: super::AdfInputDto =
+            serde_json::from_value(json!({ "data": [1, 2, 3] })).expect("defaults");
+        assert_eq!(adf.model, "constant");
+        assert_eq!((adf.max_lags, adf.lags), (None, None));
+        assert_rejects_unknown::<super::AdfInputDto>(json!({
+            "data": [1, 2, 3], "regression": "c"
+        }));
+        let err = super::named("model", "ct", &crate::time_series::ADF_MODELS, false)
+            .expect_err("unknown model");
+        assert_eq!(
+            err.fields,
+            json!({
+                "code": "unknown_option",
+                "parameter": "model",
+                "got": "ct",
+                "expected": ["none", "constant", "constant_trend"],
+            })
+        );
+    }
+
     #[test]
     fn a_negative_silhouette_label_is_out_of_range_where_it_sits() {
         let labels = super::from_json::<Vec<super::Whole>>(json!([0, -1, 1]), "labels")
@@ -3299,6 +3522,10 @@ mod card_schema {
         names(&super::OUTLIER_METHODS)
     }
 
+    pub(super) fn adf_model(_: &mut SchemaGenerator) -> Schema {
+        names(&crate::time_series::ADF_MODELS)
+    }
+
     pub(super) fn normality_test(_: &mut SchemaGenerator) -> Schema {
         let all = [
             NormalityTest::KolmogorovSmirnov,
@@ -3490,6 +3717,21 @@ mod engine_card_tests {
             "spectral_residual",
             vec![arg("data", s.of::<SpectralResidualInputDto>())],
             s.of::<SpectralResidualDto>(),
+        );
+        s.op(
+            "acf",
+            vec![arg("data", s.of::<AutocorrelationInputDto>())],
+            s.of::<AcfDto>(),
+        );
+        s.op(
+            "pacf",
+            vec![arg("data", s.of::<AutocorrelationInputDto>())],
+            s.of::<PacfDto>(),
+        );
+        s.op(
+            "adf_test",
+            vec![arg("data", s.of::<AdfInputDto>())],
+            s.of::<AdfDto>(),
         );
         s
     }

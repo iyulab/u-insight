@@ -875,6 +875,150 @@
       "performance": {
         "status": "none"
       }
+    },
+    {
+      "id": "acf",
+      "summary": "Sample autocorrelation of a series for lags 0 to max_lag (biased estimator), with the 95 % white-noise threshold and Bartlett's 95 % limits per lag.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/acf.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/acf.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The autocorrelations, the white-noise threshold and Bartlett's limits the operation returns equal the reference's.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0, statsmodels.tsa.stattools.acf(x, nlags=8, fft=False, alpha=0.05) (limits = confint upper - acf); the same values u-analytics checks its acf against",
+            "method": "compares lags 0 to 8 of one series of 24 through the request layer both transports share",
+            "tolerance": "1e-12",
+            "test": "src/time_series.rs::tests::acf_matches_statsmodels"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for one series; the default max_lag and the refusals are covered by unit tests, not compared with the reference."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "pacf",
+      "summary": "Sample partial autocorrelation of a series for lags 1 to max_lag (below n / 2), by Durbin-Levinson on the biased autocorrelation, with the 95 % threshold.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/pacf.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/pacf.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The partial autocorrelations the operation returns equal the reference's Levinson-Durbin (biased) estimate.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15.0, statsmodels.tsa.stattools.pacf(x, nlags=8, method='ldb'); the same values u-analytics checks its pacf against",
+            "method": "compares lags 1 to 8 of one series of 24 through the request layer both transports share",
+            "tolerance": "1e-12",
+            "test": "src/time_series.rs::tests::pacf_matches_statsmodels"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for one series; statsmodels' default method (ywadjusted, denominators n - k) gives different values and is not this estimate."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
+    },
+    {
+      "id": "adf_test",
+      "summary": "The augmented Dickey-Fuller unit-root test of a series (no constant, constant, or constant and trend): the statistic, the lags and observations used, and critical values with the verdict at 1 %, 5 % and 10 %.",
+      "input": {
+        "schema": "schemas/wasm.schema.json#/$defs/adf_test.input",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "output": {
+        "schema": "schemas/wasm.schema.json#/$defs/adf_test.output",
+        "freshness_test": "src/wasm.rs::engine_card_tests::the_schemas_are_generated_from_the_binding_types"
+      },
+      "contract_test": "src/wasm.rs::engine_card_tests::every_export_is_a_card_operation_with_its_arguments",
+      "hints": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": false
+      },
+      "effects": {
+        "filesystem": "none",
+        "network": "none",
+        "clock": "none",
+        "randomness": "none"
+      },
+      "determinism": {
+        "kind": "deterministic",
+        "test": "src/wasm.rs::engine_card_tests::the_crate_reads_no_clock_and_no_unseeded_randomness"
+      },
+      "validation": {
+        "status": "partial",
+        "checks": [
+          {
+            "claim": "The ADF statistic, lag count and observations used match the reference implementation, for each model and for a fixed lag count.",
+            "reference_kind": "reference_implementation",
+            "reference": "statsmodels 0.15 tsa.stattools.adfuller; the same values u-analytics checks its adf_test against",
+            "method": "tests one generated AR(1) series of 120 under five model and lag settings through the request layer both transports share",
+            "tolerance": "statistic 1e-8; lags and observations exact",
+            "test": "src/time_series.rs::tests::adf_matches_statsmodels"
+          }
+        ],
+        "limits": [
+          "Checked against the reference above for one series; the critical values come from MacKinnon's (2010) response surfaces in u-analytics and are not compared here."
+        ]
+      },
+      "performance": {
+        "status": "none"
+      }
     }
   ]
 }

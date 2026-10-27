@@ -984,6 +984,128 @@ public sealed class InsightClient : IDisposable
     }
 
     /// <summary>
+    /// Sample autocorrelation of a series for lags 0 to <paramref name="maxLag"/> (the
+    /// biased estimator), with the 95% white-noise threshold and Bartlett's 95% limits
+    /// per lag — the bands an ACF plot draws to choose an MA order.
+    /// </summary>
+    /// <param name="data">Univariate series, at least 2 finite values.</param>
+    /// <param name="maxLag">
+    /// Largest lag, in [1, n − 1]; <c>null</c> for min(⌊10·log₁₀ n⌋, n − 1). Outside the
+    /// range: <c>parameter_out_of_range</c> with <c>min</c> / <c>max</c>. A series that
+    /// does not vary is <c>degenerate_data</c>.
+    /// </param>
+    public AcfResult Acf(double[] data, int? maxLag = null)
+    {
+        var native = new NativeStructs.CAcfResult();
+        unsafe
+        {
+            var lag = maxLag.GetValueOrDefault();
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_acf(
+                    ptr, (uint)data.Length, maxLag.HasValue ? &lag : null, ref native));
+            }
+        }
+
+        try
+        {
+            return new AcfResult
+            {
+                Acf = CopyF64Array(native.Acf, native.MaxLag + 1),
+                ConfidenceThreshold = native.ConfidenceThreshold,
+                BartlettLimits = CopyF64Array(native.BartlettLimits, native.MaxLag),
+            };
+        }
+        finally
+        {
+            Native.insight_free_acf_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// Sample partial autocorrelation of a series for lags 1 to <paramref name="maxLag"/>
+    /// (Durbin-Levinson on the biased autocorrelation), with the 95% threshold.
+    /// </summary>
+    /// <param name="data">Univariate series, at least 4 finite values.</param>
+    /// <param name="maxLag">
+    /// Largest lag, in [1, n / 2 − 1]; <c>null</c> for min(⌊10·log₁₀ n⌋, n / 2 − 1).
+    /// </param>
+    public PacfResult Pacf(double[] data, int? maxLag = null)
+    {
+        var native = new NativeStructs.CPacfResult();
+        unsafe
+        {
+            var lag = maxLag.GetValueOrDefault();
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_pacf(
+                    ptr, (uint)data.Length, maxLag.HasValue ? &lag : null, ref native));
+            }
+        }
+
+        try
+        {
+            return new PacfResult
+            {
+                Pacf = CopyF64Array(native.Pacf, native.MaxLag),
+                ConfidenceThreshold = native.ConfidenceThreshold,
+            };
+        }
+        finally
+        {
+            Native.insight_free_pacf_result(ref native);
+        }
+    }
+
+    /// <summary>
+    /// The augmented Dickey-Fuller unit-root test of a series (H0: a unit root). The
+    /// number of lagged differences is chosen by AIC from 0 to <paramref name="maxLags"/>
+    /// (<c>null</c>: Schwert's rule), or fixed at <paramref name="lags"/> — give at most
+    /// one (both: <c>invalid_option</c> about <c>lags</c>).
+    /// </summary>
+    /// <param name="data">Univariate series, at least 10 finite values.</param>
+    /// <param name="model">Deterministic terms in the test regression.</param>
+    /// <param name="maxLags">
+    /// Largest lag count the AIC search considers, from 0 to the most the data leave room
+    /// for (at least 5 regression rows and a residual degree of freedom).
+    /// </param>
+    /// <param name="lags">Exactly this many lagged differences, no search; same range.</param>
+    public AdfResult AdfTest(
+        double[] data,
+        AdfModel model = AdfModel.Constant,
+        int? maxLags = null,
+        int? lags = null)
+    {
+        var native = new NativeStructs.CAdfResult();
+        unsafe
+        {
+            var max = maxLags.GetValueOrDefault();
+            var fixedLags = lags.GetValueOrDefault();
+            fixed (double* ptr = data)
+            {
+                Native.ThrowIfFailed(Native.insight_adf_test(
+                    ptr, (uint)data.Length, (uint)model,
+                    maxLags.HasValue ? &max : null,
+                    lags.HasValue ? &fixedLags : null,
+                    ref native));
+            }
+        }
+
+        return new AdfResult
+        {
+            Statistic = native.Statistic,
+            NLags = native.NLags,
+            NObs = native.NObs,
+            Levels =
+            [
+                new AdfLevel { Level = 0.01, CriticalValue = native.CriticalValue1, Rejected = native.Rejected1 != 0 },
+                new AdfLevel { Level = 0.05, CriticalValue = native.CriticalValue5, Rejected = native.Rejected5 != 0 },
+                new AdfLevel { Level = 0.10, CriticalValue = native.CriticalValue10, Rejected = native.Rejected10 != 0 },
+            ],
+        };
+    }
+
+    /// <summary>
     /// Detect changepoints in multivariate (multi-channel) time-series data using PELT.
     /// </summary>
     /// <param name="data">
@@ -1617,6 +1739,67 @@ public class SpectralResidualResult
     public SrPoint[] Points { get; init; } = [];
     /// <summary>Indices of the points flagged as anomalies.</summary>
     public uint[] Anomalies { get; init; } = [];
+}
+
+/// <summary>Result of <see cref="InsightClient.Acf"/>.</summary>
+public class AcfResult
+{
+    /// <summary>Autocorrelations for lags 0 to the largest lag; <c>Acf[0]</c> is 1.</summary>
+    public double[] Acf { get; init; } = [];
+    /// <summary>95% white-noise threshold, z / sqrt(n).</summary>
+    public double ConfidenceThreshold { get; init; }
+    /// <summary>
+    /// 95% limits for lags 1 to the largest lag by Bartlett's formula: for lag k, under the
+    /// hypothesis that the autocorrelation is zero beyond lag k − 1 (an MA(k − 1) process).
+    /// </summary>
+    public double[] BartlettLimits { get; init; } = [];
+}
+
+/// <summary>Result of <see cref="InsightClient.Pacf"/>.</summary>
+public class PacfResult
+{
+    /// <summary>Partial autocorrelations for lags 1 to the largest lag.</summary>
+    public double[] Pacf { get; init; } = [];
+    /// <summary>95% threshold, z / sqrt(n).</summary>
+    public double ConfidenceThreshold { get; init; }
+}
+
+/// <summary>
+/// Deterministic terms of the ADF test regression. Numeric values match the native
+/// <c>INSIGHT_ADF_*</c> constants.
+/// </summary>
+public enum AdfModel : uint
+{
+    /// <summary>No constant, no trend.</summary>
+    None = 0,
+    /// <summary>A constant (the usual choice).</summary>
+    Constant = 1,
+    /// <summary>A constant and a linear trend.</summary>
+    ConstantTrend = 2,
+}
+
+/// <summary>One significance level of <see cref="InsightClient.AdfTest"/>.</summary>
+public class AdfLevel
+{
+    /// <summary>Significance level: 0.01, 0.05 or 0.10.</summary>
+    public double Level { get; init; }
+    /// <summary>Critical value at that level (MacKinnon 2010 response surfaces).</summary>
+    public double CriticalValue { get; init; }
+    /// <summary>Statistic &lt;= critical value: the unit root is rejected at this level.</summary>
+    public bool Rejected { get; init; }
+}
+
+/// <summary>Result of <see cref="InsightClient.AdfTest"/>.</summary>
+public class AdfResult
+{
+    /// <summary>ADF statistic (t-ratio of the lagged level).</summary>
+    public double Statistic { get; init; }
+    /// <summary>Lagged differences in the regression.</summary>
+    public uint NLags { get; init; }
+    /// <summary>Observations the regression used.</summary>
+    public uint NObs { get; init; }
+    /// <summary>1%, 5% and 10%, in that order.</summary>
+    public AdfLevel[] Levels { get; init; } = [];
 }
 
 /// <summary>Mann-Kendall trend test result.</summary>

@@ -260,6 +260,29 @@ internal static partial class NativeLibrary
         ref NativeStructs.CSpectralResidualResult result);
 
     [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_acf(
+        double* data, uint n, int* maxLag,
+        ref NativeStructs.CAcfResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_acf_result(
+        ref NativeStructs.CAcfResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_pacf(
+        double* data, uint n, int* maxLag,
+        ref NativeStructs.CPacfResult result);
+
+    [LibraryImport(LibraryName)]
+    public static partial void insight_free_pacf_result(
+        ref NativeStructs.CPacfResult result);
+
+    [LibraryImport(LibraryName)]
+    public static unsafe partial int insight_adf_test(
+        double* data, uint n, uint model, int* maxLags, int* lags,
+        ref NativeStructs.CAdfResult result);
+
+    [LibraryImport(LibraryName)]
     public static unsafe partial int insight_mann_kendall(
         double* data, uint n,
         ref NativeStructs.CMannKendallResult result);

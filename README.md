@@ -9,6 +9,12 @@ A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
 ## What's New (unreleased)
 
+- **Autocorrelation, partial autocorrelation and the augmented Dickey-Fuller
+  test** on every surface: WASM `acf` / `pacf` / `adf_test`, C ABI
+  `insight_acf` / `insight_pacf` / `insight_adf_test`, and .NET
+  `Acf` / `Pacf` / `AdfTest` — with Bartlett's limits per lag beside the
+  white-noise threshold, and the same lag defaults, ranges and refusals on
+  every surface.
 - **SPC control charts, process capability, sigma ↔ PPM and Weibull reliability
   are no longer in the C ABI or in `UInsight`.** They are the `u-analytics`
   crate's own surface, carried to .NET by `UAnalytics` and to JavaScript by
@@ -117,7 +123,7 @@ Built on `u-analytics` (statistical algorithms), `u-numflow` (math primitives).
 
 | Module | Description |
 |--------|-------------|
-| `ffi` | C FFI bindings — 46 functions, 30 `#[repr(C)]` structs, auto-generated C header via cbindgen |
+| `ffi` | C FFI bindings — 52 functions, 33 `#[repr(C)]` structs, auto-generated C header via cbindgen |
 
 ## Quick Start
 
@@ -232,6 +238,11 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 | `insight_free_period_estimate` | Frees the candidates of a `CPeriodEstimate` |
 | `insight_spectral_residual` | Spectral residual anomaly scoring (Ren et al. 2019); null options = paper defaults |
 | `insight_free_spectral_residual_result` | Frees the points of a `CSpectralResidualResult` |
+| `insight_acf` | Sample autocorrelation, white-noise threshold and Bartlett's limits; `max_lag` a pointer, null = `min(⌊10·log₁₀ n⌋, n − 1)` |
+| `insight_free_acf_result` | Frees the arrays of a `CAcfResult` |
+| `insight_pacf` | Sample partial autocorrelation (Durbin-Levinson); `max_lag` null = default, lags below `n / 2` |
+| `insight_free_pacf_result` | Frees the array of a `CPacfResult` |
+| `insight_adf_test` | Augmented Dickey-Fuller test; `model` `INSIGHT_ADF_NONE` / `_CONSTANT` / `_CONSTANT_TREND`, `max_lags` / `lags` pointers (null = not given, at most one) |
 
 ### Trend & Density Estimation
 
@@ -318,7 +329,7 @@ The binding is in `bindings/csharp/UInsight/` with:
 474 lib tests + 53 doc-tests = 527 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
-C header: auto-generated via cbindgen (40 structs, 73 functions)
+C header: auto-generated via cbindgen (33 structs, 52 functions)
 ```
 
 ## Scope & Non-Goals
@@ -652,6 +663,72 @@ replaced by their neighbours and `lower`/`upper` the band of `sensitivity`
 percent coverage around it — chart information; the anomaly decision is the
 `score` against `threshold`, gated by `min_zscore` against the level of the
 window before the point.
+
+#### `acf(data) -> AcfResult`
+
+Sample autocorrelation for lags 0 to `max_lag` (the biased estimator), with the
+95 % white-noise threshold `z / √n` and Bartlett's 95 % limits per lag — for lag
+k, under the hypothesis that the autocorrelation is zero beyond lag k − 1 (the
+bands an ACF plot draws to choose an MA order). At least 2 finite values.
+
+**Input:** `{ "data": number[], "max_lag"?: number | null }` — `max_lag` a whole
+number in `[1, n − 1]`; absent or `null` = `min(⌊10·log₁₀ n⌋, n − 1)`.
+
+**Output:**
+```json
+{ "acf": [1, 0.49, -0.36], "confidence_threshold": 0.4, "bartlett_limits": [0.4, 0.49] }
+// `acf` has lags 0..=max_lag, `bartlett_limits` lags 1..=max_lag.
+```
+
+A `max_lag` outside its range is `parameter_out_of_range` (`parameter: "max_lag"`,
+`min: 1`, `max: n − 1`, `got`); a series that does not vary is `degenerate_data`
+(`parameter: "data"`); fewer than 2 values `insufficient_data`.
+
+#### `pacf(data) -> PacfResult`
+
+Sample partial autocorrelation for lags 1 to `max_lag` — Durbin-Levinson on the
+biased autocorrelation — with the 95 % threshold `z / √n`. At least 4 finite
+values.
+
+**Input:** `{ "data": number[], "max_lag"?: number | null }` — `max_lag` a whole
+number in `[1, n / 2 − 1]` (beyond `n / 2` the recursion runs on
+autocorrelations from too few pairs); absent = `min(⌊10·log₁₀ n⌋, n / 2 − 1)`.
+
+**Output:** `{ "pacf": number[] /* lags 1..=max_lag */, "confidence_threshold": number }`
+
+Refusals as `acf`.
+
+#### `adf_test(data) -> AdfResult`
+
+Augmented Dickey-Fuller unit-root test (H₀: a unit root). At least 10 finite
+values.
+
+**Input:**
+```json
+{ "data": [/* ... */], "model": "constant", "max_lags": null, "lags": null }
+```
+
+- `model`: `"none"` | `"constant"` (default) | `"constant_trend"` — the
+  deterministic terms of the test regression; another name is `unknown_option`.
+- `max_lags`: the largest number of lagged differences the AIC search considers;
+  absent or `null` = Schwert's rule `⌊12·(n/100)^¼⌋`.
+- `lags`: exactly this many lagged differences, no search.
+
+Give at most one of `max_lags` and `lags` (both: `invalid_option`,
+`parameter: "lags"`). Each is a whole number from 0 to the most the data leave
+room for — at least 5 regression rows and a residual degree of freedom —
+refused outside as `parameter_out_of_range` with `min: 0` and that `max`. A
+deterministic series (an exact fit of the differences) is `degenerate_data`.
+
+**Output:**
+```json
+{ "statistic": -3.44, "n_lags": 5, "n_obs": 114,
+  "levels": [{ "level": 0.01, "critical_value": -3.49, "rejected": false },
+             { "level": 0.05, "critical_value": -2.89, "rejected": true },
+             { "level": 0.10, "critical_value": -2.58, "rejected": true }] }
+// Critical values from MacKinnon's (2010) response surfaces;
+// `rejected` = statistic <= critical_value.
+```
 
 ## npm (WebAssembly)
 
