@@ -1026,8 +1026,11 @@ impl std::fmt::Display for DiagnosticFlag {
 pub struct FlagThresholds {
     /// Missing rate threshold (%). Default: 50.0.
     pub high_missing_pct: f64,
-    /// Near-zero variance threshold. Default: 1e-10.
-    pub zero_variance_threshold: f64,
+    /// Near-zero variation threshold on the **relative** standard deviation,
+    /// `sd / sqrt(mean² + sd²)` (the standard deviation next to the root mean
+    /// square of the values), so the same column in another unit gets the same
+    /// flag. Default: 1e-5.
+    pub relative_std_threshold: f64,
     /// Extreme skewness threshold. Default: 10.0.
     pub extreme_skewness: f64,
     /// Extreme kurtosis threshold. Default: 100.0.
@@ -1042,7 +1045,7 @@ impl Default for FlagThresholds {
     fn default() -> Self {
         Self {
             high_missing_pct: 50.0,
-            zero_variance_threshold: 1e-10,
+            relative_std_threshold: 1e-5,
             extreme_skewness: 10.0,
             extreme_kurtosis: 100.0,
             high_cardinality: 100,
@@ -1075,10 +1078,9 @@ pub fn compute_flags(profile: &ColumnProfile, thresholds: &FlagThresholds) -> Ve
     if let Some(np) = &profile.numeric {
         if np.valid_count > 0 && np.distinct_count <= 1 {
             flags.push(DiagnosticFlag::ConstantColumn);
-        } else if np
-            .std_dev
-            .is_some_and(|sd| sd < thresholds.zero_variance_threshold)
-        {
+        } else if np.std_dev.zip(np.mean).is_some_and(|(sd, mean)| {
+            sd <= thresholds.relative_std_threshold * (mean * mean + sd * sd).sqrt()
+        }) {
             flags.push(DiagnosticFlag::ZeroVariance);
         }
 
@@ -1568,6 +1570,25 @@ mod tests {
     }
 
     // ── Diagnostic flags ─────────────────────────────────────────
+
+    /// The near-zero-variation flag is judged against the column's own size:
+    /// a varying column in a small unit is not flagged, a column that barely
+    /// moves next to its values is, in any unit.
+    #[test]
+    fn zero_variance_flag_is_the_same_in_any_unit() {
+        let flagged = |data: &[f64], scale: f64| {
+            let v: Vec<f64> = data.iter().map(|x| x * scale).collect();
+            let col = Column::numeric(v, ValidityBitmap::all_valid(data.len()));
+            compute_flags(&profile_column("x", &col), &FlagThresholds::default())
+                .contains(&DiagnosticFlag::ZeroVariance)
+        };
+        let varying = [1.0, 2.0, 3.0, 4.0];
+        let still = [1000.0, 1000.0 + 1e-6, 1000.0 - 1e-6, 1000.0];
+        for scale in [1e-12, 1.0, 1e12] {
+            assert!(!flagged(&varying, scale), "varying at ×{scale}");
+            assert!(flagged(&still, scale), "near-constant at ×{scale}");
+        }
+    }
 
     #[test]
     fn flag_constant_numeric() {

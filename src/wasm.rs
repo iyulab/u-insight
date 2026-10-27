@@ -3071,8 +3071,8 @@ mod dto_strictness_tests {
                 json!({ "parameter": "alpha", "exclusive_min": 0.0, "exclusive_max": 1.0, "got": 0.0 }),
             ),
             (
-                features(FeatureConfig::default().variance_threshold(-1.0)),
-                json!({ "parameter": "variance_threshold", "min": 0.0, "got": -1.0 }),
+                features(FeatureConfig::default().relative_variance_threshold(-1.0)),
+                json!({ "parameter": "relative_variance_threshold", "min": 0.0, "got": -1.0 }),
             ),
             (
                 features(FeatureConfig::default().correlation_threshold(1.2)),

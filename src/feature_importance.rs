@@ -36,9 +36,14 @@ use u_numflow::matrix::Matrix;
 /// Configuration for feature importance analysis.
 #[derive(Debug, Clone)]
 pub struct FeatureConfig {
-    /// Minimum variance threshold, a finite number `>= 0`. Features with
-    /// variance below this are flagged as low-variance. Default: 1e-10.
-    pub variance_threshold: f64,
+    /// Low-variance threshold on the **relative variance** — the share of a
+    /// feature's sum of squares that is variation about its mean,
+    /// `Σ(x − x̄)² / Σx²`, in [0, 1] — a finite number `>= 0`. A feature at or
+    /// below it is flagged as low-variance: its spread is negligible next to
+    /// its values (the default 1e-10 is a standard deviation below 1e-5 of the
+    /// root mean square). Relative, so the same data in another unit is judged
+    /// the same; 0 flags constant features only. Default: 1e-10.
+    pub relative_variance_threshold: f64,
     /// Correlation threshold for flagging highly correlated pairs (|r| above
     /// it), in [0, 1]. Default: 0.9.
     pub correlation_threshold: f64,
@@ -51,7 +56,7 @@ pub struct FeatureConfig {
 impl Default for FeatureConfig {
     fn default() -> Self {
         Self {
-            variance_threshold: 1e-10,
+            relative_variance_threshold: 1e-10,
             correlation_threshold: 0.9,
             vif_threshold: 10.0,
         }
@@ -59,9 +64,9 @@ impl Default for FeatureConfig {
 }
 
 impl FeatureConfig {
-    /// Sets the variance threshold.
-    pub fn variance_threshold(mut self, t: f64) -> Self {
-        self.variance_threshold = t;
+    /// Sets the relative variance threshold.
+    pub fn relative_variance_threshold(mut self, t: f64) -> Self {
+        self.relative_variance_threshold = t;
         self
     }
 
@@ -89,6 +94,8 @@ pub struct LowVarianceFeature {
     pub index: usize,
     /// Computed variance.
     pub variance: f64,
+    /// Its relative variance, `Σ(x − x̄)² / Σx²` — what the threshold judges.
+    pub relative_variance: f64,
 }
 
 /// A pair of features with high correlation.
@@ -185,8 +192,8 @@ pub fn feature_analysis(
     // A variance is never negative: a threshold below 0 flags nothing, and
     // one that is not finite flags everything or nothing.
     InsightError::check_range(
-        "variance_threshold",
-        config.variance_threshold,
+        "relative_variance_threshold",
+        config.relative_variance_threshold,
         Bound::Closed(0.0),
         Bound::Unbounded,
     )?;
@@ -231,17 +238,21 @@ pub fn feature_analysis(
         }
     }
 
-    // Step 1: Compute variances
+    // Step 1: Compute variances, and each one relative to its feature's size
     let variances: Vec<f64> = features.iter().map(|f| compute_variance(f)).collect();
-
-    let low_variance: Vec<LowVarianceFeature> = variances
+    let relative: Vec<f64> = features.iter().map(|f| relative_variance(f)).collect();
+    let low: Vec<bool> = relative
         .iter()
-        .enumerate()
-        .filter(|(_, &v)| v < config.variance_threshold)
-        .map(|(i, &v)| LowVarianceFeature {
+        .map(|&r| r <= config.relative_variance_threshold)
+        .collect();
+
+    let low_variance: Vec<LowVarianceFeature> = (0..p)
+        .filter(|&i| low[i])
+        .map(|i| LowVarianceFeature {
             name: names[i].clone(),
             index: i,
-            variance: v,
+            variance: variances[i],
+            relative_variance: relative[i],
         })
         .collect();
 
@@ -256,7 +267,7 @@ pub fn feature_analysis(
     for i in 0..p {
         correlation_matrix[i][i] = 1.0;
         for j in (i + 1)..p {
-            let r = if stds[i] > 1e-15 && stds[j] > 1e-15 {
+            let r = if relative[i] > NO_VARIATION && relative[j] > NO_VARIATION {
                 let cov: f64 = features[i]
                     .iter()
                     .zip(features[j].iter())
@@ -327,7 +338,7 @@ pub fn feature_analysis(
         .map(|i| {
             // Importance = high variance × (low correlation + low VIF) / 2
             // Zero-variance features get importance = 0.
-            let has_variance = variances[i] > config.variance_threshold;
+            let has_variance = !low[i];
             let corr_score = 1.0 - max_abs_correlations[i].min(1.0);
             let vif_score = if vifs[i].is_finite() && vifs[i] > 0.0 {
                 (1.0 / vifs[i]).min(1.0)
@@ -369,6 +380,23 @@ pub fn feature_analysis(
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────
+
+/// At or below this relative variance a feature has no variation beyond the
+/// rounding of its mean — the same floor `r_squared` applies to a target.
+const NO_VARIATION: f64 = 1e-20;
+
+/// `Σ(x − x̄)² / Σx²`: the share of the sum of squares that is variation about
+/// the mean, in [0, 1] and the same in any unit. 0 for an all-zero feature.
+fn relative_variance(data: &[f64]) -> f64 {
+    let n = data.len() as f64;
+    let mean = data.iter().sum::<f64>() / n;
+    let total: f64 = data.iter().map(|x| x * x).sum();
+    if total == 0.0 {
+        return 0.0;
+    }
+    let about_mean: f64 = data.iter().map(|x| (x - mean) * (x - mean)).sum();
+    (about_mean / total).min(1.0)
+}
 
 fn compute_variance(data: &[f64]) -> f64 {
     let n = data.len();
@@ -801,11 +829,50 @@ mod tests {
             vec![1.0, 1.001, 1.002, 1.003], // very low variance
             vec![1.0, 2.0, 3.0, 4.0],
         ];
-        let config = FeatureConfig::default().variance_threshold(0.01);
+        let config = FeatureConfig::default().relative_variance_threshold(0.01);
         let result = feature_analysis(&features, &names(&["low", "high"]), &config).unwrap();
 
         assert_eq!(result.low_variance.len(), 1);
         assert_eq!(result.low_variance[0].name, "low");
+    }
+
+    /// The low-variance judgement does not depend on the unit: the same
+    /// columns at 1e-9, 1 and 1e9 flag the same features, and a column whose
+    /// spread is negligible next to its values is flagged in every unit.
+    #[test]
+    fn low_variance_is_the_same_in_any_unit() {
+        let base = [
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0],
+            vec![5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+            vec![1000.0, 1000.0 + 1e-6, 1000.0, 1000.0 - 1e-6, 1000.0, 1000.0],
+        ];
+        let names = names(&["a", "b", "constant", "near_constant"]);
+        let flagged = |scale: f64| {
+            let features: Vec<Vec<f64>> = base
+                .iter()
+                .map(|f| f.iter().map(|v| v * scale).collect())
+                .collect();
+            let r = feature_analysis(&features, &names, &FeatureConfig::default()).unwrap();
+            let low: Vec<String> = r.low_variance.iter().map(|f| f.name.clone()).collect();
+            let corr = r
+                .feature_scores
+                .iter()
+                .find(|f| f.name == "a")
+                .unwrap()
+                .max_abs_correlation;
+            (low, corr)
+        };
+        let (low, corr) = flagged(1.0);
+        assert_eq!(low, ["constant", "near_constant"]);
+        for scale in [1e-9, 1e9] {
+            let (l, c) = flagged(scale);
+            assert_eq!(l, low, "at ×{scale}");
+            assert!(
+                (c - corr).abs() < 1e-9,
+                "correlation at ×{scale}: {c} vs {corr}"
+            );
+        }
     }
 
     // ── Correlation filter ────────────────────────────────────────

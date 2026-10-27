@@ -8,6 +8,27 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- `feature_analysis` flagged low-variance features against a fixed variance
+  (1e-10), so every column of data recorded in a small unit was flagged and the
+  same columns a billion times larger were not (4 against 0 on one dataset). The
+  judgement is now on the relative variance `Σ(x − x̄)² / Σx²` -- the share of the
+  feature's sum of squares that is spread about its mean -- and gives the same
+  answer in any unit. The correlation step's "no variation" test (a standard
+  deviation above 1e-15) is relative in the same way. The C ABI's
+  `n_low_variance` (.NET `NLowVariance`) follows.
+- `compute_flags` raised `ZeroVariance` on an absolute standard deviation below
+  1e-10; it now compares the standard deviation with the column's root mean
+  square (`relative_std_threshold`, default 1e-5).
+
+### Changed
+
+- **Breaking** (Rust): `FeatureConfig::variance_threshold` is
+  `relative_variance_threshold` (the same default number, now relative), and
+  `LowVarianceFeature` gains `relative_variance`. `FlagThresholds::
+  zero_variance_threshold` is `relative_std_threshold`.
+
 ## [0.36.2] - 2026-10-20
 
 Depends on u-numflow 0.15 and u-analytics 0.27.2.
