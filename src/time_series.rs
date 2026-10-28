@@ -16,6 +16,7 @@ use u_analytics::error::TimeSeriesError;
 use u_analytics::testing::{AdfLags, AdfModel, AdfResult, KpssLags, KpssModel, KpssResult};
 
 use crate::error::{Bound, InsightError};
+use std::ops::RangeInclusive;
 
 /// `adf_test`'s `model` names, in the order of the C ABI's `INSIGHT_ADF_*`.
 pub(crate) const ADF_MODELS: [(&str, AdfModel); 3] = [
@@ -60,62 +61,56 @@ impl From<TimeSeriesError> for InsightError {
                     reason: error.to_string(),
                 }
             }
-            // A reason this crate does not know yet is still a refusal of the data.
-            _ => InsightError::DegenerateData {
-                parameter: Some("data".into()),
-                reason: error.to_string(),
+            // A reason this crate does not map yet: say so rather than guess
+            // which refusal it is -- the mapping is what to extend.
+            _ => InsightError::ComputationFailed {
+                operation: "time series".into(),
+                detail: error.to_string(),
             },
         }
     }
 }
 
 /// A count option of a time-series statistic, a whole number already read,
-/// whose domain the statistic states and which depends on the data.
+/// judged against the domain the statistic states for the data (`domain` --
+/// the data's own refusal, if it has one, or the option's values).
 ///
 /// The value is read as sent -- negative, or past what a count holds -- so it
-/// is judged here, against the domain the statistic itself reports: asked
-/// with a value it refuses (`usize::MAX`), it answers with the data's
-/// refusal, if the data has one, or the option's domain. Judging the option
-/// before the statistic runs keeps the data's refusals ahead of the
-/// option's, and the option's ahead of a combination of options this crate
-/// refuses (`lags` with `max_lags`).
-fn series_count<T>(
+/// is judged here rather than by the statistic. Judging it before the
+/// statistic runs keeps the data's refusals ahead of the option's, and the
+/// option's ahead of a combination of options this crate refuses (`lags`
+/// with `max_lags`).
+fn series_count(
     option: &'static str,
     value: Option<f64>,
-    probe: impl FnOnce(usize) -> Result<T, TimeSeriesError>,
+    domain: impl FnOnce() -> Result<RangeInclusive<usize>, TimeSeriesError>,
 ) -> Result<Option<usize>, InsightError> {
     let Some(v) = value else {
         return Ok(None);
     };
-    match probe(usize::MAX) {
-        Err(TimeSeriesError::OptionOutOfRange {
-            option: o,
-            min,
-            max,
-            ..
-        }) if o == option => {
-            InsightError::check_range(option, v, Bound::Closed(min), Bound::Closed(max))?;
-            Ok(Some(v as usize))
-        }
-        Err(other) => Err(other.into()),
-        // No count is refused by no domain: the value stands.
-        Ok(_) => Ok(Some(v as usize)),
-    }
+    let domain = domain()?;
+    InsightError::check_range(
+        option,
+        v,
+        Bound::Closed(*domain.start() as f64),
+        Bound::Closed(*domain.end() as f64),
+    )?;
+    Ok(Some(v as usize))
 }
 
 /// Sample autocorrelation for lags 0 to `max_lag` (a whole number, already
 /// read; `None` = statsmodels' default).
 pub(crate) fn acf(data: &[f64], max_lag: Option<f64>) -> Result<AcfResult, InsightError> {
-    let lag = series_count("max_lag", max_lag, |k| {
-        u_analytics::correlation::acf(data, Some(k))
+    let lag = series_count("max_lag", max_lag, || {
+        u_analytics::correlation::acf_max_lag_domain(data)
     })?;
     Ok(u_analytics::correlation::acf(data, lag)?)
 }
 
 /// Sample partial autocorrelation for lags 1 to `max_lag` (below `n / 2`).
 pub(crate) fn pacf(data: &[f64], max_lag: Option<f64>) -> Result<PacfResult, InsightError> {
-    let lag = series_count("max_lag", max_lag, |k| {
-        u_analytics::correlation::pacf(data, Some(k))
+    let lag = series_count("max_lag", max_lag, || {
+        u_analytics::correlation::pacf_max_lag_domain(data)
     })?;
     Ok(u_analytics::correlation::pacf(data, lag)?)
 }
@@ -131,8 +126,9 @@ pub(crate) fn adf(
     lags: Option<f64>,
 ) -> Result<AdfResult, InsightError> {
     let run = |lags| u_analytics::testing::adf_test(data, model, lags);
-    let max_lags = series_count("max_lags", max_lags, |m| run(AdfLags::Aic { max: Some(m) }))?;
-    let lags = series_count("lags", lags, |p| run(AdfLags::Fixed(p)))?;
+    let domain = || u_analytics::testing::adf_lags_domain(data, model);
+    let max_lags = series_count("max_lags", max_lags, domain)?;
+    let lags = series_count("lags", lags, domain)?;
     let lags = match (max_lags, lags) {
         (Some(_), Some(_)) => {
             return Err(InsightError::InvalidParameter {
@@ -159,7 +155,9 @@ pub(crate) fn kpss(
     lags: Option<f64>,
 ) -> Result<KpssResult, InsightError> {
     let run = |lags| u_analytics::testing::kpss_test(data, model, lags);
-    let fixed = series_count("lags", lags, |l| run(KpssLags::Fixed(l)))?;
+    let fixed = series_count("lags", lags, || {
+        u_analytics::testing::kpss_lags_domain(data)
+    })?;
     let lags = match (lag_rule, fixed) {
         (Some(_), Some(_)) => {
             return Err(InsightError::InvalidParameter {
