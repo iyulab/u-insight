@@ -28,7 +28,7 @@ categories = ["algorithms", "science"]
 wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde-wasm-bindgen", "dep:serde", "dep:tsify", "dep:serde_path_to_error"]
 
 [dependencies]
-u-analytics = "0.29"
+u-analytics = "0.30"
 u-numflow = "0.15"
 serde_json = "1"
 wasm-bindgen = { version = "0.2", optional = true }

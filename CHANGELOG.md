@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- Depends on u-analytics 0.30.
+
 ## [0.38.0] - 2026-10-28
 
 Depends on u-numflow 0.15 and u-analytics 0.29.0.
