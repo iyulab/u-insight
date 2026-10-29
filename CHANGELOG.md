@@ -16,6 +16,9 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   approximation without the tied-group cross terms.
 - Spectral residual anomaly scores no longer change with the unit of the series (through
   u-analytics); the amplitude floor is relative to the spectrum's peak.
+- Change detection with the default BIC penalty and the L2 cost finds the same changepoints in
+  any unit of the series (through u-analytics): the penalty carries the noise variance estimated
+  from the data. A numeric penalty is unchanged and is in data units squared for L2.
 
 ## [0.38.0] - 2026-10-28
 
