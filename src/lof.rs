@@ -195,10 +195,14 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
         let k_dist = dists[k - 1].1;
         k_distances[i] = k_dist;
 
-        // Include all neighbors at distance ≤ k-distance (handles ties)
+        // Include all neighbors at distance ≤ k-distance (handles ties). Two
+        // distances are tied when they agree to rounding *in proportion to
+        // their size*: a fixed tolerance is nothing for lengths near 1e9 and
+        // more than every distance for lengths near 1e-15.
+        let tied = k_dist * (1.0 + 1e-12);
         k_neighbors[i] = dists
             .iter()
-            .take_while(|(_, d)| *d <= k_dist + 1e-15)
+            .take_while(|(_, d)| *d <= tied)
             .map(|(j, _)| *j)
             .collect();
 

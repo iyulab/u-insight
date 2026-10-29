@@ -153,3 +153,48 @@ fn univariate_outlier_tests_do_not_depend_on_the_unit() {
         }
     }
 }
+
+/// Points on a lattice have many neighbours at exactly the same distance;
+/// whether two distances are "the same" must not depend on the unit they are
+/// written in (a tie tolerance of a fixed size is nothing for lengths near 1e9
+/// and everything for lengths near 1e-15).
+#[test]
+fn lof_scores_do_not_depend_on_the_unit() {
+    use u_insight::lof::{lof, LofConfig};
+
+    let mut data: Vec<Vec<f64>> = (0..6)
+        .flat_map(|x| (0..6).map(move |y| vec![x as f64, y as f64]))
+        .collect();
+    data.push(vec![9.0, 9.5]);
+    data.push(vec![-3.0, 4.0]);
+    // A ring of points all at distance 5 from (20, 20) -- ties reached by
+    // different sums of squares -- and one a hair beyond them: a tie only if
+    // the tolerance is as large as that hair in the unit used.
+    for (dx, dy) in [
+        (5.0, 0.0),
+        (3.0, 4.0),
+        (4.0, 3.0),
+        (0.0, 5.0),
+        (-3.0, 4.0),
+        (-5.0, 0.0),
+    ] {
+        data.push(vec![20.0 + dx, 20.0 + dy]);
+    }
+    data.push(vec![20.0, 20.0]);
+    data.push(vec![20.0 - 5.0 - 4e-7, 20.0]);
+    let config = LofConfig::default().k(5);
+    let reference = lof(&data, &config).expect("valid");
+    for factor in [1e-14, 1e-9, 1e-6, 1e6, 1e9, 1e12] {
+        let other = lof(&scaled(&data, factor), &config).expect("valid");
+        assert_eq!(
+            reference.anomalies, other.anomalies,
+            "anomalies at {factor:e}"
+        );
+        for (i, (a, b)) in reference.scores.iter().zip(&other.scores).enumerate() {
+            assert!(
+                (a - b).abs() <= 1e-6 * a.abs().max(1.0),
+                "score {i} at {factor:e}: {a} vs {b}"
+            );
+        }
+    }
+}

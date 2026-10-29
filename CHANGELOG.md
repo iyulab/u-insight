@@ -20,6 +20,14 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   any unit of the series (through u-analytics): the penalty carries the noise variance estimated
   from the data. A numeric penalty is unchanged and is in data units squared for L2.
 
+### Fixed
+
+- `lof` decided which neighbours tie at the k-distance with a fixed tolerance of
+  1e-15, so the same points in other units gave other scores: in units near 1e-14
+  a distance a hair beyond the tie counted as one of them. Two distances are now
+  tied when they agree to 1e-12 of their size, whatever the unit.
+
+
 ## [0.38.0] - 2026-10-28
 
 Depends on u-numflow 0.15 and u-analytics 0.29.0.
