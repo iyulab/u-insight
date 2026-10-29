@@ -122,7 +122,7 @@
         "status": "partial",
         "checks": [
           {
-            "claim": "The Pearson, Spearman and Kendall (tau-b) coefficients equal SciPy's, and the pair p-values equal SciPy's default (Kendall's: the exact distribution at these 30 values without ties, SciPy method='auto').",
+            "claim": "The Pearson, Spearman and Kendall (tau-b) coefficients equal SciPy's, and the pair p-values equal SciPy's default (Kendall's: the exact distribution at these 30 values without ties, SciPy method='auto'; with u-analytics 0.31, still the normal approximation, which the test also accepts).",
             "reference_kind": "reference_implementation",
             "reference": "SciPy 1.17.1 pearsonr, spearmanr, kendalltau",
             "method": "compares all six pairs of four columns for each method on a seeded NumPy draw, 30 rows by 4 correlated columns (and a target), rounded to six places",

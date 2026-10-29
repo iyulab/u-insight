@@ -2,7 +2,8 @@
 //! SciPy, statsmodels and NumPy. The data are a seeded NumPy draw rounded to six
 //! places; the constants below were printed by that recipe with the versions in
 //! the next line (rerun it to change the data). Kendall p-values are SciPy's
-//! default (`method="auto"`): the exact distribution at 30 values without ties.
+//! default (`method="auto"`, the exact distribution at 30 values without ties),
+//! or -- until the declared u-analytics floor has it -- the normal approximation.
 #![allow(clippy::excessive_precision, clippy::approx_constant)]
 
 // Generated with NumPy 2.4.6, SciPy 1.17.1, statsmodels 0.15.0 (seed 20261020, n = 30).
@@ -83,6 +84,18 @@ const KENDALL_P: [f64; 6] = [
     0.303589884403213,
     0.1653935231257671,
     2.4092178700649936e-05,
+];
+
+// SciPy `method="asymptotic"` -- what u-analytics 0.31 returns for every sample.
+// TODO(upstream: u-analytics 0.32): once 0.32 is the declared floor, drop this
+// table and the either-or below; the p-value is then the exact one above.
+const KENDALL_P_ASYMPTOTIC: [f64; 6] = [
+    0.0006552802320946897,
+    0.532341233012158,
+    0.0028876430068704062,
+    0.2925148069039126,
+    0.15870467504648134,
+    5.123645060690808e-05,
 ];
 const OLS_COEF: [f64; 5] = [
     2.47214786769358,
@@ -231,7 +244,21 @@ fn correlation_matrices_and_p_values_match_scipy() {
             );
             let (r, p) = pair_value(&got, &names[i], &names[j]);
             close(r, r_ref[idx], 1e-10, &format!("{method:?} listed r {i}{j}"));
-            close(p, p_ref[idx], 1e-6, &format!("{method:?} p {i}{j}"));
+            if matches!(method, CorrelationMethod::Kendall) {
+                // The exact value (u-analytics with the exact distribution) or
+                // the approximation of the floor this crate still declares.
+                let exact = (p - p_ref[idx]).abs() <= 1e-6 * p_ref[idx].abs();
+                let approx =
+                    (p - KENDALL_P_ASYMPTOTIC[idx]).abs() <= 1e-6 * KENDALL_P_ASYMPTOTIC[idx].abs();
+                assert!(
+                    exact || approx,
+                    "Kendall p {i}{j}: got {p}, want {} or {}",
+                    p_ref[idx],
+                    KENDALL_P_ASYMPTOTIC[idx]
+                );
+            } else {
+                close(p, p_ref[idx], 1e-6, &format!("{method:?} p {i}{j}"));
+            }
         }
     }
 }
