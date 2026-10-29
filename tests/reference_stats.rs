@@ -1,8 +1,8 @@
 //! Correlation, regression, variance-inflation and conditioning results against
 //! SciPy, statsmodels and NumPy. The data are a seeded NumPy draw rounded to six
 //! places; the constants below were printed by that recipe with the versions in
-//! the next line (rerun it to change the data). Kendall p-values are compared
-//! with SciPy `method="asymptotic"`, the normal approximation the crate uses.
+//! the next line (rerun it to change the data). Kendall p-values are SciPy's
+//! default (`method="auto"`): the exact distribution at 30 values without ties.
 #![allow(clippy::excessive_precision, clippy::approx_constant)]
 
 // Generated with NumPy 2.4.6, SciPy 1.17.1, statsmodels 0.15.0 (seed 20261020, n = 30).
@@ -77,12 +77,12 @@ const KENDALL_R: [f64; 6] = [
     -0.5218390804597701,
 ];
 const KENDALL_P: [f64; 6] = [
-    0.0006552802320946897,
-    0.532341233012158,
-    0.0028876430068704062,
-    0.2925148069039126,
-    0.15870467504648134,
-    5.123645060690808e-05,
+    0.00048749523007180005,
+    0.5473088481323835,
+    0.0025434639403121434,
+    0.303589884403213,
+    0.1653935231257671,
+    2.4092178700649936e-05,
 ];
 const OLS_COEF: [f64; 5] = [
     2.47214786769358,

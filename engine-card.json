@@ -122,7 +122,7 @@
         "status": "partial",
         "checks": [
           {
-            "claim": "The Pearson, Spearman and Kendall (tau-b) coefficients equal SciPy's, and the pair p-values equal SciPy's (Kendall's: the asymptotic normal approximation, SciPy method='asymptotic').",
+            "claim": "The Pearson, Spearman and Kendall (tau-b) coefficients equal SciPy's, and the pair p-values equal SciPy's default (Kendall's: the exact distribution at these 30 values without ties, SciPy method='auto').",
             "reference_kind": "reference_implementation",
             "reference": "SciPy 1.17.1 pearsonr, spearmanr, kendalltau",
             "method": "compares all six pairs of four columns for each method on a seeded NumPy draw, 30 rows by 4 correlated columns (and a target), rounded to six places",
@@ -131,7 +131,7 @@
           }
         ],
         "limits": [
-          "Kendall's p-value is the normal approximation; SciPy's default is the exact distribution for n <= 33 without ties, which differs (6.6e-4 against 4.9e-4 at n = 30, tau 0.43). Data with ties are not covered."
+          "The Kendall p-value is exact for n <= 33 without ties (and at any n when at most one pair is on the minority side) and the normal approximation otherwise; the u-analytics tests compare both paths, and the tied-data variance, with SciPy kendalltau. This check compares one tie-free sample of 30 values."
         ]
       },
       "performance": {
