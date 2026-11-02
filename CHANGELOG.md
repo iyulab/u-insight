@@ -8,8 +8,15 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-02
+
+Depends on u-analytics 0.33 and u-numflow 0.16. The .NET client is `UInsight` 0.41.0.
+
 ### Fixed
 
+- .NET `AnovaSelect`, `MutualInfo` and `PermutationImportance` passed a `target` shorter than the data's rows to
+  the native call, which read past the end of the array; such a target is now refused with `ArgumentException`, as
+  `Silhouette` refuses its labels.
 - ANOVA feature selection reported each feature's place in the p-value order as its `index` (C ABI
   `CAnovaFeature.index`, .NET `AnovaFeature.Index`, WebAssembly `feature_importance` `anova`), so a caller mapping
   the results back to its columns read the wrong ones. It is now the feature's column; Rust's
