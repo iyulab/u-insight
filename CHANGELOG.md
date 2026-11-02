@@ -22,6 +22,12 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Fixed
 
+- `hdbscan` kept two n × n matrices (distances and mutual reachability), so its memory grew with the
+  square of the points: about 1.6 GB at 10,000 points and 40 GB at 50,000. Core distances now come
+  from a k-d tree and the spanning tree computes each mutual-reachability distance when it looks at
+  the edge, in memory linear in the points; the tree, and so the clustering, is the same edge for
+  edge. Time stays quadratic (10,000 points: 5.6 s to 1.5 s; 20,000 points: 11 s, where the
+  matrices needed 6.4 GB).
 - `lof` compared every point with every other one and sorted the distances, so its time grew with
   the square of the rows (25,000 rows × 4 columns: 31 s). The neighbours now come from a k-d tree:
   0.5 s for the same rows, 1.5 s for 50,000, 4.9 s for 100,000. The scores are bit-identical to

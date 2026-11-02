@@ -1603,49 +1603,7 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
         });
     }
 
-    // Phase 1: Compute pairwise Euclidean distances
-    let mut dist_matrix = vec![0.0_f64; n * n];
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d_val = euclidean_dist(&data[i], &data[j]);
-            dist_matrix[i * n + j] = d_val;
-            dist_matrix[j * n + i] = d_val;
-        }
-    }
-
-    // Phase 1b: Compute core distances (distance to k-th nearest neighbor)
-    let k = min_samples.min(n);
-    let mut core_dists = vec![0.0_f64; n];
-    for i in 0..n {
-        let mut dists_from_i: Vec<f64> = (0..n)
-            .filter(|&j| j != i)
-            .map(|j| dist_matrix[i * n + j])
-            .collect();
-        dists_from_i.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        // k-th nearest neighbor (0-indexed: k-1)
-        core_dists[i] = if k <= 1 {
-            dists_from_i.first().copied().unwrap_or(0.0)
-        } else {
-            dists_from_i
-                .get(k - 2)
-                .copied()
-                .unwrap_or(dists_from_i.last().copied().unwrap_or(0.0))
-        };
-    }
-
-    // Phase 2: Mutual reachability distance
-    // d_mreach(a, b) = max(core(a), core(b), d(a,b))
-    let mut mreach = vec![0.0_f64; n * n];
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d_val = dist_matrix[i * n + j].max(core_dists[i]).max(core_dists[j]);
-            mreach[i * n + j] = d_val;
-            mreach[j * n + i] = d_val;
-        }
-    }
-
-    // Phase 3: MST via Prim's algorithm on mutual reachability graph
-    let mst_edges = prim_mst(&mreach, n);
+    let mst_edges = mutual_reachability_mst(data, min_samples);
 
     // Phase 4: Build single-linkage dendrogram from MST
     // Sort edges by weight (ascending)
@@ -1705,15 +1663,47 @@ pub fn hdbscan(data: &[Vec<f64>], config: &HdbscanConfig) -> Result<HdbscanResul
 
 /// Prim's algorithm for MST on dense mutual reachability graph.
 /// Returns edges as (u, v, weight).
-fn prim_mst(mreach: &[f64], n: usize) -> Vec<(usize, usize, f64)> {
+/// The minimum spanning tree of the mutual-reachability graph HDBSCAN
+/// condenses (Campello, Moulavi & Sander 2013): `O(n²)` time, `O(n)` memory.
+fn mutual_reachability_mst(data: &[Vec<f64>], min_samples: usize) -> Vec<(usize, usize, f64)> {
+    let n = data.len();
+    // Phase 1: core distances -- the distance to the (min_samples)-th nearest
+    // point counting the point itself, i.e. its (min_samples - 1)-th nearest
+    // other point (the nearest when min_samples is 1) -- through a k-d tree.
+    // No n x n matrix is kept: at 50,000 points two of them were ~40 GB.
+    let k = min_samples.min(n);
+    let dist = |i: usize, j: usize| euclidean_dist(&data[i], &data[j]);
+    let core_dists: Vec<f64> = if n < 2 {
+        vec![0.0; n]
+    } else {
+        let tree = crate::knn::KdTree::new(data);
+        (0..n)
+            .map(|i| tree.kth_distance(i, k.saturating_sub(1).max(1), dist))
+            .collect()
+    };
+
+    // Phase 2: mutual reachability distance, computed when an edge is looked
+    // at: d_mreach(a, b) = max(core(a), core(b), d(a, b)).
+    let mreach = |i: usize, j: usize| {
+        let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+        dist(lo, hi).max(core_dists[lo]).max(core_dists[hi])
+    };
+
+    // Phase 3: MST via Prim's algorithm on mutual reachability graph
+    prim_mst(mreach, n)
+}
+
+/// Prim's minimum spanning tree of the complete graph on `n` vertices whose
+/// edge weights `weight(i, j)` gives: `O(n²)` time, `O(n)` memory.
+fn prim_mst(weight: impl Fn(usize, usize) -> f64, n: usize) -> Vec<(usize, usize, f64)> {
     let mut in_mst = vec![false; n];
     let mut min_edge = vec![(f64::INFINITY, 0_usize); n]; // (weight, from)
     let mut edges = Vec::with_capacity(n - 1);
 
     // Start from vertex 0
     in_mst[0] = true;
-    for j in 1..n {
-        min_edge[j] = (mreach[j], 0); // dist from vertex 0
+    for (j, edge) in min_edge.iter_mut().enumerate().skip(1) {
+        *edge = (weight(0, j), 0); // dist from vertex 0
     }
 
     for _ in 0..(n - 1) {
@@ -1733,7 +1723,7 @@ fn prim_mst(mreach: &[f64], n: usize) -> Vec<(usize, usize, f64)> {
         // Update min edges
         for v in 0..n {
             if !in_mst[v] {
-                let d = mreach[best_v * n + v];
+                let d = weight(best_v, v);
                 if d < min_edge[v].0 {
                     min_edge[v] = (d, best_v);
                 }
@@ -2779,6 +2769,81 @@ mod tests {
     /// take a core distance from; it is refused (as scikit-learn does), not
     /// clamped. It defaults to `min_cluster_size`, so an oversized cluster
     /// size with no explicit `min_samples` is refused the same way.
+    /// The tree as HDBSCAN built it before: every distance in an n x n
+    /// matrix, core distances by sorting a row, Prim over a dense matrix.
+    fn dense_mutual_reachability_mst(
+        data: &[Vec<f64>],
+        min_samples: usize,
+    ) -> Vec<(usize, usize, f64)> {
+        let n = data.len();
+        let mut dist = vec![0.0_f64; n * n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = euclidean_dist(&data[i], &data[j]);
+                dist[i * n + j] = d;
+                dist[j * n + i] = d;
+            }
+        }
+        let k = min_samples.min(n);
+        let core: Vec<f64> = (0..n)
+            .map(|i| {
+                let mut row: Vec<f64> = (0..n)
+                    .filter(|&j| j != i)
+                    .map(|j| dist[i * n + j])
+                    .collect();
+                row.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                if k <= 1 {
+                    row.first().copied().unwrap_or(0.0)
+                } else {
+                    row.get(k - 2)
+                        .copied()
+                        .unwrap_or(row.last().copied().unwrap_or(0.0))
+                }
+            })
+            .collect();
+        let mut mreach = vec![0.0_f64; n * n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = dist[i * n + j].max(core[i]).max(core[j]);
+                mreach[i * n + j] = d;
+                mreach[j * n + i] = d;
+            }
+        }
+        prim_mst(|i, j| mreach[i * n + j], n)
+    }
+
+    #[test]
+    fn the_spanning_tree_is_the_one_the_dense_matrices_gave() {
+        let mut s = 11_u64;
+        let mut next = || {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((s >> 11) as f64) / ((1u64 << 53) as f64)
+        };
+        for (n, dims) in [(2usize, 1usize), (30, 2), (250, 2), (250, 5)] {
+            let data: Vec<Vec<f64>> = (0..n)
+                .map(|r| match r % 4 {
+                    0 => vec![(r % 3) as f64; dims], // duplicates and ties
+                    1 => (0..dims).map(|_| 40.0 + next()).collect(),
+                    _ => (0..dims).map(|_| next() * 10.0).collect(),
+                })
+                .collect();
+            for min_samples in [1, 2, 5, 12] {
+                let got = mutual_reachability_mst(&data, min_samples);
+                let want = dense_mutual_reachability_mst(&data, min_samples);
+                assert_eq!(got.len(), want.len());
+                for (g, w) in got.iter().zip(&want) {
+                    assert_eq!(
+                        (g.0, g.1, g.2.to_bits()),
+                        (w.0, w.1, w.2.to_bits()),
+                        "n {n} dims {dims} min_samples {min_samples}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn hdbscan_refuses_min_samples_above_n() {
         let data: Vec<Vec<f64>> = (0..30)
