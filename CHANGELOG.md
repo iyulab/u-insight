@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-02
+
+Depends on u-analytics 0.33 and u-numflow 0.16. The .NET client is `UInsight` 0.40.0.
+
 ### Removed
 
 - **Breaking:** the single-series statistics — autocorrelation, partial
