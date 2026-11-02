@@ -1192,11 +1192,12 @@ public class FeatureImportanceResult
 /// <summary>ANOVA feature.</summary>
 public class AnovaFeature
 {
-    /// <summary>Feature index.</summary>
+    /// <summary>The feature's column in the input (the list is sorted by p-value).</summary>
     public uint Index { get; init; }
-    /// <summary>F-statistic.</summary>
+    /// <summary>F-statistic; <see cref="double.PositiveInfinity"/> for a feature that separates the
+    /// classes perfectly (constant within every class, not across them).</summary>
     public double FStatistic { get; init; }
-    /// <summary>P-value.</summary>
+    /// <summary>P-value; 0 for a perfectly separating feature.</summary>
     public double PValue { get; init; }
 }
 

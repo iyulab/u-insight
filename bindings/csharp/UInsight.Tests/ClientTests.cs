@@ -358,17 +358,23 @@ public class ClientTests : IDisposable
     [Fact]
     public void AnovaSelect_FeatureSelection()
     {
+        // Column 0 says nothing, column 1 separates the classes, column 2
+        // separates them perfectly (constant within each class).
         var data = new double[,]
         {
-            { 1.0, 10.0 }, { 1.1, 10.1 }, { 0.9, 9.9 },
-            { 5.0, 10.0 }, { 5.1, 10.1 }, { 4.9, 9.9 },
-            { 9.0, 10.0 }, { 9.1, 10.1 }, { 8.9, 9.9 }
+            { 10.0, 1.0, 1.0 }, { 10.1, 1.1, 1.0 }, { 9.9, 0.9, 1.0 },
+            { 10.0, 5.0, 2.0 }, { 10.1, 5.1, 2.0 }, { 9.9, 4.9, 2.0 },
+            { 10.0, 9.0, 3.0 }, { 10.1, 9.1, 3.0 }, { 9.9, 8.9, 3.0 }
         };
         var target = new uint[] { 0, 0, 0, 1, 1, 1, 2, 2, 2 };
 
         var result = _client.AnovaSelect(data, target, significanceLevel: 0.05);
 
-        Assert.True(result.Features.Length > 0);
+        // Sorted by p-value; each entry keeps its column.
+        Assert.Equal(new uint[] { 2, 1, 0 }, result.Features.Select(f => f.Index).ToArray());
+        Assert.True(double.IsPositiveInfinity(result.Features[0].FStatistic));
+        Assert.Equal(0.0, result.Features[0].PValue);
+        Assert.True(result.Features[1].PValue < 0.05);
     }
 
     [Fact]

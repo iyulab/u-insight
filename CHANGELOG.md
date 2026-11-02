@@ -8,6 +8,20 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- ANOVA feature selection reported each feature's place in the p-value order as its `index` (C ABI
+  `CAnovaFeature.index`, .NET `AnovaFeature.Index`, WebAssembly `feature_importance` `anova`), so a caller mapping
+  the results back to its columns read the wrong ones. It is now the feature's column; Rust's
+  `AnovaFeatureResult` carries it as `index`.
+- A feature constant within every class but not across them -- a perfect separator -- is reported with an infinite
+  F statistic and p-value 0, ranked first, whether or not the one-way ANOVA underneath answers for zero
+  within-class spread.
+
+### Changed
+
+- **Breaking** `AnovaFeatureResult` has a new field, `index`.
+
 ## [0.40.0] - 2026-11-02
 
 Depends on u-analytics 0.33 and u-numflow 0.16. The .NET client is `UInsight` 0.40.0.

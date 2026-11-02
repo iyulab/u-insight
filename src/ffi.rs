@@ -1611,11 +1611,12 @@ pub unsafe extern "C" fn insight_cramers_v(
 /// C-compatible ANOVA feature result.
 #[repr(C)]
 pub struct CAnovaFeature {
-    /// Feature index.
+    /// The feature's column in the input (the list is sorted by p-value).
     pub index: u32,
-    /// F-statistic.
+    /// F-statistic; infinite for a feature that separates the classes
+    /// perfectly (constant within every class, not across them).
     pub f_statistic: f64,
-    /// P-value.
+    /// P-value; 0 for a perfectly separating feature.
     pub p_value: f64,
 }
 
@@ -1682,9 +1683,8 @@ pub unsafe extern "C" fn insight_anova_select(
                 let c_features: Vec<CAnovaFeature> = r
                     .features
                     .iter()
-                    .enumerate()
-                    .map(|(i, f)| CAnovaFeature {
-                        index: i as u32,
+                    .map(|f| CAnovaFeature {
+                        index: f.index as u32,
                         f_statistic: f.f_statistic,
                         p_value: f.p_value,
                     })

@@ -416,15 +416,16 @@ typedef struct CCramersVResult {
  */
 typedef struct CAnovaFeature {
   /**
-   * Feature index.
+   * The feature's column in the input (the list is sorted by p-value).
    */
   uint32_t index;
   /**
-   * F-statistic.
+   * F-statistic; infinite for a feature that separates the classes
+   * perfectly (constant within every class, not across them).
    */
   double f_statistic;
   /**
-   * P-value.
+   * P-value; 0 for a perfectly separating feature.
    */
   double p_value;
 } CAnovaFeature;

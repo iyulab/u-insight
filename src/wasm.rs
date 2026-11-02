@@ -1919,10 +1919,9 @@ pub fn feature_importance(
                 features: result
                     .features
                     .iter()
-                    .enumerate()
-                    .map(|(i, f)| FeatureImportanceItemDto {
+                    .map(|f| FeatureImportanceItemDto {
                         name: f.name.clone(),
-                        index: i,
+                        index: f.index,
                         score: f.f_statistic,
                         std_dev: None,
                         p_value: Some(f.p_value),

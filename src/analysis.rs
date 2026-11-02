@@ -607,9 +607,13 @@ pub fn cramers_v(
 pub struct AnovaFeatureResult {
     /// Feature name.
     pub name: String,
-    /// F-statistic.
+    /// The feature's position in the input -- the list is sorted by p-value,
+    /// so this is not its place in the list.
+    pub index: usize,
+    /// F-statistic. Infinite for a feature that separates the classes
+    /// perfectly: no spread within any class, and the class means differ.
     pub f_statistic: f64,
-    /// P-value.
+    /// P-value; 0 for a perfectly separating feature.
     pub p_value: f64,
 }
 
@@ -630,6 +634,11 @@ pub struct AnovaSelectionResult {
 ///
 /// Features with low p-values have means that differ across classes, making them
 /// useful for classification.
+///
+/// A feature that is constant within every class but not across them
+/// separates the classes perfectly: its F statistic is infinite and its
+/// p-value 0 (as scikit-learn's `f_classif` reports it), so it ranks first.
+/// A feature that is constant everywhere says nothing: F 0, p-value 1.
 ///
 /// # Arguments
 ///
@@ -741,29 +750,31 @@ pub fn anova_feature_selection(
             .cloned()
             .unwrap_or_else(|| format!("feature_{i}"));
 
-        match u_analytics::testing::one_way_anova(&group_refs) {
-            Some(anova) => {
-                results.push((
-                    i,
-                    AnovaFeatureResult {
-                        name,
-                        f_statistic: anova.f_statistic,
-                        p_value: anova.p_value,
-                    },
-                ));
-            }
+        let (f_statistic, p_value) = match u_analytics::testing::one_way_anova(&group_refs) {
+            Some(anova) => (anova.f_statistic, anova.p_value),
+            // No test: either no spread within any class -- a perfect
+            // separator when the class means differ (F infinite), nothing at
+            // all when the feature is constant -- or a class too small to
+            // test, reported as non-significant.
             None => {
-                // ANOVA failed (e.g., group too small) — report as non-significant
-                results.push((
-                    i,
-                    AnovaFeatureResult {
-                        name,
-                        f_statistic: 0.0,
-                        p_value: 1.0,
-                    },
-                ));
+                let constant_within = groups.iter().all(|g| g.iter().all(|&x| x == g[0]));
+                let means_differ = groups.iter().any(|g| g[0] != groups[0][0]);
+                if constant_within && means_differ && n > classes.len() {
+                    (f64::INFINITY, 0.0)
+                } else {
+                    (0.0, 1.0)
+                }
             }
-        }
+        };
+        results.push((
+            i,
+            AnovaFeatureResult {
+                name,
+                index: i,
+                f_statistic,
+                p_value,
+            },
+        ));
     }
 
     // Sort by p-value ascending
@@ -979,6 +990,35 @@ pub fn mutual_info_classif(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A feature constant within each class but not across them separates the
+    /// classes perfectly: F infinite, p 0, first in the list. A feature that
+    /// is constant everywhere says nothing: F 0, p 1, last. Each result keeps
+    /// the feature's position in the input, whatever its place in the list.
+    #[test]
+    fn a_perfect_separator_ranks_first_and_keeps_its_index() {
+        let features = vec![
+            vec![7.0; 6],                               // 0: constant everywhere
+            vec![1.0, 1.4, 0.8, 1.9, 2.2, 1.6],         // 1: some separation
+            vec![2.0, 2.0, 2.0, 5.0, 5.0, 5.0],         // 2: perfect separation
+            vec![0.1, 0.1, 0.1, 0.1, 0.1, 0.1 + 1e-12], // 3: almost constant
+        ];
+        let names: Vec<String> = ["c", "s", "p", "a"].map(String::from).to_vec();
+        let target = [0, 0, 0, 1, 1, 1];
+        let r = anova_feature_selection(&features, &names, &target, 0.05).expect("valid");
+        let first = &r.features[0];
+        assert_eq!((first.name.as_str(), first.index), ("p", 2));
+        assert!(first.f_statistic.is_infinite() && first.p_value == 0.0);
+        let constant = r.features.iter().find(|f| f.name == "c").expect("listed");
+        assert_eq!(
+            (constant.index, constant.f_statistic, constant.p_value),
+            (0, 0.0, 1.0)
+        );
+        for f in &r.features {
+            assert_eq!(names[f.index], f.name);
+        }
+        assert!(r.selected_indices.contains(&2) && !r.selected_indices.contains(&0));
+    }
 
     // ── Input validation ─────────────────────────────────────────
 
