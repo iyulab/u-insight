@@ -64,6 +64,7 @@ pub mod ffi;
 mod header_contract;
 pub mod isolation_forest;
 pub mod json_parser;
+mod knn;
 pub mod lof;
 pub mod mahalanobis;
 pub mod pca;

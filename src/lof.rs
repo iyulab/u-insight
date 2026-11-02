@@ -179,37 +179,28 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
     }
     let k = config.k;
 
-    // Step 1: Compute pairwise distances and find k-neighbors
-    // For each point: sorted list of (neighbor_index, distance)
+    // Step 1: each point's k-distance and k-neighbourhood, through a k-d tree
+    // (the same neighbours, in the same order, as sorting every distance).
     let mut k_distances = vec![0.0_f64; n];
     let mut k_neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let tree = crate::knn::KdTree::new(data);
+    let dist = |i: usize, j: usize| euclidean_distance(&data[i], &data[j]);
 
     for i in 0..n {
-        let mut dists: Vec<(usize, f64)> = (0..n)
-            .filter(|&j| j != i)
-            .map(|j| (j, euclidean_distance(&data[i], &data[j])))
-            .collect();
-
-        dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        let k_dist = dists[k - 1].1;
+        let k_dist = tree.kth_distance(i, k, dist);
         k_distances[i] = k_dist;
 
         // Include all neighbors at distance ≤ k-distance (handles ties). Two
         // distances are tied when they agree to rounding *in proportion to
         // their size*: a fixed tolerance is nothing for lengths near 1e9 and
-        // more than every distance for lengths near 1e-15.
+        // more than every distance for lengths near 1e-15. The k nearest are
+        // always among them (the k-th is at the k-distance).
         let tied = k_dist * (1.0 + 1e-12);
-        k_neighbors[i] = dists
-            .iter()
-            .take_while(|(_, d)| *d <= tied)
-            .map(|(j, _)| *j)
+        k_neighbors[i] = tree
+            .within(i, tied, dist)
+            .into_iter()
+            .map(|(j, _)| j)
             .collect();
-
-        // Ensure at least k neighbors
-        if k_neighbors[i].len() < k {
-            k_neighbors[i] = dists[..k].iter().map(|(j, _)| *j).collect();
-        }
     }
 
     // Step 2 & 3: Compute Local Reachability Density (LRD)
@@ -505,6 +496,83 @@ mod tests {
                 index: 1
             }
         );
+    }
+
+    /// LOF as it was computed before the k-d tree: every distance, sorted.
+    fn scores_by_full_sort(data: &[Vec<f64>], k: usize) -> Vec<f64> {
+        let n = data.len();
+        let mut k_distances = vec![0.0_f64; n];
+        let mut k_neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for i in 0..n {
+            let mut dists: Vec<(usize, f64)> = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| (j, euclidean_distance(&data[i], &data[j])))
+                .collect();
+            dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            k_distances[i] = dists[k - 1].1;
+            let tied = k_distances[i] * (1.0 + 1e-12);
+            k_neighbors[i] = dists
+                .iter()
+                .take_while(|(_, d)| *d <= tied)
+                .map(|(j, _)| *j)
+                .collect();
+        }
+        let lrd: Vec<f64> = (0..n)
+            .map(|i| {
+                let s: f64 = k_neighbors[i]
+                    .iter()
+                    .map(|&j| k_distances[j].max(euclidean_distance(&data[i], &data[j])))
+                    .sum();
+                if s > 0.0 {
+                    k_neighbors[i].len() as f64 / s
+                } else {
+                    f64::MAX
+                }
+            })
+            .collect();
+        (0..n)
+            .map(|i| {
+                let nk = k_neighbors[i].len() as f64;
+                let avg = k_neighbors[i].iter().map(|&j| lrd[j]).sum::<f64>() / nk;
+                if lrd[i] > 0.0 && lrd[i] < f64::MAX {
+                    avg / lrd[i]
+                } else {
+                    1.0
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scores_are_bit_identical_to_sorting_every_distance() {
+        let mut s = 7_u64;
+        let mut next = || {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((s >> 11) as f64) / ((1u64 << 53) as f64)
+        };
+        for dims in [1, 2, 4, 7] {
+            let data: Vec<Vec<f64>> = (0..600)
+                .map(|r| match r % 6 {
+                    0 => vec![(r % 5) as f64; dims], // duplicates and lattice ties
+                    1 => (0..dims).map(|_| 50.0 + next()).collect(), // a tight cluster
+                    _ => (0..dims).map(|_| next() * 20.0).collect(),
+                })
+                .collect();
+            for k in [1, 5, 20] {
+                let got = lof(&data, &LofConfig::default().k(k))
+                    .expect("valid")
+                    .scores;
+                let want = scores_by_full_sort(&data, k);
+                let differ = got
+                    .iter()
+                    .zip(&want)
+                    .filter(|(a, b)| a.to_bits() != b.to_bits())
+                    .count();
+                assert_eq!(differ, 0, "dims {dims} k {k}: {differ} scores differ");
+            }
+        }
     }
 
     #[test]

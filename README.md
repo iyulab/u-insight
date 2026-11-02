@@ -568,7 +568,7 @@ Isolation Forest anomaly detection. `config`: `{ "n_estimators": 100, "contamina
 
 #### `lof(data, config) -> LofResult`
 
-Local Outlier Factor anomaly detection. `config`: `{ "k": 20, "threshold": 1.5 }` or `{ "k": 20, "contamination": 0.05 }`.
+Local Outlier Factor anomaly detection. `config`: `{ "k": 20, "threshold": 1.5 }` or `{ "k": 20, "contamination": 0.05 }`. The neighbours come from a k-d tree: about **O(n log n)** time in a few dimensions (50,000 rows × 4 columns in under 2 s on a laptop), degrading towards O(n²) as the number of columns grows; the scores are exactly those of comparing every pair.
 
 - `threshold` (default 1.5): a point scoring above it is an outlier.
 - `contamination` (`0` to `1`): the expected outlier fraction, as in `isolation_forest` — the `ceil(n · contamination)` highest scores are outliers (ties included) and the result's `threshold` is the lowest of them (`Infinity` when none is). It cannot be given with `threshold`.

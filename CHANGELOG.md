@@ -22,6 +22,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Fixed
 
+- `lof` compared every point with every other one and sorted the distances, so its time grew with
+  the square of the rows (25,000 rows × 4 columns: 31 s). The neighbours now come from a k-d tree:
+  0.5 s for the same rows, 1.5 s for 50,000, 4.9 s for 100,000. The scores are bit-identical to
+  before — the same neighbours, ties included, in the same order.
 - The C ABI refused an empty array passed as a null pointer with `count = 0` as a null pointer
   (`null pointer`, no reason). `(NULL, 0)` is a valid empty array in C and is how .NET pins an
   empty array, so the .NET client's `Pelt([])` and every other routine given an empty array
