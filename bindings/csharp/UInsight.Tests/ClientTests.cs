@@ -377,6 +377,19 @@ public class ClientTests : IDisposable
         Assert.True(result.Features[1].PValue < 0.05);
     }
 
+    /// <summary>
+    /// A target that is not one value per row is refused before the native call, which would
+    /// otherwise read past the end of the array.
+    /// </summary>
+    [Fact]
+    public void A_target_shorter_than_the_data_is_refused()
+    {
+        var data = new double[,] { { 1.0 }, { 2.0 }, { 3.0 }, { 4.0 }, { 5.0 }, { 6.0 } };
+        Assert.Throws<ArgumentException>(() => _client.AnovaSelect(data, [0, 0, 1, 1]));
+        Assert.Throws<ArgumentException>(() => _client.MutualInfo(data, [0, 0, 1, 1]));
+        Assert.Throws<ArgumentException>(() => _client.PermutationImportance(data, [1.0, 2.0]));
+    }
+
     [Fact]
     public void MutualInfo_FeatureRanking()
     {

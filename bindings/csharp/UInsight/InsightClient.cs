@@ -718,6 +718,7 @@ public sealed class InsightClient : IDisposable
     public AnovaSelectionResult AnovaSelect(double[,] data, uint[] target, double significanceLevel = 0.05)
     {
         var (nRows, nCols, flat) = Flatten(data);
+        OneValuePerRow(target, nRows, nameof(target));
         var native = new NativeStructs.CAnovaSelectionResult();
 
         unsafe
@@ -758,6 +759,7 @@ public sealed class InsightClient : IDisposable
     public MutualInfoResult MutualInfo(double[,] data, uint[] target, uint nBins = 10)
     {
         var (nRows, nCols, flat) = Flatten(data);
+        OneValuePerRow(target, nRows, nameof(target));
         var native = new NativeStructs.CMutualInfoResult();
 
         unsafe
@@ -794,6 +796,7 @@ public sealed class InsightClient : IDisposable
     public PermImportanceResult PermutationImportance(double[,] data, double[] target, uint nRepeats = 5, ulong seed = 42)
     {
         var (nRows, nCols, flat) = Flatten(data);
+        OneValuePerRow(target, nRows, nameof(target));
         var native = new NativeStructs.CPermImportanceResult();
 
         unsafe
@@ -831,6 +834,21 @@ public sealed class InsightClient : IDisposable
     #endregion
 
     #region Helpers
+
+    /// <summary>
+    /// Refuses a per-row array that is not one value per row of the data: the native call reads
+    /// one value for each row, so a shorter array would be read past its end.
+    /// </summary>
+    private static void OneValuePerRow(Array values, uint nRows, string parameter)
+    {
+        ArgumentNullException.ThrowIfNull(values, parameter);
+        if (values.Length != nRows)
+        {
+            throw new ArgumentException(
+                $"{parameter} length ({values.Length}) must match data row count ({nRows})",
+                parameter);
+        }
+    }
 
     private static (uint nRows, uint nCols, double[] flat) Flatten(double[,] data)
     {
