@@ -558,13 +558,13 @@ pub unsafe extern "C" fn insight_kmeans(
     out: *mut CKMeansResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
         let d = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, n * d) };
+        let raw = unsafe { view(data, n * d) };
 
         // Convert to Vec<Vec<f64>>
         let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
@@ -658,13 +658,13 @@ pub unsafe extern "C" fn insight_pca(
     out: *mut CPcaResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
         let d = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, n * d) };
+        let raw = unsafe { view(data, n * d) };
 
         let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
 
@@ -762,7 +762,7 @@ pub unsafe extern "C" fn insight_silhouette(
     out: *mut CSilhouetteResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || labels.is_null() || out.is_null() {
+        if absent(data, n_rows) || absent(labels, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
@@ -772,8 +772,8 @@ pub unsafe extern "C" fn insight_silhouette(
             return fail(&InsightError::empty("data"));
         }
 
-        let raw = unsafe { slice::from_raw_parts(data, n * d) };
-        let raw_labels = unsafe { slice::from_raw_parts(labels, n) };
+        let raw = unsafe { view(data, n * d) };
+        let raw_labels = unsafe { view(labels, n) };
 
         let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
         let labels_usize: Vec<usize> = raw_labels.iter().map(|&l| l as usize).collect();
@@ -859,13 +859,13 @@ pub unsafe extern "C" fn insight_dbscan(
     out: *mut CDbscanResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
         let d = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, n * d) };
+        let raw = unsafe { view(data, n * d) };
 
         let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
 
@@ -963,12 +963,12 @@ pub unsafe extern "C" fn insight_distribution(
     out: *mut CDistributionResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
-        let raw = unsafe { slice::from_raw_parts(data, len) };
+        let raw = unsafe { view(data, len) };
         let values: Vec<f64> = raw.to_vec();
 
         let config = DistributionConfig {
@@ -1063,13 +1063,13 @@ pub unsafe extern "C" fn insight_feature_importance(
     out: *mut CFeatureImportanceResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
         let d = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, n * d) };
+        let raw = unsafe { view(data, n * d) };
 
         // Convert row-major to column-major vectors
         let columns: Vec<Vec<f64>> = (0..d)
@@ -1157,13 +1157,13 @@ pub unsafe extern "C" fn insight_isolation_forest(
     out: *mut CAnomalyResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let rows = n_rows as usize;
         let cols = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, rows * cols) };
+        let raw = unsafe { view(data, rows * cols) };
 
         let points: Vec<Vec<f64>> = (0..rows)
             .map(|i| raw[i * cols..(i + 1) * cols].to_vec())
@@ -1231,13 +1231,13 @@ pub unsafe extern "C" fn insight_lof(
     out: *mut CAnomalyResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let rows = n_rows as usize;
         let cols = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, rows * cols) };
+        let raw = unsafe { view(data, rows * cols) };
 
         let points: Vec<Vec<f64>> = (0..rows)
             .map(|i| raw[i * cols..(i + 1) * cols].to_vec())
@@ -1324,7 +1324,7 @@ pub unsafe extern "C" fn insight_correlation(
     out: *mut CCorrelationResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
@@ -1349,7 +1349,7 @@ pub unsafe extern "C" fn insight_correlation(
             }
         };
 
-        let raw = unsafe { slice::from_raw_parts(data, nr * nc) };
+        let raw = unsafe { view(data, nr * nc) };
 
         // Convert row-major flat to column-major Vec<Vec<f64>>
         let mut columns: Vec<Vec<f64>> = vec![Vec::with_capacity(nr); nc];
@@ -1431,13 +1431,13 @@ pub unsafe extern "C" fn insight_regression(
     out: *mut CRegressionResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if x.is_null() || y.is_null() || out.is_null() {
+        if absent(x, n) || absent(y, n) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
-        let x_slice = unsafe { slice::from_raw_parts(x, len) };
-        let y_slice = unsafe { slice::from_raw_parts(y, len) };
+        let x_slice = unsafe { view(x, len) };
+        let y_slice = unsafe { view(y, len) };
 
         let x_vecs = vec![x_slice.to_vec()];
         let names = vec!["x".to_string()];
@@ -1504,14 +1504,14 @@ pub unsafe extern "C" fn insight_mahalanobis(
     out: *mut CMahalanobisResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let nr = n_rows as usize;
         let nc = n_cols as usize;
 
-        let raw = unsafe { slice::from_raw_parts(data, nr * nc) };
+        let raw = unsafe { view(data, nr * nc) };
         let points: Vec<Vec<f64>> = (0..nr)
             .map(|i| raw[i * nc..(i + 1) * nc].to_vec())
             .collect();
@@ -1580,13 +1580,13 @@ pub unsafe extern "C" fn insight_cramers_v(
     out: *mut CCramersVResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if table.is_null() || out.is_null() {
+        if absent(table, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let nr = n_rows as usize;
         let nc = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(table, nr * nc) };
+        let raw = unsafe { view(table, nr * nc) };
 
         match crate::analysis::cramers_v(raw, nr, nc) {
             Ok(r) => {
@@ -1651,14 +1651,14 @@ pub unsafe extern "C" fn insight_anova_select(
     out: *mut CAnovaSelectionResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || target.is_null() || out.is_null() {
+        if absent(data, n_rows) || absent(target, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let nr = n_rows as usize;
         let nf = n_features as usize;
-        let raw = unsafe { slice::from_raw_parts(data, nr * nf) };
-        let target_raw = unsafe { slice::from_raw_parts(target, nr) };
+        let raw = unsafe { view(data, nr * nf) };
+        let target_raw = unsafe { view(target, nr) };
 
         // Convert row-major to column-major
         let columns: Vec<Vec<f64>> = (0..nf)
@@ -1799,13 +1799,13 @@ pub unsafe extern "C" fn insight_hierarchical(
     out: *mut CHierarchicalResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
         let d = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, n * d) };
+        let raw = unsafe { view(data, n * d) };
 
         let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
 
@@ -1928,13 +1928,13 @@ pub unsafe extern "C" fn insight_hdbscan(
     out: *mut CHdbscanResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_rows) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let n = n_rows as usize;
         let d = n_cols as usize;
-        let raw = unsafe { slice::from_raw_parts(data, n * d) };
+        let raw = unsafe { view(data, n * d) };
 
         let points: Vec<Vec<f64>> = (0..n).map(|i| raw[i * d..(i + 1) * d].to_vec()).collect();
 
@@ -2021,15 +2021,15 @@ pub unsafe extern "C" fn insight_mutual_info(
     n_bins: u32,
     out: *mut CMutualInfoResult,
 ) -> i32 {
-    if data.is_null() || target.is_null() || out.is_null() {
+    if absent(data, n_rows) || absent(target, n_rows) || out.is_null() {
         return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
         let nr = n_rows as usize;
         let nf = n_features as usize;
-        let raw = slice::from_raw_parts(data, nr * nf);
-        let target_raw = slice::from_raw_parts(target, nr);
+        let raw = view(data, nr * nf);
+        let target_raw = view(target, nr);
 
         let mut features: Vec<Vec<f64>> = Vec::with_capacity(nf);
         for col in 0..nf {
@@ -2116,14 +2116,14 @@ pub unsafe extern "C" fn insight_mini_batch_kmeans(
     seed: u64,
     out: *mut CKMeansResult,
 ) -> i32 {
-    if data.is_null() || out.is_null() {
+    if absent(data, n_rows) || out.is_null() {
         return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
         let nr = n_rows as usize;
         let nc = n_cols as usize;
-        let raw = slice::from_raw_parts(data, nr * nc);
+        let raw = view(data, nr * nc);
 
         let mut rows: Vec<Vec<f64>> = Vec::with_capacity(nr);
         for r in 0..nr {
@@ -2210,14 +2210,14 @@ pub unsafe extern "C" fn insight_gap_statistic(
     seed: u64,
     out: *mut CGapStatResult,
 ) -> i32 {
-    if data.is_null() || out.is_null() {
+    if absent(data, n_rows) || out.is_null() {
         return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
         let nr = n_rows as usize;
         let nc = n_cols as usize;
-        let raw = slice::from_raw_parts(data, nr * nc);
+        let raw = view(data, nr * nc);
 
         let mut rows: Vec<Vec<f64>> = Vec::with_capacity(nr);
         for r in 0..nr {
@@ -2303,15 +2303,15 @@ pub unsafe extern "C" fn insight_permutation_importance(
     seed: u64,
     out: *mut CPermImportanceResult,
 ) -> i32 {
-    if data.is_null() || target.is_null() || out.is_null() {
+    if absent(data, n_rows) || absent(target, n_rows) || out.is_null() {
         return refuse(INSIGHT_ERR_NULL_PTR, "null pointer argument");
     }
 
     let result = panic::catch_unwind(|| {
         let nr = n_rows as usize;
         let nf = n_features as usize;
-        let raw = slice::from_raw_parts(data, nr * nf);
-        let target_raw = slice::from_raw_parts(target, nr);
+        let raw = view(data, nr * nf);
+        let target_raw = view(target, nr);
 
         let mut features: Vec<Vec<f64>> = Vec::with_capacity(nf);
         for col in 0..nf {
@@ -2399,6 +2399,22 @@ fn pelt_penalty(penalty: f64) -> Result<u_analytics::detection::Penalty, i32> {
     })
 }
 
+/// The values PELT reads: not empty, every one finite. A NaN makes every
+/// segment cost NaN, every comparison false and the answer «no change»;
+/// it is refused instead, at its position (row-major for several signals).
+fn pelt_series(raw: &[f64]) -> Result<(), i32> {
+    if raw.is_empty() {
+        return Err(fail(&InsightError::empty("data")));
+    }
+    match raw.iter().position(|v| !v.is_finite()) {
+        Some(index) => Err(fail(&InsightError::ValueNotFinite {
+            column: "data".into(),
+            index,
+        })),
+        None => Ok(()),
+    }
+}
+
 /// A PELT detector, its minimum segment length at least 2.
 fn pelt_detector(
     cost: u_analytics::detection::CostFunction,
@@ -2437,12 +2453,15 @@ pub unsafe extern "C" fn insight_pelt(
     out: *mut CPeltResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let len = n as usize;
-        let raw = unsafe { slice::from_raw_parts(data, len) };
+        let raw = unsafe { view(data, len) };
+        if let Err(rc) = pelt_series(raw) {
+            return rc;
+        }
 
         let cost_fn = match cost {
             INSIGHT_PELT_COST_L2 => u_analytics::detection::CostFunction::L2,
@@ -2526,13 +2545,16 @@ pub unsafe extern "C" fn insight_pelt_multi(
     out: *mut CPeltResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n_samples) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
         let ns = n_samples as usize;
         let ch = n_channels as usize;
-        let raw = unsafe { slice::from_raw_parts(data, ns * ch) };
+        let raw = unsafe { view(data, ns * ch) };
+        if let Err(rc) = pelt_series(raw) {
+            return rc;
+        }
 
         // Transpose row-major [n_samples, n_channels] into per-channel slices
         // expected by `Pelt::detect_multi` (one slice per channel).
@@ -2661,7 +2683,7 @@ pub unsafe extern "C" fn insight_mann_kendall(
     out: *mut CMannKendallResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
@@ -2670,7 +2692,7 @@ pub unsafe extern "C" fn insight_mann_kendall(
             return fail(&InsightError::too_few("data", 4, len));
         }
 
-        let raw = unsafe { slice::from_raw_parts(data, len) };
+        let raw = unsafe { view(data, len) };
         if let Some(index) = raw.iter().position(|v| !v.is_finite()) {
             return fail(&InsightError::ValueNotFinite {
                 column: "data".into(),
@@ -2752,7 +2774,7 @@ pub unsafe extern "C" fn insight_kde(
     out: *mut CKdeResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
 
@@ -2787,7 +2809,7 @@ pub unsafe extern "C" fn insight_kde(
         if len < 2 {
             return fail(&InsightError::too_few("data", 2, len));
         }
-        let raw = unsafe { slice::from_raw_parts(data, len) };
+        let raw = unsafe { view(data, len) };
         if let Some(index) = raw.iter().position(|v| !v.is_finite()) {
             return fail(&InsightError::ValueNotFinite {
                 column: "data".into(),
@@ -2898,10 +2920,10 @@ pub unsafe extern "C" fn insight_estimate_period(
     out: *mut CPeriodEstimate,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
-        let raw = unsafe { slice::from_raw_parts(data, n as usize) };
+        let raw = unsafe { view(data, n as usize) };
         if let Some(index) = raw.iter().position(|v| !v.is_finite()) {
             return fail(&InsightError::ValueNotFinite {
                 column: "data".into(),
@@ -3049,10 +3071,10 @@ pub unsafe extern "C" fn insight_spectral_residual(
     out: *mut CSpectralResidualResult,
 ) -> i32 {
     let result = panic::catch_unwind(|| {
-        if data.is_null() || out.is_null() {
+        if absent(data, n) || out.is_null() {
             return refuse(INSIGHT_ERR_NULL_PTR, "null pointer");
         }
-        let raw = unsafe { slice::from_raw_parts(data, n as usize) };
+        let raw = unsafe { view(data, n as usize) };
         let mut sr = u_analytics::detection::SpectralResidual::new();
         if !options.is_null() {
             let o = unsafe { &*options };
@@ -3159,15 +3181,37 @@ unsafe fn free_f64s(values: *mut f64, len: usize) {
     }
 }
 
-/// The series behind `data` (`n` values), or null-pointer refusal.
+/// The series behind `data` (`n` values; null with `n == 0` is empty), or
+/// `None` for a null pointer to a non-empty series.
 ///
 /// # Safety
 /// `data` must be null or point to `n` f64s.
 unsafe fn series<'a>(data: *const f64, n: u32) -> Option<&'a [f64]> {
-    if data.is_null() {
+    if absent(data, n) {
         None
     } else {
-        Some(unsafe { slice::from_raw_parts(data, n as usize) })
+        Some(unsafe { view(data, n as usize) })
+    }
+}
+
+/// Whether an input array is missing: a null pointer for an array that is
+/// not empty. An empty array may come as a null pointer -- `(NULL, 0)` is a
+/// valid empty array in C, and .NET pins an empty array to null -- so it is
+/// the routine's own empty-input refusal that answers it, not a null-pointer one.
+fn absent<T>(ptr: *const T, len: u32) -> bool {
+    ptr.is_null() && len > 0
+}
+
+/// The `len` values behind `ptr`; an empty slice when `len` is 0, whatever
+/// `ptr` is (`slice::from_raw_parts` needs a non-null pointer even then).
+///
+/// # Safety
+/// `ptr` must point to `len` values when `len > 0`.
+unsafe fn view<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
+    if len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(ptr, len) }
     }
 }
 
@@ -6036,6 +6080,100 @@ mod tests {
         // n_samples=50, n_channels=2
         let rc = unsafe { insight_pelt_multi(ptr::null(), 50, 2, 0, 0.0, 2, &mut result) };
         assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    fn no_changepoints() -> CPeltResult {
+        CPeltResult {
+            changepoints: ptr::null_mut(),
+            n_changepoints: 0,
+        }
+    }
+
+    #[test]
+    fn ffi_pelt_refuses_a_value_that_is_not_finite_at_its_position() {
+        let mut data = [2.0_f64; 14];
+        data[2] = f64::NAN;
+        let mut result = no_changepoints();
+        let rc = unsafe { insight_pelt(data.as_ptr(), 14, 0, 0.0, 3, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+        let body = last_error_body().expect("a refusal body");
+        assert_eq!(body["code"], "value_not_finite");
+        assert_eq!(body["parameter"], "data");
+        assert_eq!(body["index"], 2);
+
+        // Several signals: the position is the row-major element's.
+        let mut multi = [1.0_f64; 20]; // 10 samples x 2 channels
+        multi[7] = f64::INFINITY;
+        let rc = unsafe { insight_pelt_multi(multi.as_ptr(), 10, 2, 0, 0.0, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_INVALID_INPUT);
+        let body = last_error_body().expect("a refusal body");
+        assert_eq!(body["code"], "value_not_finite");
+        assert_eq!(body["index"], 7);
+    }
+
+    #[test]
+    fn ffi_an_empty_array_given_as_null_is_refused_as_empty_not_as_a_null_pointer() {
+        // (NULL, 0) is how C passes an empty array and how .NET pins one.
+        let mut result = no_changepoints();
+        let rc = unsafe { insight_pelt(ptr::null(), 0, 0, 0.0, 3, &mut result) };
+        assert_ne!(rc, INSIGHT_ERR_NULL_PTR);
+        assert_eq!(
+            last_error_body().expect("a refusal body")["code"],
+            "empty_input"
+        );
+
+        let rc = unsafe { insight_pelt_multi(ptr::null(), 0, 2, 0, 0.0, 2, &mut result) };
+        assert_ne!(rc, INSIGHT_ERR_NULL_PTR);
+        assert_eq!(
+            last_error_body().expect("a refusal body")["code"],
+            "empty_input"
+        );
+
+        let mut mk: CMannKendallResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe { insight_mann_kendall(ptr::null(), 0, &mut mk) };
+        assert_ne!(rc, INSIGHT_ERR_NULL_PTR);
+        assert_eq!(
+            last_error_body().expect("a refusal body")["code"],
+            "insufficient_data"
+        );
+
+        let mut km: CKMeansResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe { insight_kmeans(ptr::null(), 0, 3, 2, &mut km) };
+        assert_ne!(rc, INSIGHT_ERR_NULL_PTR);
+
+        // A null pointer to an array that is not empty is still a null pointer.
+        let rc = unsafe { insight_pelt(ptr::null(), 4, 0, 0.0, 2, &mut result) };
+        assert_eq!(rc, INSIGHT_ERR_NULL_PTR);
+    }
+
+    #[test]
+    fn ffi_array_inputs_are_read_through_the_empty_aware_helpers() {
+        // Every routine's input array goes through `absent` / `view`: a bare
+        // `data.is_null()` refusal (or `slice::from_raw_parts(data, ..)`)
+        // would refuse an empty array as a null pointer again.
+        let source = include_str!("ffi.rs");
+        let library = &source[..source.find("#[cfg(test)]").expect("a test module")];
+        // A whole identifier: `csv_data.is_null()` and `ctx.is_null()` are not inputs of this kind,
+        // and `!labels.is_null()` / `r.x.is_null()` are about outputs, not inputs.
+        let whole = |needle: &str| {
+            library
+                .match_indices(needle)
+                .filter(|&(at, _)| {
+                    !library[..at]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '!' | '.'))
+                })
+                .count()
+        };
+        for name in ["data", "labels", "target", "table", "x", "y"] {
+            for bare in [
+                format!("{name}.is_null()"),
+                format!("slice::from_raw_parts({name},"),
+            ] {
+                assert_eq!(whole(&bare), 0, "{bare} outside the helpers");
+            }
+        }
     }
 
     #[test]

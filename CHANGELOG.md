@@ -22,6 +22,14 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Fixed
 
+- The C ABI refused an empty array passed as a null pointer with `count = 0` as a null pointer
+  (`null pointer`, no reason). `(NULL, 0)` is a valid empty array in C and is how .NET pins an
+  empty array, so the .NET client's `Pelt([])` and every other routine given an empty array
+  failed that way. A null pointer is now refused only for an array that is not empty; an empty
+  one reaches the routine's own refusal (`empty_input`, `insufficient_data`, ...).
+- `pelt` and `pelt_multi` accepted values that are not finite: one NaN made every segment cost
+  NaN and the answer "no changepoints". They now refuse it as `value_not_finite` with its
+  `index` (row-major for `pelt_multi`), and refuse an empty series as `empty_input`.
 - `lof` decided which neighbours tie at the k-distance with a fixed tolerance of
   1e-15, so the same points in other units gave other scores: in units near 1e-14
   a distance a hair beyond the tie counted as one of them. Two distances are now

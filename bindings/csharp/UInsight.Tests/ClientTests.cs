@@ -459,6 +459,25 @@ public class ClientTests : IDisposable
     }
 
     [Fact]
+    public void An_empty_series_is_refused_as_empty_not_as_a_null_pointer()
+    {
+        // .NET pins an empty array to a null pointer.
+        var ex = Assert.Throws<InsightException>(() => _client.Pelt([]));
+        Assert.Equal("empty_input", ex.ErrorCode);
+        Assert.Equal("data", ex.Parameter);
+    }
+
+    [Fact]
+    public void Pelt_refuses_a_value_that_is_not_finite_at_its_index()
+    {
+        double[] data = [2, 2, double.NaN, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+        var ex = Assert.Throws<InsightException>(() => _client.Pelt(data, PeltCost.L2, 0, 3));
+        Assert.Equal("value_not_finite", ex.ErrorCode);
+        Assert.Equal("data", ex.Parameter);
+        Assert.Equal(2, ex.Index);
+    }
+
+    [Fact]
     public void A_constant_or_short_series_is_refused()
     {
         var flat = Enumerable.Repeat(3.0, 10).ToArray();
