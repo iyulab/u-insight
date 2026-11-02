@@ -9,16 +9,13 @@ A statistical analysis and data profiling engine in Rust with C FFI bindings.
 
 ## What's New (unreleased)
 
-- **STL seasonal-trend decomposition** on every surface: WASM `stl`, C ABI
-  `insight_stl`, and .NET `Stl` — trend, seasonal and remainder of a series with
-  a known period by Loess, with statsmodels' defaults, an optional robust outer
-  loop, and the strengths of trend and seasonality.
-- **Autocorrelation, partial autocorrelation, the augmented Dickey-Fuller
-  test and the KPSS stationarity test** on every surface: WASM `acf` / `pacf` /
-  `adf_test` / `kpss_test`, C ABI `insight_acf` / `insight_pacf` /
-  `insight_adf_test` / `insight_kpss_test`, and .NET `Acf` / `Pacf` / `AdfTest` /
-  `KpssTest` — with Bartlett's limits per lag beside the white-noise threshold,
-  and the same lag defaults, ranges and refusals on every surface.
+- **The single-series statistics are no longer in the WebAssembly package, the C
+  ABI or `UInsight`**: autocorrelation and partial autocorrelation, the ADF and
+  KPSS tests, the Mann-Kendall trend test, PELT changepoint detection, STL
+  decomposition, period estimation, spectral residual scoring and kernel
+  density estimation. They are the `u-analytics` crate's own surface —
+  `UAnalytics` for .NET, `@iyulab/u-analytics` for JavaScript — which has each
+  of them. `CHANGELOG.md` maps every removed function to its replacement.
 - **SPC control charts, process capability, sigma ↔ PPM and Weibull reliability
   are no longer in the C ABI or in `UInsight`.** They are the `u-analytics`
   crate's own surface, carried to .NET by `UAnalytics` and to JavaScript by
@@ -127,7 +124,7 @@ Built on `u-analytics` (statistical algorithms), `u-numflow` (math primitives).
 
 | Module | Description |
 |--------|-------------|
-| `ffi` | C FFI bindings — 56 functions, 35 `#[repr(C)]` structs, auto-generated C header via cbindgen |
+| `ffi` | C FFI bindings — 38 functions, 21 `#[repr(C)]` structs, auto-generated C header via cbindgen |
 
 ## Quick Start
 
@@ -228,37 +225,6 @@ u-insight builds as `cdylib` + `staticlib` for cross-language interop. A C heade
 |----------|-------------|
 | `insight_distribution` | Normality testing (KS, JB, SW, AD) |
 
-### Changepoint Detection
-
-| Function | Description |
-|----------|-------------|
-| `insight_pelt` | PELT changepoint detection (univariate) |
-| `insight_pelt_multi` | PELT changepoint detection (multivariate) |
-
-### Time Series
-
-| Function | Description |
-|----------|-------------|
-| `insight_estimate_period` | Dominant period of a series (AutoPeriod); `period` 0 = none, candidates listed |
-| `insight_free_period_estimate` | Frees the candidates of a `CPeriodEstimate` |
-| `insight_spectral_residual` | Spectral residual anomaly scoring (Ren et al. 2019); null options = paper defaults |
-| `insight_free_spectral_residual_result` | Frees the points of a `CSpectralResidualResult` |
-| `insight_acf` | Sample autocorrelation, white-noise threshold and Bartlett's limits; `max_lag` a pointer, null = `min(⌊10·log₁₀ n⌋, n − 1)` |
-| `insight_free_acf_result` | Frees the arrays of a `CAcfResult` |
-| `insight_pacf` | Sample partial autocorrelation (Durbin-Levinson); `max_lag` null = default, lags below `n / 2` |
-| `insight_free_pacf_result` | Frees the array of a `CPacfResult` |
-| `insight_adf_test` | Augmented Dickey-Fuller test; `model` `INSIGHT_ADF_NONE` / `_CONSTANT` / `_CONSTANT_TREND`, `max_lags` / `lags` pointers (null = not given, at most one) |
-| `insight_kpss_test` | KPSS stationarity test; `model` `INSIGHT_KPSS_LEVEL` / `_TREND`, `lag_rule` (`INSIGHT_KPSS_LAGS_HOBIJN` / `_SCHWERT`) and `lags` pointers (null = not given, at most one); `p_value_bound` one of `INSIGHT_KPSS_P_*` |
-| `insight_stl` | STL seasonal-trend decomposition; `period` required, each option (`seasonal`, `trend`, `low_pass`, the three degrees, `inner_iterations`, `outer_iterations`) a pointer, null = default; `robust` a flag |
-| `insight_free_stl_result` | Frees the four arrays of a `CStlResult` |
-
-### Trend & Density Estimation
-
-| Function | Description |
-|----------|-------------|
-| `insight_mann_kendall` | Mann-Kendall trend test with Sen's slope |
-| `insight_kde` | Gaussian kernel density estimation (Silverman/Scott/manual bandwidth) |
-
 ### SPC, process capability and Weibull reliability
 
 Control charts, process capability (normal, Box-Cox, percentile), sigma ↔ PPM
@@ -266,6 +232,10 @@ and Weibull fitting and reliability are not part of this library's C ABI. They
 come from [u-analytics](https://crates.io/crates/u-analytics) — over its own C
 ABI and the `UAnalytics` NuGet package, and over `@iyulab/u-analytics` for
 JavaScript — which is the one place they are implemented and kept current.
+
+Time-series and density users likewise go to u-analytics: autocorrelation,
+ADF / KPSS / Mann-Kendall tests, changepoint detection, STL, period estimation,
+spectral residual scoring and kernel density estimation are its functions.
 
 ### Feature Importance
 
@@ -286,12 +256,6 @@ JavaScript — which is the one place they are implemented and kept current.
 | `insight_free_anova_features` | Free ANOVA feature arrays |
 | `insight_free_mi_features` | Free MI feature arrays |
 | `insight_free_perm_features` | Free permutation importance arrays |
-| `insight_free_pelt_result` | Free PELT changepoint results |
-| `insight_free_kde_result` | Free KDE results |
-| `insight_free_variables_chart_result` | Free variables control chart results |
-| `insight_free_attribute_chart_result` | Free attributes control chart results |
-| `insight_free_laney_chart_result` | Free Laney P'/U' chart results |
-| `insight_free_rare_event_chart_result` | Free G/T chart results |
 
 ### Error & Version
 
@@ -334,10 +298,10 @@ The binding is in `bindings/csharp/UInsight/` with:
 ## Test Status
 
 ```text
-474 lib tests + 53 doc-tests = 527 total
+459 lib tests + 57 doc-tests = 516 total
 0 clippy warnings
 Build: lib + cdylib + staticlib
-C header: auto-generated via cbindgen (35 structs, 56 functions)
+C header: auto-generated via cbindgen (21 structs, 38 functions)
 ```
 
 ## Scope & Non-Goals
@@ -435,14 +399,14 @@ try {
 | `unknown_option` | `parameter`, `got`, `expected` | A `linkage`, `method`, `bin_method` or `_method` that names none of the supported values |
 | `missing_option` | `parameter`, `expected` | A `hierarchical` config with neither `n_clusters` nor `distance_threshold` |
 | `invalid_option` | `parameter` | Options that contradict each other (`config.distance_threshold` given with `n_clusters`) or a limit the data exceeds (more points than `max_points`). An option that is simply outside an interval is `parameter_out_of_range` instead |
-| `parameter_out_of_range` | `parameter`, `got` (and `index`, `min`, `max`, `exclusive_min`, `exclusive_max` where they apply) | A numeric option outside the interval it takes: `kmeans` `k`, PCA `n_components`, LOF `k`, hierarchical `n_clusters`, isolation forest `n_estimators` and histogram `bins` (`min: 1`), DBSCAN `min_samples` (`min: 2`) and `epsilon` (`exclusive_min: 0`), hierarchical `distance_threshold` (`min: 0`), isolation forest `contamination` (`min: 0, max: 1`), LOF `threshold` (`exclusive_min: 0` — a LOF score is always positive), `significance_level` of `distribution_analysis` and of `feature_importance` `anova` (`exclusive_min: 0, exclusive_max: 1`), `vif_diagnostic` `_threshold` (`min: 1` — no VIF is below 1), the `spectral_residual` options, a seed (`min: 0`). The C ABI refuses the same options the same way (`insight_lof` `threshold`, `insight_distribution` / `insight_anova_select` `significance_level`), and also `insight_cramers_v` `n_rows` / `n_cols` (`min: 2`) and a negative frequency (`parameter: "table[i]"`, `min: 0`), and an `insight_profile_column` `col_idx` past the last column (`min: 0, max: <columns> - 1`). PCA `n_components` above the number of features carries `max` — that number. A negative count is refused with the same fields as `0`, `got` aside, and one too large for the platform with `max`. A `silhouette` label `≥ k` or negative is refused at its `index` with `min: 0, max: k - 1`. `min` / `max` are inclusive bounds and `exclusive_min` / `exclusive_max` exclusive ones; each is present only on the side it applies to — `threshold` (`> 0`) carries `exclusive_min: 0`, `sensitivity` (strictly between 0 and 100) `exclusive_min: 0, exclusive_max: 100`, `min_zscore` (`≥ 0`) `min: 0` |
+| `parameter_out_of_range` | `parameter`, `got` (and `index`, `min`, `max`, `exclusive_min`, `exclusive_max` where they apply) | A numeric option outside the interval it takes: `kmeans` `k`, PCA `n_components`, LOF `k`, hierarchical `n_clusters`, isolation forest `n_estimators` and histogram `bins` (`min: 1`), DBSCAN `min_samples` (`min: 2`) and `epsilon` (`exclusive_min: 0`), hierarchical `distance_threshold` (`min: 0`), isolation forest `contamination` (`min: 0, max: 1`), LOF `threshold` (`exclusive_min: 0` — a LOF score is always positive), `significance_level` of `distribution_analysis` and of `feature_importance` `anova` (`exclusive_min: 0, exclusive_max: 1`), `vif_diagnostic` `_threshold` (`min: 1` — no VIF is below 1), a seed (`min: 0`). The C ABI refuses the same options the same way (`insight_lof` `threshold`, `insight_distribution` / `insight_anova_select` `significance_level`), and also `insight_cramers_v` `n_rows` / `n_cols` (`min: 2`) and a negative frequency (`parameter: "table[i]"`, `min: 0`), and an `insight_profile_column` `col_idx` past the last column (`min: 0, max: <columns> - 1`). PCA `n_components` above the number of features carries `max` — that number. A negative count is refused with the same fields as `0`, `got` aside, and one too large for the platform with `max`. A `silhouette` label `≥ k` or negative is refused at its `index` with `min: 0, max: k - 1`. `min` / `max` are inclusive bounds and `exclusive_min` / `exclusive_max` exclusive ones; each is present only on the side it applies to — DBSCAN `epsilon` (`> 0`) carries `exclusive_min: 0`, isolation forest `contamination` (`[0, 1]`) `min: 0, max: 1` |
 | `insufficient_data` | `parameter`, `min`, `got` | Fewer rows than the method needs (`correlation_matrix` 3, the fewest a pair's p-value is defined for), or an option that asks for more than the data holds: `kmeans` `k` or hierarchical `n_clusters` above the number of points, LOF `k` without `k + 1` points (`min` is the rows that option needs) |
 | `value_not_finite` | `parameter`, `index` | A NaN or ±Infinity anywhere in an argument — `parameter` is the path to it (`data.b`), `index` its position in that array, or `null`. `describe` reads NaN as a missing value, like `null` |
 | `dimension_mismatch` | `expected`, `got` (and `parameter`, `index`) | Lengths that have to agree do not — a row shorter than the first (`index` is that row), `labels` vs data rows, … |
 | `empty_input` | `parameter` | An input with nothing in it: no columns, no points (`kmeans([], 2)`, `dbscan([], …)`), no features |
 | `missing_values` | `column`, `count` | A column with missing values where the analysis needs complete data |
 | `not_a_class_label` | `parameter`, `index`, `got` | A classification `target` (`feature_importance` `anova` / `mutual_info`) value that is not a whole number ≥ 0 |
-| `degenerate_data` | `parameter` where one input is to blame | Constant columns, a singular matrix, … — `correlation_matrix` names a constant column as `data.<column>` (the C ABI by position: `data.1` for the second); in the C ABI, `insight_kde` with an automatic bandwidth and `insight_mann_kendall` on values that are all the same name `data`, and `insight_cramers_v` names `table` for a table with no observations or a row or column that sums to 0 |
+| `degenerate_data` | `parameter` where one input is to blame | Constant columns, a singular matrix, … — `correlation_matrix` names a constant column as `data.<column>` (the C ABI by position: `data.1` for the second); in the C ABI, `insight_cramers_v` names `table` for a table with no observations or a row or column that sums to 0 |
 | `column_not_found` | `column` | A column name the data does not have |
 | `computation_failed` | `operation` | A numerical step that did not converge or produced no result |
 | `csv_parse` | `line` | CSV text the C ABI cannot read (`insight_profile_csv`) — `line` is where |
@@ -620,197 +584,6 @@ Feature importance via permutation, ANOVA, or mutual information.
 **Output:**
 ```json
 { "method": "permutation", "features": [{ "name": "f1", "index": 0, "score": 0.8, "std_dev": 0.1 }], "baseline_score": 0.5 }
-```
-
-#### `estimate_period(data) -> PeriodEstimate`
-
-Dominant period of a univariate series — AutoPeriod (Vlachos, Yu & Castelli
-2005): peaks of the detrended, zero-padded periodogram above a permutation
-threshold (100 seeded shuffles, so the estimate is deterministic), each refined
-on the autocorrelation function to the integer lag that is a local maximum
-above the `1.96/√n` bound. At least 8 finite values.
-
-**Input:** `{ "data": [0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 0, 1] }`
-
-**Output:**
-```json
-{ "period": 7, "candidates": [{ "period": 7, "acf": 0.71, "bin": 18, "power": 21.3, "power_share": 0.62 }],
-  "n": 16, "acf_threshold": 0.49, "power_threshold": 6.8 }
-// `acf` has the (n - lag)/n bias of the estimator undone, so it is comparable
-// against `acf_threshold`. The period is exact whether or not the series is a
-// whole number of cycles long.
-```
-
-`period` is `null` — explicitly, not an error — when no periodicity passes both
-stages (a constant, a pure trend, white noise). Only periods from 2 to `n/2`
-are admissible.
-
-#### `spectral_residual(data) -> SpectralResidualResult`
-
-Score every point for anomalies by spectral residual saliency (Ren et al.
-2019) — spikes, steps and dropouts, without a trained model and without
-assuming a period. At least 12 finite values; the options default to the
-paper's.
-
-**Input:**
-```json
-{ "data": [1, 1.1, 0.9, 1, 6, 1, 1.1, 0.9, 1, 1, 1.1, 0.9],
-  "averaging_window": 3, "judgement_window": 40, "threshold": 3.0,
-  "min_zscore": 1.5, "sensitivity": 70, "batch_size": null }
-```
-
-**Output:**
-```json
-{ "points": [{ "index": 4, "value": 6, "saliency": 2.1, "score": 5.3,
-               "expected": 1.0, "lower": 0.9, "upper": 1.1, "is_anomaly": true, "near_edge": false }],
-  "anomalies": [4] }
-```
-
-`expected` is the low-frequency reconstruction of the series with its anomalies
-replaced by their neighbours and `lower`/`upper` the band of `sensitivity`
-percent coverage around it — chart information; the anomaly decision is the
-`score` against `threshold`, gated by `min_zscore` against the level of the
-window before the point.
-
-#### `acf(data) -> AcfResult`
-
-Sample autocorrelation for lags 0 to `max_lag` (the biased estimator), with the
-95 % white-noise threshold `z / √n` and Bartlett's 95 % limits per lag — for lag
-k, under the hypothesis that the autocorrelation is zero beyond lag k − 1 (the
-bands an ACF plot draws to choose an MA order). At least 2 finite values.
-
-**Input:** `{ "data": number[], "max_lag"?: number | null }` — `max_lag` a whole
-number in `[1, n − 1]`; absent or `null` = `min(⌊10·log₁₀ n⌋, n − 1)`.
-
-**Output:**
-```json
-{ "acf": [1, 0.49, -0.36], "confidence_threshold": 0.4, "bartlett_limits": [0.4, 0.49] }
-// `acf` has lags 0..=max_lag, `bartlett_limits` lags 1..=max_lag.
-```
-
-A `max_lag` outside its range is `parameter_out_of_range` (`parameter: "max_lag"`,
-`min: 1`, `max: n − 1`, `got`); a series that does not vary is `degenerate_data`
-(`parameter: "data"`); fewer than 2 values `insufficient_data`.
-
-#### `pacf(data) -> PacfResult`
-
-Sample partial autocorrelation for lags 1 to `max_lag` — Durbin-Levinson on the
-biased autocorrelation — with the 95 % threshold `z / √n`. At least 4 finite
-values.
-
-**Input:** `{ "data": number[], "max_lag"?: number | null }` — `max_lag` a whole
-number in `[1, n / 2 − 1]` (beyond `n / 2` the recursion runs on
-autocorrelations from too few pairs); absent = `min(⌊10·log₁₀ n⌋, n / 2 − 1)`.
-
-**Output:** `{ "pacf": number[] /* lags 1..=max_lag */, "confidence_threshold": number }`
-
-Refusals as `acf`.
-
-#### `adf_test(data) -> AdfResult`
-
-Augmented Dickey-Fuller unit-root test (H₀: a unit root). At least 10 finite
-values.
-
-**Input:**
-```json
-{ "data": [/* ... */], "model": "constant", "max_lags": null, "lags": null }
-```
-
-- `model`: `"none"` | `"constant"` (default) | `"constant_trend"` — the
-  deterministic terms of the test regression; another name is `unknown_option`.
-- `max_lags`: the largest number of lagged differences the AIC search considers;
-  absent or `null` = Schwert's rule `⌊12·(n/100)^¼⌋`.
-- `lags`: exactly this many lagged differences, no search.
-
-Give at most one of `max_lags` and `lags` (both: `invalid_option`,
-`parameter: "lags"`). Each is a whole number from 0 to the most the data leave
-room for — at least 5 regression rows and a residual degree of freedom —
-refused outside as `parameter_out_of_range` with `min: 0` and that `max`. A
-deterministic series (an exact fit of the differences) is `degenerate_data`.
-
-**Output:**
-```json
-{ "statistic": -3.44, "n_lags": 5, "n_obs": 114,
-  "levels": [{ "level": 0.01, "critical_value": -3.49, "rejected": false },
-             { "level": 0.05, "critical_value": -2.89, "rejected": true },
-             { "level": 0.10, "critical_value": -2.58, "rejected": true }] }
-// Critical values from MacKinnon's (2010) response surfaces;
-// `rejected` = statistic <= critical_value.
-```
-
-#### `kpss_test(data) -> KpssResult`
-
-KPSS stationarity test (H₀: the series is stationary around a level or a trend)
-— the complement of `adf_test`, whose null is the unit root. At least 10 finite
-values.
-
-**Input:**
-```json
-{ "data": [/* ... */], "model": "level", "lag_rule": null, "lags": null }
-```
-
-- `model`: `"level"` (default) | `"trend"`; another name is `unknown_option`.
-- `lag_rule`: how the truncation lag of the long-run variance is chosen —
-  `"hobijn"` (Hobijn, Franses & Ooms 1998, from the residuals' own
-  autocovariances; the default when neither option is given) | `"schwert"`
-  (`⌈12·(n/100)^¼⌉`).
-- `lags`: exactly this truncation lag, a whole number in `[0, n − 1]` (outside:
-  `parameter_out_of_range` with `min: 0`, `max: n − 1`).
-
-Give at most one of `lag_rule` and `lags` (both: `invalid_option`,
-`parameter: "lags"`). A series with no variation about its level (or trend) is
-`degenerate_data`.
-
-**Output:**
-```json
-{ "statistic": 0.52, "n_lags": 3, "p_value": 0.037, "p_value_bound": "interpolated",
-  "levels": [{ "level": 0.01, "critical_value": 0.739, "rejected": false },
-             { "level": 0.025, "critical_value": 0.574, "rejected": false },
-             { "level": 0.05, "critical_value": 0.463, "rejected": true },
-             { "level": 0.1, "critical_value": 0.347, "rejected": true }] }
-// Critical values from Kwiatkowski et al. (1992), Table 1; `rejected` =
-// statistic > critical_value. `p_value` is interpolated in that table and
-// clamped to [0.01, 0.10]: `p_value_bound` "at_most" / "at_least" says it is
-// the table's bound.
-```
-
-#### `stl(data) -> StlResult`
-
-Seasonal-trend decomposition by Loess (STL; Cleveland et al. 1990) of a series
-with a known period: `data = trend + seasonal + residual`, with the defaults of
-statsmodels' `STL`. With the ACF, ADF and KPSS it answers what a series is made
-of.
-
-**Input:**
-```json
-{ "data": [/* ... */], "period": 12, "seasonal": null, "trend": null, "low_pass": null,
-  "seasonal_degree": null, "trend_degree": null, "low_pass_degree": null,
-  "robust": false, "inner_iterations": null, "outer_iterations": null }
-```
-
-- `period`: the cycle length, a whole number of at least 2; at least two full
-  cycles of finite values (fewer: `insufficient_data` with `min`, `got`).
-- `seasonal`: odd span of the seasonal smoother, at least 3 (default 7).
-- `trend`, `low_pass`: odd spans above the period (`parameter_out_of_range`
-  with `exclusive_min` = period); default the smallest odd integer at least
-  `1.5 · period / (1 − 1.5 / seasonal)`, and the smallest odd integer above the
-  period.
-- `seasonal_degree`, `trend_degree`, `low_pass_degree`: 0 or 1 (default 1).
-- `robust`: an outer loop of bisquare weights from the remainder, so an outlier
-  lands in `residual` instead of bending the components (default `false`).
-- `inner_iterations` (at least 1) / `outer_iterations` (at least 0): default 5 /
-  0, or 2 / 15 when robust.
-
-An even span is `invalid_option` (`parameter` names it); a negative count is
-`parameter_out_of_range`.
-
-**Output:**
-```json
-{ "trend": [/* n */], "seasonal": [/* n */], "residual": [/* n */], "weights": [/* n */],
-  "trend_strength": 0.98, "seasonal_strength": 0.95,
-  "period": 12, "seasonal_span": 7, "trend_span": 23, "low_pass_span": 13 }
-// weights: the last pass's robustness weights, all 1 without `robust`.
-// Strengths: max(0, 1 − Var(R)/Var(C + R)) (Wang, Smith & Hyndman 2006).
 ```
 
 ## npm (WebAssembly)

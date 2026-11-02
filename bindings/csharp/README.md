@@ -11,7 +11,6 @@
 - **Statistical Analysis**: Pearson correlation, simple linear regression, Cramer's V
 - **Distribution**: Normality testing (KS, Jarque-Bera, Shapiro-Wilk, Anderson-Darling)
 - **Feature Importance**: Composite scores, ANOVA F-test, Mutual Information, Permutation Importance
-- **Time Series**: Period estimation, spectral residual anomaly scoring, ACF (with Bartlett's limits), PACF, augmented Dickey-Fuller test, KPSS stationarity test, STL decomposition
 - **Cross-Platform**: Windows, Linux, and macOS support
 
 ## Installation
@@ -83,7 +82,10 @@ Console.WriteLine($"Normal: {dist.IsNormal}, SW p={dist.SwPValue:F4}");
 ## API Reference
 
 SPC control charts, process capability, sigma ↔ PPM and Weibull reliability are
-in the `UAnalytics` package, not here.
+in the `UAnalytics` package, not here — and so are the single-series statistics:
+autocorrelation, unit-root and stationarity tests, trend tests, changepoint
+detection, STL decomposition, period estimation, spectral residual scoring and
+kernel density estimation.
 
 ### InsightClient
 
@@ -127,17 +129,6 @@ public sealed class InsightClient : IDisposable
     AnovaSelectionResult AnovaSelect(double[,] data, uint[] target, double significanceLevel = 0.05);
     MutualInfoResult MutualInfo(double[,] data, uint[] target, uint nBins = 10);
     PermImportanceResult PermutationImportance(double[,] data, double[] target, uint nRepeats = 5, ulong seed = 42);
-
-    // Time Series
-    PeriodEstimate EstimatePeriod(double[] data);
-    SpectralResidualResult SpectralResidual(double[] data, SpectralResidualOptions? options = null);
-    AcfResult Acf(double[] data, int? maxLag = null);      // null: min(floor(10 log10 n), n - 1)
-    PacfResult Pacf(double[] data, int? maxLag = null);    // lags below n / 2
-    AdfResult AdfTest(double[] data, AdfModel model = AdfModel.Constant, int? maxLags = null, int? lags = null);
-    KpssResult KpssTest(double[] data, KpssModel model = KpssModel.Level, KpssLagRule? lagRule = null, int? lags = null);
-    StlResult Stl(double[] data, int period, int? seasonal = null, int? trend = null, int? lowPass = null,
-        int? seasonalDegree = null, int? trendDegree = null, int? lowPassDegree = null, bool robust = false,
-        int? innerIterations = null, int? outerIterations = null);  // null: statsmodels' STL default
 }
 ```
 

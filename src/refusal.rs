@@ -206,15 +206,6 @@ impl Refusal {
         })
     }
 
-    /// A NaN or infinity at `index` of `parameter`.
-    pub(crate) fn value_not_finite(parameter: &str, index: usize) -> Self {
-        Self::new(
-            Code::ValueNotFinite,
-            format!("{parameter}[{index}] is not a finite number"),
-            json!({ "parameter": parameter, "index": index }),
-        )
-    }
-
     /// The stable reason, as the `code` field carries it.
     #[cfg(all(test, feature = "wasm"))]
     pub(crate) fn code(&self) -> &str {
@@ -310,46 +301,5 @@ impl From<&InsightError> for Refusal {
             InsightError::Io(_) => (Code::Internal, json!({})),
         };
         Refusal::new(code, message, fields)
-    }
-}
-
-impl From<&u_analytics::detection::SpectralResidualError> for Refusal {
-    fn from(e: &u_analytics::detection::SpectralResidualError) -> Self {
-        use u_analytics::detection::SpectralResidualError as E;
-        let message = e.to_string();
-        match e {
-            E::OptionOutOfRange {
-                option,
-                got,
-                min,
-                exclusive_min,
-                max,
-                exclusive_max,
-                ..
-            } => {
-                // Each bound is sent only on the side it applies to: `min` /
-                // `max` inclusive, `exclusive_min` / `exclusive_max` exclusive.
-                let mut fields = json!({ "parameter": option });
-                for (key, bound) in [
-                    ("min", min),
-                    ("exclusive_min", exclusive_min),
-                    ("max", max),
-                    ("exclusive_max", exclusive_max),
-                ] {
-                    if let Some(v) = bound {
-                        fields[key] = json!(v);
-                    }
-                }
-                fields["got"] = json!(got);
-                Refusal::new(Code::ParameterOutOfRange, message, fields)
-            }
-            E::TooFewObservations { needed, got } => Refusal::new(
-                Code::InsufficientData,
-                message,
-                json!({ "parameter": "data", "min": needed, "got": got }),
-            ),
-            E::ValueNotFinite { index } => Refusal::value_not_finite("data", *index),
-            _ => Refusal::new(Code::InvalidInput, message, json!({})),
-        }
     }
 }

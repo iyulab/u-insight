@@ -1,13 +1,7 @@
-//! Anomaly and seasonality operations on data whose answer is known by
-//! construction: planted points, a generated period. Isolation forests are
-//! randomised, so the checks are about structure (ranking, range, seed,
-//! unit) rather than a library's numbers; the numerical values of the period
-//! estimate and the spectral residual are compared with NumPy in the engine
-//! that computes them (`u-analytics`), and these tests check that the
-//! operation reaches them.
+//! Anomaly detection on data whose answer is known by construction: planted
+//! points. Isolation forests are randomised, so the checks are about structure
+//! (ranking, range, seed, unit) rather than a library's numbers.
 
-use u_analytics::detection::SpectralResidual;
-use u_analytics::seasonality::estimate_period;
 use u_insight::isolation_forest::{isolation_forest, IsolationForestConfig};
 
 /// 120 points of a smooth three-dimensional cloud, then three planted far points.
@@ -77,34 +71,4 @@ fn isolation_forest_is_reproducible_and_does_not_depend_on_the_unit() {
             );
         }
     }
-}
-
-#[test]
-fn the_period_estimate_is_the_generating_period() {
-    for period in [12usize, 7, 24] {
-        let series: Vec<f64> = (0..120)
-            .map(|i| {
-                10.0 + 3.0 * (2.0 * std::f64::consts::PI * i as f64 / period as f64).sin()
-                    + 0.01 * i as f64
-            })
-            .collect();
-        let r = estimate_period(&series).expect("enough data");
-        assert_eq!(r.period, Some(period), "period {period}");
-    }
-}
-
-#[test]
-fn the_spectral_residual_flags_a_planted_spike() {
-    let mut series: Vec<f64> = (0..96)
-        .map(|i| 5.0 + (i as f64 * 0.5).sin() + 0.05 * (i as f64 * 1.7).cos())
-        .collect();
-    series[60] += 12.0;
-    let points = SpectralResidual::new().analyze(&series).expect("valid");
-    let flagged: Vec<usize> = points
-        .iter()
-        .filter(|p| p.is_anomaly)
-        .map(|p| p.index)
-        .collect();
-    assert!(flagged.contains(&60), "spike not flagged: {flagged:?}");
-    assert!(flagged.len() <= 3, "too many flags: {flagged:?}");
 }

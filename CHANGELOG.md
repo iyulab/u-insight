@@ -8,6 +8,65 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** the single-series statistics — autocorrelation, partial
+  autocorrelation, the augmented Dickey-Fuller and KPSS tests, the Mann-Kendall
+  trend test, PELT changepoint detection (one and several signals), STL
+  decomposition, period estimation, spectral residual anomaly scoring and kernel
+  density estimation — are removed from the WebAssembly package, the C ABI and
+  the .NET client. The `u-analytics` crate provides each of them, over its own C
+  ABI, the `UAnalytics` NuGet package and `@iyulab/u-analytics`, and is where
+  they are implemented and kept current; this library kept a second copy of
+  their bindings. Removed:
+  - WebAssembly: `acf`, `pacf`, `adf_test`, `kpss_test`, `stl`,
+    `estimate_period`, `spectral_residual` and their declared types.
+  - C ABI: `insight_acf`, `insight_pacf`, `insight_adf_test`,
+    `insight_kpss_test`, `insight_mann_kendall`, `insight_pelt`,
+    `insight_pelt_multi`, `insight_stl`, `insight_estimate_period`,
+    `insight_spectral_residual`, `insight_kde`, their free functions
+    (`insight_free_acf_result`, `insight_free_pacf_result`,
+    `insight_free_pelt_result`, `insight_free_period_estimate`,
+    `insight_free_spectral_residual_result`, `insight_free_stl_result`,
+    `insight_free_kde_result`), their 13 `#[repr(C)]` structs and the
+    `INSIGHT_PELT_COST_*`, `INSIGHT_KDE_*`, `INSIGHT_ADF_*` and `INSIGHT_KPSS_*`
+    constants.
+  - .NET: the `InsightClient` methods below with their result, option and enum
+    types (`AcfResult`, `PacfResult`, `AdfResult`, `AdfLevel`, `AdfModel`,
+    `KpssResult`, `KpssLevel`, `KpssModel`, `KpssLagRule`, `KpssPValueBound`,
+    `MannKendallResult`, `PeltResult`, `PeltCost`, `StlResult`,
+    `PeriodEstimate`, `PeriodCandidate`, `SpectralResidualOptions`,
+    `SpectralResidualResult`, `SrPoint`, `KdeResult`, `KdeBandwidthMethod`).
+
+  | `UInsight` `InsightClient` | `UAnalytics` `AnalyticsClient` |
+  |---|---|
+  | `Acf` | `Acf` |
+  | `Pacf` | `Pacf` |
+  | `AdfTest` | `AdfTest` |
+  | `KpssTest` | `KpssTest` |
+  | `MannKendall` | `MannKendallTest` |
+  | `Pelt` | `DetectChangepoints` |
+  | `PeltMulti` | `DetectChangepointsMulti` |
+  | `Stl` | `Stl` |
+  | `EstimatePeriod` | `EstimatePeriod` |
+  | `SpectralResidual` | `SpectralResidual` |
+  | `Kde` | `Kde` (in the next `UAnalytics` release) |
+
+  | `@iyulab/u-insight` | `@iyulab/u-analytics` |
+  |---|---|
+  | `acf` | `acf` |
+  | `pacf` | `pacf` |
+  | `adf_test` | `adf_test` |
+  | `kpss_test` | `kpss_test` |
+  | `stl` | `stl` |
+  | `estimate_period` | `estimate_period` |
+  | `spectral_residual` | `spectral_residual` |
+
+  In JavaScript, `@iyulab/u-analytics` also has `mann_kendall_test`,
+  `detect_changepoints`, `detect_changepoints_multi` and `kde`, which this
+  package never exported. Request and result shapes are each package's own; see
+  the `u-analytics` documentation for them.
+
 ## [0.39.0] - 2026-11-02
 
 Depends on u-numflow 0.16 and u-analytics 0.32. The .NET client `UInsight` is 0.39.0 (lockstep).
