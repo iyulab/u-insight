@@ -750,20 +750,23 @@ pub fn anova_feature_selection(
             .cloned()
             .unwrap_or_else(|| format!("feature_{i}"));
 
-        let (f_statistic, p_value) = match u_analytics::testing::one_way_anova(&group_refs) {
-            Some(anova) => (anova.f_statistic, anova.p_value),
-            // No test: either no spread within any class -- a perfect
-            // separator when the class means differ (F infinite), nothing at
-            // all when the feature is constant -- or a class too small to
-            // test, reported as non-significant.
-            None => {
-                let constant_within = groups.iter().all(|g| g.iter().all(|&x| x == g[0]));
-                let means_differ = groups.iter().any(|g| g[0] != groups[0][0]);
-                if constant_within && means_differ && n > classes.len() {
-                    (f64::INFINITY, 0.0)
-                } else {
-                    (0.0, 1.0)
-                }
+        // No spread within any class is decided here, not left to the ANOVA:
+        // a perfect separator when the class means differ (F infinite, p 0),
+        // nothing at all when the feature is constant (F 0, p 1). What the
+        // ANOVA answers in that case has differed between versions.
+        let constant_within = groups.iter().all(|g| g.iter().all(|&x| x == g[0]));
+        let (f_statistic, p_value) = if constant_within {
+            let means_differ = groups.iter().any(|g| g[0] != groups[0][0]);
+            if means_differ && n > classes.len() {
+                (f64::INFINITY, 0.0)
+            } else {
+                (0.0, 1.0)
+            }
+        } else {
+            match u_analytics::testing::one_way_anova(&group_refs) {
+                Some(anova) => (anova.f_statistic, anova.p_value),
+                // A class too small to test: reported as non-significant.
+                None => (0.0, 1.0),
             }
         };
         results.push((
