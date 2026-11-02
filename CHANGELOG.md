@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-02
+
+Depends on u-numflow 0.16 and u-analytics 0.32. The .NET client `UInsight` is 0.39.0 (lockstep).
+
 ### Changed
 
 - Depends on u-numflow 0.16 and u-analytics 0.32.
