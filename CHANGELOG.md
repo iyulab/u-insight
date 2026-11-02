@@ -10,7 +10,7 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ### Changed
 
-- Depends on u-numflow 0.16 and u-analytics 0.31.
+- Depends on u-numflow 0.16 and u-analytics 0.32.
 - The p-values of the Kendall correlation pairs are exact for up to 33 values without ties and
   use the full tied-data variance otherwise (through u-analytics); they were the normal
   approximation without the tied-group cross terms.
