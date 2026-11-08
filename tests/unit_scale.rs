@@ -12,7 +12,7 @@ use u_insight::lof::{lof, LofConfig};
 use u_insight::mahalanobis::{mahalanobis, MahalanobisConfig};
 use u_insight::pca::{pca, PcaConfig};
 
-const SCALES: [f64; 6] = [1e-12, 1e-9, 1e-6, 1e6, 1e9, 1e12];
+const SCALES: [f64; 10] = [1e-100, 1e-50, 1e-12, 1e-9, 1e-6, 1e6, 1e9, 1e12, 1e50, 1e100];
 
 /// Three blobs of 30 points in three columns, and a distant point.
 fn data() -> Vec<Vec<f64>> {
