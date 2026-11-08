@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-08
+
+Depends on u-analytics 0.34 and u-numflow 0.16. The .NET client is `UInsight` 0.42.0.
+
 ### Fixed
 
 - Feature analysis (`feature_importance`, the C ABI `insight_feature_importance`, `vif_analysis`) took time cubic in
