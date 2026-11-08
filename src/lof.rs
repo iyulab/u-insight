@@ -272,11 +272,7 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
 
 /// Euclidean distance between two points.
 fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y).powi(2))
-        .sum::<f64>()
-        .sqrt()
+    crate::distance::squared_euclidean(a, b).sqrt()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────

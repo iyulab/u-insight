@@ -8,6 +8,20 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- Permutation importance floored the shuffled score at 0 (and the baseline), a leftover from the refitted model,
+  whose in-sample R² could not be negative. With one fitted model a shuffle can leave it worse than the mean, and
+  the floor made every dominant feature read as the baseline R²: with `y = 10a + 3b` over independent columns
+  `a` read 1.0 where scikit-learn's drop is 1.83. The importance is the full drop now and can exceed
+  `baseline_score`; `std_dev` follows. Ranking among features is unchanged except that ties at the baseline break.
+- The squared distance every distance-based method sums (k-means, DBSCAN, HDBSCAN, hierarchical, silhouette,
+  LOF) is a running sum the compiler cannot vectorise, so a table of 200 columns paid about 1.3 ns a coordinate. It
+  is four partial sums in one place now (`distance.rs`), the order of the additions fixed: on 20,000 rows by 200
+  columns k-means 22 s to 11 s, DBSCAN 100 s to 65 s, silhouette 121 s to 64 s, the gap statistic 203 s to 110 s
+  (the distances differ from the old sum only in the last bit). What remains is `n²·d` memory traffic, which a
+  caller bounds with the row thresholds (`HdbscanRowThreshold`, `LofRowThreshold`, …).
+
 ## [0.42.0] - 2026-11-08
 
 Depends on u-analytics 0.34 and u-numflow 0.16. The .NET client is `UInsight` 0.42.0.
@@ -23,11 +37,6 @@ Depends on u-analytics 0.34 and u-numflow 0.16. The .NET client is `UInsight` 0.
   copies of that fit, as scikit-learn does: 200 features take 0.7 s, 800 take 13 s. **Breaking** the scores are
   those of the fitted model with a feature shuffled, not of a model refitted without its signal, so values change
   where features are correlated.
-- Permutation importance floored the shuffled score at 0 (and the baseline), a leftover from the refitted model,
-  whose in-sample R² could not be negative. With one fitted model a shuffle can leave it worse than the mean, and
-  the floor made every dominant feature read as the baseline R²: with `y = 10a + 3b` over independent columns
-  `a` read 1.0 where scikit-learn's drop is 1.83. The importance is the full drop now and can exceed
-  `baseline_score`; `std_dev` follows. Ranking among features is unchanged except that ties at the baseline break.
 
 ## [0.41.0] - 2026-11-02
 

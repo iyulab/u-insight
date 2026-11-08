@@ -684,13 +684,7 @@ fn kmeans_plus_plus(data: &[Vec<f64>], k: usize, _d: usize, seed: Option<u64>) -
 
 #[inline]
 fn euclidean_dist_sq(a: &[f64], b: &[f64]) -> f64 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&ai, &bi)| {
-            let diff = ai - bi;
-            diff * diff
-        })
-        .sum()
+    crate::distance::squared_euclidean(a, b)
 }
 
 #[inline]

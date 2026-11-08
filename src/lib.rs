@@ -55,6 +55,7 @@ pub mod analysis;
 pub mod clustering;
 pub mod csv_parser;
 pub mod dataframe;
+mod distance;
 pub mod distribution;
 pub mod error;
 pub mod feature_importance;
