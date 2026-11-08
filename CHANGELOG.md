@@ -8,6 +8,18 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Fixed
+
+- Feature analysis (`feature_importance`, the C ABI `insight_feature_importance`, `vif_analysis`) took time cubic in
+  the number of columns: 20,000 rows took 0.5 s at 25 columns, 28 s at 100 and 243 s at 200. The VIFs are now read
+  off the correlation matrix by u-analytics (200 columns: 1.0 s, 400: 8 s). A column that is a copy of another
+  used to turn every other column's VIF into 1, and a constant column did the same; neither does now.
+- Permutation importance refitted the model once per feature and repeat, cubic in the number of features as well
+  (and 0 for every feature when two features were copies of each other). It fits once and scores the shuffled
+  copies of that fit, as scikit-learn does: 200 features take 0.7 s, 800 take 13 s. **Breaking** the scores are
+  those of the fitted model with a feature shuffled, not of a model refitted without its signal, so values change
+  where features are correlated.
+
 ## [0.41.0] - 2026-11-02
 
 Depends on u-analytics 0.33 and u-numflow 0.16. The .NET client is `UInsight` 0.41.0.

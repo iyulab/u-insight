@@ -308,8 +308,12 @@ pub fn feature_analysis(
         pairs
     };
 
-    // Step 3: VIF (using simple regression approach)
-    let vifs = compute_vif_values(features, n);
+    // Step 3: VIF -- the diagonal of the correlation matrix's inverse
+    // (u-analytics), not a regression per feature (O(n·p³)). A decomposition
+    // that fails leaves the collinearity unquantifiable: infinite, as the
+    // condition number below.
+    let vifs = u_analytics::regression::vif_from_correlation(&correlation_matrix)
+        .unwrap_or_else(|| vec![f64::INFINITY; p]);
     let vif_results: Vec<VifResult> = vifs
         .iter()
         .enumerate()
@@ -408,105 +412,8 @@ fn compute_variance(data: &[f64]) -> f64 {
     sum_sq / (n - 1) as f64
 }
 
-/// Compute VIF for each feature by regressing each on all others.
-fn compute_vif_values(features: &[Vec<f64>], n: usize) -> Vec<f64> {
-    let p = features.len();
-    if p <= 1 {
-        return vec![1.0; p];
-    }
-
-    let mut vifs = Vec::with_capacity(p);
-
-    for target in 0..p {
-        // Collect other features as predictors
-        let predictors: Vec<&[f64]> = (0..p)
-            .filter(|&i| i != target)
-            .map(|i| features[i].as_slice())
-            .collect();
-
-        // Compute R² of target regressed on predictors
-        let r2 = compute_r2_multiple(&features[target], &predictors, n);
-
-        if r2 < 1.0 - 1e-15 {
-            vifs.push(1.0 / (1.0 - r2));
-        } else {
-            vifs.push(f64::INFINITY);
-        }
-    }
-
-    vifs
-}
-
-/// Compute R² for multiple regression using normal equations (Cholesky).
-fn compute_r2_multiple(target: &[f64], predictors: &[&[f64]], n: usize) -> f64 {
-    let p = predictors.len();
-    if p == 0 || n < p + 1 {
-        return 0.0;
-    }
-
-    // Center target
-    let y_mean = target.iter().sum::<f64>() / n as f64;
-
-    // Build X'X and X'y (with intercept)
-    let p1 = p + 1; // predictors + intercept
-    let mut xtx_data = vec![0.0; p1 * p1];
-    let mut xty = vec![0.0; p1];
-
-    for i in 0..n {
-        let y = target[i];
-
-        // Row of X: [1, x1, x2, ...]
-        let mut x_row = Vec::with_capacity(p1);
-        x_row.push(1.0);
-        for pred in predictors {
-            x_row.push(pred[i]);
-        }
-
-        for j in 0..p1 {
-            xty[j] += x_row[j] * y;
-            for k in j..p1 {
-                xtx_data[j * p1 + k] += x_row[j] * x_row[k];
-                if j != k {
-                    xtx_data[k * p1 + j] += x_row[j] * x_row[k];
-                }
-            }
-        }
-    }
-
-    let xtx = match Matrix::new(p1, p1, xtx_data) {
-        Ok(m) => m,
-        Err(_) => return 0.0,
-    };
-
-    let coeffs = match xtx.cholesky_solve(&xty) {
-        Ok(c) => c,
-        Err(_) => return 0.0, // singular → return 0
-    };
-
-    // Compute R² = 1 - SS_res / SS_tot
-    let mut ss_res = 0.0;
-    let mut ss_tot = 0.0;
-    for i in 0..n {
-        let mut y_hat = coeffs[0]; // intercept
-        for (j, pred) in predictors.iter().enumerate() {
-            y_hat += coeffs[j + 1] * pred[i];
-        }
-        let y = target[i];
-        ss_res += (y - y_hat) * (y - y_hat);
-        ss_tot += (y - y_mean) * (y - y_mean);
-    }
-
-    // No variation in the target: nothing above the rounding of its mean,
-    // judged against its own size (a fixed number would call a target in small
-    // units constant and report every importance as 0).
-    let target_size: f64 = target.iter().map(|y| y * y).sum();
-    if ss_tot <= 1e-20 * target_size {
-        return 0.0;
-    }
-    1.0 - ss_res / ss_tot
-}
-
-/// Compute condition number from correlation matrix eigenvalues.
+/// Condition number: the square root of the ratio of the largest to the
+/// smallest eigenvalue of the correlation matrix; infinite when it is singular.
 fn compute_condition_number(corr: &[Vec<f64>], p: usize) -> f64 {
     if p <= 1 {
         return 1.0;
@@ -542,6 +449,108 @@ fn compute_condition_number(corr: &[Vec<f64>], p: usize) -> f64 {
         }
         Err(_) => f64::INFINITY,
     }
+}
+
+/// A least-squares fit of `target` on `predictors` and an intercept, kept for
+/// scoring changed copies of the predictors.
+struct LinearFit {
+    /// Slope per predictor.
+    slopes: Vec<f64>,
+    /// Predictor means (the fit is centred).
+    means: Vec<f64>,
+    /// Target mean.
+    y_mean: f64,
+}
+
+impl LinearFit {
+    /// Fits by the normal equations on centred data. A singular system (a
+    /// duplicated or constant predictor) is solved with a small ridge, grown
+    /// until it factors — the fit stays usable and the duplicated predictors
+    /// share the weight. `None` when no ridge makes it factor.
+    fn new(target: &[f64], predictors: &[&[f64]], n: usize) -> Option<Self> {
+        let p = predictors.len();
+        let nf = n as f64;
+        let y_mean = target.iter().sum::<f64>() / nf;
+        let means: Vec<f64> = predictors
+            .iter()
+            .map(|f| f.iter().sum::<f64>() / nf)
+            .collect();
+
+        let mut gram = vec![0.0; p * p];
+        let mut rhs = vec![0.0; p];
+        for j in 0..p {
+            let (fj, mj) = (predictors[j], means[j]);
+            rhs[j] = fj
+                .iter()
+                .zip(target)
+                .map(|(&x, &y)| (x - mj) * (y - y_mean))
+                .sum();
+            for k in j..p {
+                let (fk, mk) = (predictors[k], means[k]);
+                let g: f64 = fj
+                    .iter()
+                    .zip(fk.iter())
+                    .map(|(&a, &b)| (a - mj) * (b - mk))
+                    .sum();
+                gram[j * p + k] = g;
+                gram[k * p + j] = g;
+            }
+        }
+
+        let scale = (0..p).map(|j| gram[j * p + j]).sum::<f64>() / p as f64;
+        let mut ridge = 0.0;
+        for attempt in 0..8 {
+            let mut data = gram.clone();
+            for j in 0..p {
+                data[j * p + j] += ridge;
+            }
+            if let Ok(solved) = Matrix::new(p, p, data).and_then(|m| m.cholesky_solve(&rhs)) {
+                return Some(Self {
+                    slopes: solved,
+                    means,
+                    y_mean,
+                });
+            }
+            ridge = if attempt == 0 {
+                1e-12 * scale.max(f64::MIN_POSITIVE)
+            } else {
+                ridge * 100.0
+            };
+        }
+        None
+    }
+
+    /// The fitted values.
+    fn predict(&self, predictors: &[&[f64]], n: usize) -> Vec<f64> {
+        let mut fitted = vec![self.y_mean; n];
+        for (j, f) in predictors.iter().enumerate() {
+            let (slope, mean) = (self.slopes[j], self.means[j]);
+            for (y_hat, &x) in fitted.iter_mut().zip(f.iter()) {
+                *y_hat += slope * (x - mean);
+            }
+        }
+        fitted
+    }
+}
+
+/// R² of `fitted` against `target`. No variation in the target (nothing above
+/// the rounding of its mean, judged against its own size — a fixed number would
+/// call a target in small units constant and report every importance as 0)
+/// scores 0.
+fn r_squared_of(target: &[f64], fitted: &[f64]) -> f64 {
+    let n = target.len() as f64;
+    let y_mean = target.iter().sum::<f64>() / n;
+    let mut ss_res = 0.0;
+    let mut ss_tot = 0.0;
+    for (&y, &y_hat) in target.iter().zip(fitted) {
+        ss_res += (y - y_hat) * (y - y_hat);
+        ss_tot += (y - y_mean) * (y - y_mean);
+    }
+    let target_size: f64 = target.iter().map(|y| y * y).sum();
+    if ss_tot <= 1e-20 * target_size {
+        return 0.0;
+    }
+    1.0 - ss_res / ss_tot
 }
 
 // ── Permutation Importance ────────────────────────────────────────────
@@ -669,13 +678,20 @@ pub fn permutation_importance(
         }
     }
 
-    // Baseline score: R² using all features
+    // One least-squares fit on all features. Each feature is then shuffled in
+    // the data that fit scores (Breiman 2001, scikit-learn's definition), so a
+    // shuffle changes one predictor's term: O(n) per shuffle instead of a refit.
     let pred_refs: Vec<&[f64]> = features.iter().map(|f| f.as_slice()).collect();
-    let baseline_score = compute_r2_multiple(target, &pred_refs, n).max(0.0);
+    let fit = LinearFit::new(target, &pred_refs, n);
+    let fitted = fit.as_ref().map(|f| f.predict(&pred_refs, n));
+    let baseline_score = fitted
+        .as_ref()
+        .map_or(0.0, |y_hat| r_squared_of(target, y_hat))
+        .max(0.0);
 
     let mut results: Vec<PermutationImportanceFeature> = Vec::with_capacity(p);
 
-    for fi in 0..p {
+    for (fi, feature) in features.iter().enumerate() {
         // Every feature replays the same seeded sequence of shuffles (as
         // scikit-learn does), so a feature's score depends on its data and
         // the seed — not on how many features precede it.
@@ -684,7 +700,7 @@ pub fn permutation_importance(
 
         for _ in 0..n_repeats {
             // Create permuted copy of feature fi
-            let mut permuted = features[fi].clone();
+            let mut permuted = feature.clone();
             // Fisher-Yates shuffle
             for i in (1..n).rev() {
                 rng_state = rng_state
@@ -694,11 +710,19 @@ pub fn permutation_importance(
                 permuted.swap(i, j);
             }
 
-            // Build features with fi replaced
-            let mut perm_refs: Vec<&[f64]> = features.iter().map(|f| f.as_slice()).collect();
-            perm_refs[fi] = &permuted;
-
-            let perm_score = compute_r2_multiple(target, &perm_refs, n).max(0.0);
+            // Fitted values with feature fi replaced by its shuffled copy
+            let perm_score = match (&fit, &fitted) {
+                (Some(fit), Some(base)) => {
+                    let slope = fit.slopes[fi];
+                    let shuffled: Vec<f64> = base
+                        .iter()
+                        .zip(permuted.iter().zip(feature.iter()))
+                        .map(|(&y_hat, (&x_new, &x_old))| y_hat + slope * (x_new - x_old))
+                        .collect();
+                    r_squared_of(target, &shuffled).max(0.0)
+                }
+                _ => 0.0,
+            };
             decreases.push(baseline_score - perm_score);
         }
 
@@ -1184,5 +1208,136 @@ mod tests {
             permutation_importance(&features, &names, &target, 3, 1),
             Err(InsightError::ValueNotFinite { ref column, index: 2 }) if column == "target"
         ));
+    }
+
+    // ── VIF from one decomposition (was a regression per feature) ──────
+
+    /// Deterministic standard-ish noise: the same data every run.
+    fn noise(n: usize, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((state >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+            })
+            .collect()
+    }
+
+    /// VIF of `features[j]` by regressing it on the others.
+    fn vif_by_regression(features: &[Vec<f64>], j: usize) -> f64 {
+        let n = features[0].len();
+        let others: Vec<&[f64]> = (0..features.len())
+            .filter(|&i| i != j)
+            .map(|i| features[i].as_slice())
+            .collect();
+        let fit = LinearFit::new(&features[j], &others, n).unwrap();
+        let r2 = r_squared_of(&features[j], &fit.predict(&others, n));
+        1.0 / (1.0 - r2)
+    }
+
+    #[test]
+    fn vif_equals_the_regression_of_each_feature_on_the_others() {
+        let n = 80;
+        let base = noise(n, 1);
+        let features = vec![
+            base.clone(),
+            base.iter()
+                .zip(noise(n, 2))
+                .map(|(b, e)| 0.8 * b + 0.4 * e)
+                .collect::<Vec<_>>(),
+            noise(n, 3),
+            base.iter()
+                .zip(noise(n, 4).iter().zip(noise(n, 5)))
+                .map(|(b, (e, f))| b - e + 0.3 * f)
+                .collect::<Vec<_>>(),
+            noise(n, 6),
+        ];
+        let names: Vec<String> = (0..5).map(|i| format!("f{i}")).collect();
+        let result = feature_analysis(&features, &names, &FeatureConfig::default()).unwrap();
+        for j in 0..5 {
+            let expected = vif_by_regression(&features, j);
+            let got = result.vif_results[j].vif;
+            assert!(
+                (got - expected).abs() <= 1e-8 * expected,
+                "feature {j}: {got} vs regression {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_duplicated_feature_does_not_flatten_the_other_vifs() {
+        // `a` and its copy are dependent (infinite VIF); `c` is correlated with
+        // `a`, so its VIF is that of the regression on the others — not 1.
+        let n = 80;
+        let a = noise(n, 11);
+        let c: Vec<f64> = a
+            .iter()
+            .zip(noise(n, 12))
+            .map(|(x, e)| 0.8 * x + 0.5 * e)
+            .collect();
+        let d = noise(n, 13);
+        let features = vec![a.clone(), a.clone(), c.clone(), d];
+        let names: Vec<String> = ["a", "a2", "c", "d"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let result = feature_analysis(&features, &names, &FeatureConfig::default()).unwrap();
+
+        assert!(result.vif_results[0].vif.is_infinite());
+        assert!(result.vif_results[1].vif.is_infinite());
+        // The others of `c` span the same space as `a` and `d` (the copy adds nothing).
+        let others = [a.as_slice(), features[3].as_slice()];
+        let fit = LinearFit::new(&c, &others, n).unwrap();
+        let r2 = r_squared_of(&c, &fit.predict(&others, n));
+        let expected = 1.0 / (1.0 - r2);
+        assert!(expected > 1.5, "the case must have real correlation");
+        assert!((result.vif_results[2].vif - expected).abs() <= 1e-8 * expected);
+        assert!(result.vif_results[3].vif < 2.0);
+    }
+
+    #[test]
+    fn a_constant_feature_leaves_the_vifs_alone() {
+        let n = 60;
+        let x = noise(n, 21);
+        let y: Vec<f64> = x
+            .iter()
+            .zip(noise(n, 22))
+            .map(|(a, e)| a + 0.5 * e)
+            .collect();
+        let without = feature_analysis(
+            &[x.clone(), y.clone()],
+            &names(&["x", "y"]),
+            &FeatureConfig::default(),
+        )
+        .unwrap();
+        let with = feature_analysis(
+            &[x, y, vec![3.0; n]],
+            &names(&["x", "y", "k"]),
+            &FeatureConfig::default(),
+        )
+        .unwrap();
+        for j in 0..2 {
+            assert!((with.vif_results[j].vif - without.vif_results[j].vif).abs() < 1e-9);
+        }
+        assert_eq!(with.vif_results[2].vif, 1.0);
+    }
+
+    #[test]
+    fn permutation_importance_survives_a_duplicated_feature() {
+        // The least-squares system is singular; the fit must still be usable
+        // (a failed solve used to score every importance 0).
+        let n = 60;
+        let a = noise(n, 31);
+        let target: Vec<f64> = a.iter().map(|x| 2.0 * x + 1.0).collect();
+        let features = vec![a.clone(), a, noise(n, 32)];
+        let result =
+            permutation_importance(&features, &names(&["a", "a2", "noise"]), &target, 5, 7)
+                .unwrap();
+        assert!(result.baseline_score > 0.999, "{}", result.baseline_score);
+        let noise_feature = result.features.iter().find(|f| f.name == "noise").unwrap();
+        assert!(noise_feature.importance.abs() < 1e-6);
+        assert!(result.features[0].importance > 0.1);
     }
 }
