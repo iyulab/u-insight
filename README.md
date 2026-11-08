@@ -586,7 +586,7 @@ Feature importance via permutation, ANOVA, or mutual information.
 { "method": "permutation", "features": [{ "name": "f1", "index": 0, "score": 0.8, "std_dev": 0.1 }], "baseline_score": 0.5 }
 ```
 
-`index` is the feature's position in the input (`features` is sorted by importance). With `method: "anova"`, `score` is the F statistic and `p_value` comes with it; a feature that is constant within every class but differs between classes separates them perfectly and scores `Infinity` with `p_value: 0` (as scikit-learn's `f_classif`); a feature constant everywhere scores 0 with `p_value: 1`.
+`index` is the feature's position in the input (`features` is sorted by importance). With `method: "permutation"`, `score` is the mean drop in R² of one fitted linear model when the feature is shuffled; it can exceed `baseline_score` (shuffling a dominant feature leaves the model worse than the mean, an R² below 0). With `method: "anova"`, `score` is the F statistic and `p_value` comes with it; a feature that is constant within every class but differs between classes separates them perfectly and scores `Infinity` with `p_value: 0` (as scikit-learn's `f_classif`); a feature constant everywhere scores 0 with `p_value: 1`.
 
 ## npm (WebAssembly)
 

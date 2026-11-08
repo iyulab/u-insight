@@ -23,6 +23,11 @@ Depends on u-analytics 0.34 and u-numflow 0.16. The .NET client is `UInsight` 0.
   copies of that fit, as scikit-learn does: 200 features take 0.7 s, 800 take 13 s. **Breaking** the scores are
   those of the fitted model with a feature shuffled, not of a model refitted without its signal, so values change
   where features are correlated.
+- Permutation importance floored the shuffled score at 0 (and the baseline), a leftover from the refitted model,
+  whose in-sample R² could not be negative. With one fitted model a shuffle can leave it worse than the mean, and
+  the floor made every dominant feature read as the baseline R²: with `y = 10a + 3b` over independent columns
+  `a` read 1.0 where scikit-learn's drop is 1.83. The importance is the full drop now and can exceed
+  `baseline_score`; `std_dev` follows. Ranking among features is unchanged except that ties at the baseline break.
 
 ## [0.41.0] - 2026-11-02
 

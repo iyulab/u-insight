@@ -562,7 +562,10 @@ pub struct PermutationImportanceFeature {
     pub name: String,
     /// Feature index.
     pub index: usize,
-    /// Mean decrease in score when feature is permuted.
+    /// Mean decrease in R² when the feature is shuffled. It can exceed
+    /// `baseline_score`: shuffling a feature that carries most of the target
+    /// leaves the model worse than the mean (a negative R²), and the drop counts
+    /// all of it, so a dominant feature is told from a merely strong one.
     pub importance: f64,
     /// Standard deviation of importance across repetitions.
     pub std_dev: f64,
@@ -631,7 +634,7 @@ pub fn permutation_importance(
         return Err(InsightError::too_few("target", p + 2, n));
     }
 
-    // A NaN target made R² NaN, which `max(0.0)` below turned into 0 -- every
+    // A NaN target made R² NaN, which a floor at 0 turned into 0 -- every
     // importance read 0 with nothing saying why.
     let target_nan = target.iter().filter(|v| v.is_nan()).count();
     if target_nan > 0 {
@@ -684,10 +687,11 @@ pub fn permutation_importance(
     let pred_refs: Vec<&[f64]> = features.iter().map(|f| f.as_slice()).collect();
     let fit = LinearFit::new(target, &pred_refs, n);
     let fitted = fit.as_ref().map(|f| f.predict(&pred_refs, n));
+    // The in-sample R² of a fit with an intercept is not negative, so there is
+    // nothing to floor.
     let baseline_score = fitted
         .as_ref()
-        .map_or(0.0, |y_hat| r_squared_of(target, y_hat))
-        .max(0.0);
+        .map_or(0.0, |y_hat| r_squared_of(target, y_hat));
 
     let mut results: Vec<PermutationImportanceFeature> = Vec::with_capacity(p);
 
@@ -719,7 +723,9 @@ pub fn permutation_importance(
                         .zip(permuted.iter().zip(feature.iter()))
                         .map(|(&y_hat, (&x_new, &x_old))| y_hat + slope * (x_new - x_old))
                         .collect();
-                    r_squared_of(target, &shuffled).max(0.0)
+                    // Not floored: a model that a shuffle leaves worse than the mean
+                    // scores below 0, and the drop is all of it.
+                    r_squared_of(target, &shuffled)
                 }
                 _ => 0.0,
             };
@@ -1339,5 +1345,49 @@ mod tests {
         let noise_feature = result.features.iter().find(|f| f.name == "noise").unwrap();
         assert!(noise_feature.importance.abs() < 1e-6);
         assert!(result.features[0].importance > 0.1);
+    }
+
+    /// Shuffling a feature that carries most of the target leaves the fitted
+    /// model worse than the mean (a negative R²), and the importance is the
+    /// whole drop from the baseline -- scikit-learn's definition. The shuffled
+    /// score used to be floored at 0, so every dominant feature read as the
+    /// baseline R² and could not be told from another: with `y = 10a + 3b` over
+    /// independent columns of one variance, shuffling `a` gives
+    /// `R² = 1 - 2 * 100/109 = -0.83` and an importance of about 1.83.
+    #[test]
+    fn permutation_importance_of_a_dominant_feature_exceeds_the_baseline() {
+        let mut state = 12345_u64;
+        let mut uniform = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let n = 2000;
+        let a: Vec<f64> = (0..n).map(|_| uniform()).collect();
+        let b: Vec<f64> = (0..n).map(|_| uniform()).collect();
+        let target: Vec<f64> = a.iter().zip(&b).map(|(x, y)| 10.0 * x + 3.0 * y).collect();
+        let result =
+            permutation_importance(&[a, b], &["a".into(), "b".into()], &target, 10, 7).unwrap();
+        assert!(result.baseline_score > 0.999, "{}", result.baseline_score);
+        let importance = |name: &str| {
+            result
+                .features
+                .iter()
+                .find(|f| f.name == name)
+                .expect("a feature of the input")
+                .importance
+        };
+        assert!(
+            (importance("a") - 1.83).abs() < 0.15,
+            "a: {} (baseline {})",
+            importance("a"),
+            result.baseline_score
+        );
+        assert!(
+            (importance("b") - 0.165).abs() < 0.06,
+            "b: {}",
+            importance("b")
+        );
     }
 }
