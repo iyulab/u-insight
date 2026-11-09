@@ -36,6 +36,12 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   but the queue, which holds each row once; the labels and core points are exactly the same (checked against the
   scan over duplicates, ties and 1 to 16 columns, border points included). 50,000 rows by 2 columns: 21 s and
   579 MB to 5.3 s and 9 MB; 20,000 rows by 4 / 8 / 16 / 200 columns: 2.9 / 3.5 / 6.4 / 75 s to 0.4 / 0.4 / 1.9 / 37 s.
+- The silhouette (`silhouette_score`, `silhouette_samples`, the C ABI `insight_silhouette`, and the K search that
+  scores every candidate with it) built the whole `n × n` matrix of distances: 3 GB for 20,000 rows and 20 GB for
+  50,000 — a failed allocation aborts the process, and the .NET client's default row limit is 50,000. It keeps one
+  distance sum per row and cluster instead (and, past 2²⁴ of those, makes the sums a row at a time), added in the
+  same order, so every score is the same bit for bit. 20,000 rows by 4 / 16 / 200 columns: 12 / 13 / 56 s and
+  3 GB to 1.6 / 2.8 / 33 s and 6 to 36 MB; 50,000 rows by 4 columns now run in 13 s and 10 MB.
 
 ## [0.42.0] - 2026-11-08
 

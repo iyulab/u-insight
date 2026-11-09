@@ -326,7 +326,8 @@ pub fn auto_kmeans(
 /// Computes the mean silhouette score across all data points.
 ///
 /// Silhouette score ranges from -1 (wrong cluster) to +1 (well-separated).
-/// Uses Euclidean distance. O(n²) complexity.
+/// Uses Euclidean distance. `O(n²)` time and `O(n·k)` memory — no matrix of
+/// distances is kept.
 ///
 /// Reference: Rousseeuw (1987). "Silhouettes: a graphical aid to the
 /// interpretation and validation of cluster analysis."
@@ -343,78 +344,7 @@ pub fn auto_kmeans(
 /// assert!(score > 0.9); // well-separated clusters
 /// ```
 pub fn silhouette_score(data: &[Vec<f64>], labels: &[usize], k: usize) -> f64 {
-    let n = data.len();
-    if n < 2 || k < 2 {
-        return 0.0;
-    }
-
-    // Precompute pairwise distances
-    let mut dist_matrix = vec![0.0f64; n * n];
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = euclidean_dist(&data[i], &data[j]);
-            dist_matrix[i * n + j] = d;
-            dist_matrix[j * n + i] = d;
-        }
-    }
-
-    let mut total_sil = 0.0;
-    let mut valid_count = 0;
-
-    for i in 0..n {
-        let own_cluster = labels[i];
-
-        // a(i) = mean distance to other points in same cluster
-        let mut same_sum = 0.0;
-        let mut same_count = 0usize;
-        for j in 0..n {
-            if j != i && labels[j] == own_cluster {
-                same_sum += dist_matrix[i * n + j];
-                same_count += 1;
-            }
-        }
-
-        if same_count == 0 {
-            // Singleton cluster → silhouette = 0
-            continue;
-        }
-
-        let a_i = same_sum / same_count as f64;
-
-        // b(i) = min over other clusters of mean distance to that cluster
-        let mut b_i = f64::INFINITY;
-        for c in 0..k {
-            if c == own_cluster {
-                continue;
-            }
-            let mut other_sum = 0.0;
-            let mut other_count = 0usize;
-            for j in 0..n {
-                if labels[j] == c {
-                    other_sum += dist_matrix[i * n + j];
-                    other_count += 1;
-                }
-            }
-            if other_count > 0 {
-                let mean_dist = other_sum / other_count as f64;
-                b_i = b_i.min(mean_dist);
-            }
-        }
-
-        if b_i.is_infinite() {
-            continue;
-        }
-
-        let s_i = (b_i - a_i) / a_i.max(b_i);
-        total_sil += s_i;
-        valid_count += 1;
-    }
-
-    if valid_count == 0 {
-        0.0
-    } else {
-        total_sil / valid_count as f64
-    }
+    silhouette_analysis(data, labels, k).avg
 }
 
 /// Per-sample silhouette scores plus the mean across all valid samples.
@@ -434,7 +364,8 @@ pub struct SilhouetteAnalysis {
 /// values so callers can inspect cluster-quality on a point-by-point basis
 /// (e.g. for biplots, low-quality cluster diagnostics).
 ///
-/// O(n²) time and memory — for very large `n` this can be expensive.
+/// `O(n²)` time and `O(n·k)` memory (no matrix of distances is kept) — for very
+/// large `n` the time can still be long.
 ///
 /// ```
 /// use u_insight::clustering::silhouette_samples;
@@ -449,6 +380,32 @@ pub struct SilhouetteAnalysis {
 /// assert_eq!(analysis.per_sample.len(), 4);
 /// ```
 pub fn silhouette_samples(data: &[Vec<f64>], labels: &[usize], k: usize) -> SilhouetteAnalysis {
+    silhouette_analysis(data, labels, k)
+}
+
+/// Accumulators (one per row and cluster) the silhouette keeps before it falls
+/// back to a pass per row: 2²⁴ of them are 128 MB, a 50,000-row table of up to
+/// 335 clusters.
+const SILHOUETTE_ACCUMULATORS: usize = 1 << 24;
+
+fn silhouette_analysis(data: &[Vec<f64>], labels: &[usize], k: usize) -> SilhouetteAnalysis {
+    silhouette_analysis_within(data, labels, k, SILHOUETTE_ACCUMULATORS)
+}
+
+/// The silhouette of every row, from the distance sum of each row to each
+/// cluster — never the `n × n` matrix of distances (50,000 rows were 20 GB).
+///
+/// Every pair's distance is computed once and added to both rows' sums, in
+/// ascending order of the other row, so each sum is the one the matrix gave
+/// bit for bit. With more than `budget` accumulators (`n` × clusters) the sums
+/// are made one row at a time instead — twice the distances, `O(clusters)`
+/// memory, the same sums.
+fn silhouette_analysis_within(
+    data: &[Vec<f64>],
+    labels: &[usize],
+    k: usize,
+    budget: usize,
+) -> SilhouetteAnalysis {
     let n = data.len();
     let mut per_sample = vec![0.0f64; n];
 
@@ -459,63 +416,70 @@ pub fn silhouette_samples(data: &[Vec<f64>], labels: &[usize], k: usize) -> Silh
         };
     }
 
-    let mut dist_matrix = vec![0.0f64; n * n];
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = euclidean_dist(&data[i], &data[j]);
-            dist_matrix[i * n + j] = d;
-            dist_matrix[j * n + i] = d;
-        }
+    // A label at or above `k` still has a cluster of its own to be measured
+    // against; only the clusters below `k` are candidates for the neighbour.
+    let slots = k.max(labels[..n].iter().max().map_or(0, |&m| m + 1));
+    let mut size = vec![0usize; slots];
+    for &l in &labels[..n] {
+        size[l] += 1;
     }
+
+    // s(i) from row i's distance sums to every cluster, or None for a
+    // singleton or a row with no other cluster to compare with.
+    let value = |i: usize, sums: &[f64]| -> Option<f64> {
+        let own_cluster = labels[i];
+        let same_count = size[own_cluster] - 1;
+        if same_count == 0 {
+            return None;
+        }
+        // a(i) = mean distance to other points in same cluster
+        let a_i = sums[own_cluster] / same_count as f64;
+        // b(i) = min over other clusters of mean distance to that cluster
+        let mut b_i = f64::INFINITY;
+        for c in 0..k {
+            if c != own_cluster && size[c] > 0 {
+                b_i = b_i.min(sums[c] / size[c] as f64);
+            }
+        }
+        if b_i.is_infinite() {
+            return None;
+        }
+        Some((b_i - a_i) / a_i.max(b_i))
+    };
 
     let mut total_sil = 0.0;
     let mut valid_count = 0;
+    let mut take = |i: usize, s: Option<f64>| {
+        if let Some(s_i) = s {
+            per_sample[i] = s_i;
+            total_sil += s_i;
+            valid_count += 1;
+        }
+    };
 
-    for i in 0..n {
-        let own_cluster = labels[i];
-
-        let mut same_sum = 0.0;
-        let mut same_count = 0usize;
-        for j in 0..n {
-            if j != i && labels[j] == own_cluster {
-                same_sum += dist_matrix[i * n + j];
-                same_count += 1;
+    if n.saturating_mul(slots) <= budget {
+        let mut sums = vec![0.0f64; n * slots];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = euclidean_dist(&data[i], &data[j]);
+                sums[i * slots + labels[j]] += d;
+                sums[j * slots + labels[i]] += d;
             }
         }
-
-        if same_count == 0 {
-            continue;
+        for i in 0..n {
+            take(i, value(i, &sums[i * slots..(i + 1) * slots]));
         }
-
-        let a_i = same_sum / same_count as f64;
-
-        let mut b_i = f64::INFINITY;
-        for c in 0..k {
-            if c == own_cluster {
-                continue;
-            }
-            let mut other_sum = 0.0;
-            let mut other_count = 0usize;
+    } else {
+        let mut sums = vec![0.0f64; slots];
+        for i in 0..n {
+            sums.iter_mut().for_each(|v| *v = 0.0);
             for j in 0..n {
-                if labels[j] == c {
-                    other_sum += dist_matrix[i * n + j];
-                    other_count += 1;
+                if j != i {
+                    sums[labels[j]] += euclidean_dist(&data[i], &data[j]);
                 }
             }
-            if other_count > 0 {
-                let mean_dist = other_sum / other_count as f64;
-                b_i = b_i.min(mean_dist);
-            }
+            take(i, value(i, &sums));
         }
-
-        if b_i.is_infinite() {
-            continue;
-        }
-
-        let s_i = (b_i - a_i) / a_i.max(b_i);
-        per_sample[i] = s_i;
-        total_sil += s_i;
-        valid_count += 1;
     }
 
     let avg = if valid_count == 0 {
@@ -3215,6 +3179,130 @@ mod tests {
         let labels = vec![0, 0];
         let score = silhouette_score(&data, &labels, 1);
         assert_eq!(score, 0.0);
+    }
+
+    /// The silhouette as it was written with the `n × n` matrix of distances —
+    /// the reference the matrix-free one must match bit for bit.
+    fn silhouette_by_matrix(data: &[Vec<f64>], labels: &[usize], k: usize) -> (f64, Vec<f64>) {
+        let n = data.len();
+        let mut per_sample = vec![0.0f64; n];
+        if n < 2 || k < 2 {
+            return (0.0, per_sample);
+        }
+        let mut dist_matrix = vec![0.0f64; n * n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = euclidean_dist(&data[i], &data[j]);
+                dist_matrix[i * n + j] = d;
+                dist_matrix[j * n + i] = d;
+            }
+        }
+        let (mut total, mut valid) = (0.0, 0);
+        for i in 0..n {
+            let own = labels[i];
+            let (mut same_sum, mut same_count) = (0.0, 0usize);
+            for j in 0..n {
+                if j != i && labels[j] == own {
+                    same_sum += dist_matrix[i * n + j];
+                    same_count += 1;
+                }
+            }
+            if same_count == 0 {
+                continue;
+            }
+            let a_i = same_sum / same_count as f64;
+            let mut b_i = f64::INFINITY;
+            for c in 0..k {
+                if c == own {
+                    continue;
+                }
+                let (mut other_sum, mut other_count) = (0.0, 0usize);
+                for j in 0..n {
+                    if labels[j] == c {
+                        other_sum += dist_matrix[i * n + j];
+                        other_count += 1;
+                    }
+                }
+                if other_count > 0 {
+                    b_i = b_i.min(other_sum / other_count as f64);
+                }
+            }
+            if b_i.is_infinite() {
+                continue;
+            }
+            let s_i = (b_i - a_i) / a_i.max(b_i);
+            per_sample[i] = s_i;
+            total += s_i;
+            valid += 1;
+        }
+        (
+            if valid == 0 {
+                0.0
+            } else {
+                total / valid as f64
+            },
+            per_sample,
+        )
+    }
+
+    /// The silhouette without the matrix — through the sums kept per row and
+    /// through the pass per row it falls back to — equals the matrix one in
+    /// every bit, over singletons, an unused cluster, one label at or above
+    /// `k`, duplicates and several widths.
+    #[test]
+    fn silhouette_matches_the_matrix_in_every_bit() {
+        let mut state = 5_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        for dims in [1_usize, 3, 8] {
+            let n = 150;
+            let data: Vec<Vec<f64>> = (0..n)
+                .map(|r| match r % 7 {
+                    0 => vec![2.0; dims],
+                    _ => (0..dims).map(|_| next() * 9.0).collect(),
+                })
+                .collect();
+            let cases: Vec<(Vec<usize>, usize)> = vec![
+                ((0..n).map(|i| i % 3).collect(), 3),
+                ((0..n).map(|i| usize::from(i % 5 == 0)).collect(), 2),
+                // a singleton (row 0), a cluster no row has (2), and k above the labels
+                (
+                    (0..n)
+                        .map(|i| if i == 0 { 0 } else { 1 + (i % 2) * 2 })
+                        .collect(),
+                    5,
+                ),
+                // a label at or above k
+                (
+                    (0..n)
+                        .map(|i| if i % 11 == 0 { 4 } else { i % 2 })
+                        .collect(),
+                    2,
+                ),
+                (vec![0; n], 2),
+            ];
+            for (labels, k) in cases {
+                let (want_avg, want) = silhouette_by_matrix(&data, &labels, k);
+                for budget in [SILHOUETTE_ACCUMULATORS, 0] {
+                    let got = silhouette_analysis_within(&data, &labels, k, budget);
+                    assert_eq!(
+                        got.avg.to_bits(),
+                        want_avg.to_bits(),
+                        "dims {dims} k {k} budget {budget}"
+                    );
+                    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+                    assert_eq!(
+                        bits(&got.per_sample),
+                        bits(&want),
+                        "dims {dims} k {k} budget {budget}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
