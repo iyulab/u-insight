@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- Requires u-numflow 0.16.2, whose Frobenius norm and symmetric eigen solver are independent of the unit: principal components and the outlier scores built on a covariance in 1e-100 or 1e100 units were wrong with 0.16.1.
+
 ### Fixed
 
 - Permutation importance floored the shuffled score at 0 (and the baseline), a leftover from the refitted model,
