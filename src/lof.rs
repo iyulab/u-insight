@@ -181,26 +181,19 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
 
     // Step 1: each point's k-distance and k-neighbourhood, through a k-d tree
     // (the same neighbours, in the same order, as sorting every distance).
+    // Include all neighbours at distance ≤ k-distance (handles ties). Two
+    // distances are tied when they agree to rounding *in proportion to their
+    // size*: a fixed tolerance is nothing for lengths near 1e9 and more than
+    // every distance for lengths near 1e-15. The k nearest are always among
+    // them (the k-th is at the k-distance).
     let mut k_distances = vec![0.0_f64; n];
-    let mut k_neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut k_neighbors: Vec<Vec<(usize, f64)>> = Vec::with_capacity(n);
     let tree = crate::knn::KdTree::new(data);
     let dist = |i: usize, j: usize| euclidean_distance(&data[i], &data[j]);
-
-    for i in 0..n {
-        let k_dist = tree.kth_distance(i, k, dist);
-        k_distances[i] = k_dist;
-
-        // Include all neighbors at distance ≤ k-distance (handles ties). Two
-        // distances are tied when they agree to rounding *in proportion to
-        // their size*: a fixed tolerance is nothing for lengths near 1e9 and
-        // more than every distance for lengths near 1e-15. The k nearest are
-        // always among them (the k-th is at the k-distance).
-        let tied = k_dist * (1.0 + 1e-12);
-        k_neighbors[i] = tree
-            .within(i, tied, dist)
-            .into_iter()
-            .map(|(j, _)| j)
-            .collect();
+    for (i, k_dist) in k_distances.iter_mut().enumerate() {
+        let (kth, neighbours) = tree.neighbourhood(i, k, 1e-12, dist);
+        *k_dist = kth;
+        k_neighbors.push(neighbours);
     }
 
     // Step 2 & 3: Compute Local Reachability Density (LRD)
@@ -210,13 +203,8 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
         let neighbors = &k_neighbors[i];
         let nk = neighbors.len() as f64;
 
-        let sum_reach_dist: f64 = neighbors
-            .iter()
-            .map(|&j| {
-                let d = euclidean_distance(&data[i], &data[j]);
-                k_distances[j].max(d) // reach-dist_k(i, j) = max(k-distance(j), d(i,j))
-            })
-            .sum();
+        // reach-dist_k(i, j) = max(k-distance(j), d(i,j))
+        let sum_reach_dist: f64 = neighbors.iter().map(|&(j, d)| k_distances[j].max(d)).sum();
 
         lrd[i] = if sum_reach_dist > 0.0 {
             nk / sum_reach_dist
@@ -232,7 +220,7 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
         let neighbors = &k_neighbors[i];
         let nk = neighbors.len() as f64;
 
-        let avg_neighbor_lrd: f64 = neighbors.iter().map(|&j| lrd[j]).sum::<f64>() / nk;
+        let avg_neighbor_lrd: f64 = neighbors.iter().map(|&(j, _)| lrd[j]).sum::<f64>() / nk;
 
         scores[i] = if lrd[i] > 0.0 && lrd[i] < f64::MAX {
             avg_neighbor_lrd / lrd[i]

@@ -25,6 +25,11 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   columns k-means 22 s to 11 s, DBSCAN 100 s to 65 s, silhouette 121 s to 64 s, the gap statistic 203 s to 110 s
   (the distances differ from the old sum only in the last bit). What remains is `n²·d` memory traffic, which a
   caller bounds with the row thresholds (`HdbscanRowThreshold`, `LofRowThreshold`, …).
+- LOF bounded its k-d tree search by the last split alone and walked the tree twice per row (the k-distance, then the
+  neighbourhood). The bound now adds up every split on the way down (Arya & Mount 1993), skipping far more cells in
+  many columns, and one descent answers both; the scores are bit-for-bit the same (HDBSCAN's core distances take the
+  tighter bound too). On 20,000 rows: 4 columns 0.72 s to 0.26 s, 8 columns 3.7 s to 1.0 s, 12 columns 5.4 s to
+  2.4 s, 16 columns 5.7 s to 3.1 s — past about 12 columns the tree is little better than a full scan.
 
 ## [0.42.0] - 2026-11-08
 

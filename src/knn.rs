@@ -9,9 +9,9 @@
 //!
 //! The answers are *exactly* the brute-force ones: the same distances (the
 //! caller's distance function, applied to the same pair), the same neighbours,
-//! ordered by distance and then by index. A cell is skipped only when its
-//! splitting plane is farther than the current bound by more than rounding,
-//! so no point a full scan would keep is lost.
+//! ordered by distance and then by index. A cell is skipped only when the
+//! splits that bound it put it farther than the current bound by more than
+//! rounding, so no point a full scan would keep is lost.
 
 /// Rows at or below this count stay in one leaf, scanned directly.
 const LEAF: usize = 16;
@@ -106,92 +106,90 @@ impl<'a> KdTree<'a> {
         k: usize,
         dist: impl Fn(usize, usize) -> f64,
     ) -> f64 {
+        self.search(i, k, None, dist).0
+    }
+
+    /// The `k`-th nearest distance of row `i` (`1 <= k < n`) and every other
+    /// row within `tie` (a relative margin) of it, as `(index, distance)`
+    /// ordered by distance and then by index — the prefix a full sort keeps.
+    ///
+    /// One descent answers both: a row is kept when it is within the margin of
+    /// the `k`-th distance *as it stood when the row was met*, which is never
+    /// smaller than the final one, so every row of the final neighbourhood is
+    /// among those kept and the rest are dropped at the end.
+    pub(crate) fn neighbourhood(
+        &self,
+        i: usize,
+        k: usize,
+        tie: f64,
+        dist: impl Fn(usize, usize) -> f64,
+    ) -> (f64, Vec<(usize, f64)>) {
+        self.search(i, k, Some(tie), dist)
+    }
+
+    /// The descent behind [`Self::kth_distance`] (`tie` `None`: the neighbours
+    /// are not collected) and [`Self::neighbourhood`].
+    fn search(
+        &self,
+        i: usize,
+        k: usize,
+        tie: Option<f64>,
+        dist: impl Fn(usize, usize) -> f64,
+    ) -> (f64, Vec<(usize, f64)>) {
         // The k smallest (distance, index) pairs seen so far, largest first.
         let mut best: std::collections::BinaryHeap<Pair> =
             std::collections::BinaryHeap::with_capacity(k + 1);
-        self.knn(0, i, k, &dist, &mut best);
-        best.peek().expect("k >= 1 rows besides i").0
+        let mut kept: Vec<(usize, f64)> = Vec::new();
+        let mut offsets = vec![0.0_f64; self.data[i].len()];
+        self.knn(
+            &mut Descent {
+                i,
+                k,
+                tie,
+                dist: &dist,
+                offsets: &mut offsets,
+                best: &mut best,
+                kept: &mut kept,
+            },
+            0,
+            0.0,
+        );
+        let kth = best.peek().expect("k >= 1 rows besides i").0;
+        let reach = kth * (1.0 + tie.unwrap_or(0.0));
+        kept.retain(|&(_, d)| d <= reach);
+        kept.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        (kth, kept)
     }
 
-    fn knn(
-        &self,
-        node: usize,
-        i: usize,
-        k: usize,
-        dist: &impl Fn(usize, usize) -> f64,
-        best: &mut std::collections::BinaryHeap<Pair>,
-    ) {
+    /// `rd` is the squared distance from row `i` to the cell of `node`, as far
+    /// as the splits above it show (Arya & Mount 1993): one offset per
+    /// coordinate, so a cell is bounded by every split made on the way down,
+    /// not only the last — in many dimensions the difference decides how much
+    /// of the tree is skipped.
+    fn knn<F: Fn(usize, usize) -> f64>(&self, st: &mut Descent<'_, F>, node: usize, rd: f64) {
         match self.nodes[node] {
             Node::Leaf { lo, hi } => {
                 for &j in &self.order[lo..hi] {
-                    if j == i {
+                    if j == st.i {
                         continue;
                     }
-                    let pair = Pair(dist(i, j), j);
-                    if best.len() < k {
-                        best.push(pair);
-                    } else if pair < *best.peek().expect("k entries") {
-                        best.pop();
-                        best.push(pair);
-                    }
-                }
-            }
-            Node::Split {
-                dim,
-                at,
-                left,
-                right,
-            } => {
-                let gap = self.data[i][dim] - at;
-                let (near, far) = if gap < 0.0 {
-                    (left, right)
-                } else {
-                    (right, left)
-                };
-                self.knn(near, i, k, dist, best);
-                let bound = if best.len() < k {
-                    f64::INFINITY
-                } else {
-                    best.peek().expect("k entries").0
-                };
-                if gap.abs() <= bound * (1.0 + SLACK) {
-                    self.knn(far, i, k, dist, best);
-                }
-            }
-        }
-    }
-
-    /// Every other row within `radius` of row `i`, as `(index, distance)`,
-    /// ordered by distance and then by index — the prefix a full sort keeps.
-    pub(crate) fn within(
-        &self,
-        i: usize,
-        radius: f64,
-        dist: impl Fn(usize, usize) -> f64,
-    ) -> Vec<(usize, f64)> {
-        let mut out = Vec::new();
-        self.range(0, i, radius, &dist, &mut out);
-        out.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-        out
-    }
-
-    fn range(
-        &self,
-        node: usize,
-        i: usize,
-        radius: f64,
-        dist: &impl Fn(usize, usize) -> f64,
-        out: &mut Vec<(usize, f64)>,
-    ) {
-        match self.nodes[node] {
-            Node::Leaf { lo, hi } => {
-                for &j in &self.order[lo..hi] {
-                    if j != i {
-                        let d = dist(i, j);
-                        if d <= radius {
-                            out.push((j, d));
+                    let pair = Pair((st.dist)(st.i, j), j);
+                    if let Some(tie) = st.tie {
+                        let reach = if st.best.len() < st.k {
+                            f64::INFINITY
+                        } else {
+                            st.best.peek().expect("k entries").0 * (1.0 + tie)
+                        };
+                        if pair.0 <= reach {
+                            st.kept.push((j, pair.0));
                         }
                     }
+                    if st.best.len() < st.k {
+                        st.best.push(pair);
+                    } else if pair < *st.best.peek().expect("k entries") {
+                        st.best.pop();
+                        st.best.push(pair);
+                    }
                 }
             }
             Node::Split {
@@ -200,19 +198,43 @@ impl<'a> KdTree<'a> {
                 left,
                 right,
             } => {
-                let gap = self.data[i][dim] - at;
+                let gap = self.data[st.i][dim] - at;
                 let (near, far) = if gap < 0.0 {
                     (left, right)
                 } else {
                     (right, left)
                 };
-                self.range(near, i, radius, dist, out);
-                if gap.abs() <= radius * (1.0 + SLACK) {
-                    self.range(far, i, radius, dist, out);
+                self.knn(st, near, rd);
+                let bound = if st.best.len() < st.k {
+                    f64::INFINITY
+                } else {
+                    st.best.peek().expect("k entries").0
+                };
+                let before = st.offsets[dim];
+                let after = gap.abs().max(before);
+                let far_rd = rd - before * before + after * after;
+                let limit = bound * (1.0 + SLACK);
+                if far_rd <= limit * limit {
+                    st.offsets[dim] = after;
+                    self.knn(st, far, far_rd);
+                    st.offsets[dim] = before;
                 }
             }
         }
     }
+}
+
+/// The state of one nearest-neighbour descent.
+struct Descent<'s, F: Fn(usize, usize) -> f64> {
+    i: usize,
+    k: usize,
+    /// The relative margin of the neighbours to keep, `None` to keep none.
+    tie: Option<f64>,
+    dist: &'s F,
+    /// Per coordinate, how far row `i` lies outside the current cell.
+    offsets: &'s mut [f64],
+    best: &'s mut std::collections::BinaryHeap<Pair>,
+    kept: &'s mut Vec<(usize, f64)>,
 }
 
 /// A (distance, index) pair ordered by distance, then by index — the order a
@@ -286,6 +308,8 @@ mod tests {
             (300, 2, 4),
             (300, 4, 5),
             (200, 9, 6),
+            (400, 12, 7),
+            (400, 16, 8),
         ] {
             let data = points(n, dims, seed);
             let tree = KdTree::new(&data);
@@ -307,11 +331,10 @@ mod tests {
                         .copied()
                         .take_while(|&(_, d)| d <= radius)
                         .collect();
-                    assert_eq!(
-                        tree.within(i, radius, euclid(&data)),
-                        expected,
-                        "n {n} dims {dims} row {i} k {k}"
-                    );
+                    // One descent gives the same distance and the neighbours a sort keeps.
+                    let (got_kth, got) = tree.neighbourhood(i, k, 1e-12, euclid(&data));
+                    assert_eq!(got_kth.to_bits(), kth.to_bits());
+                    assert_eq!(got, expected, "n {n} dims {dims} row {i} k {k}");
                 }
             }
         }
