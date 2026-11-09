@@ -222,6 +222,69 @@ impl<'a> KdTree<'a> {
             }
         }
     }
+
+    /// Every other row within `radius` of row `i`, as `(index, distance)`,
+    /// ordered by distance and then by index — the prefix a full sort keeps.
+    pub(crate) fn within(
+        &self,
+        i: usize,
+        radius: f64,
+        dist: impl Fn(usize, usize) -> f64,
+    ) -> Vec<(usize, f64)> {
+        let mut out = Vec::new();
+        let mut offsets = vec![0.0_f64; self.data[i].len()];
+        self.range(i, radius, &dist, 0, 0.0, &mut offsets, &mut out);
+        out.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        out
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn range(
+        &self,
+        i: usize,
+        radius: f64,
+        dist: &impl Fn(usize, usize) -> f64,
+        node: usize,
+        rd: f64,
+        offsets: &mut [f64],
+        out: &mut Vec<(usize, f64)>,
+    ) {
+        match self.nodes[node] {
+            Node::Leaf { lo, hi } => {
+                for &j in &self.order[lo..hi] {
+                    if j != i {
+                        let d = dist(i, j);
+                        if d <= radius {
+                            out.push((j, d));
+                        }
+                    }
+                }
+            }
+            Node::Split {
+                dim,
+                at,
+                left,
+                right,
+            } => {
+                let gap = self.data[i][dim] - at;
+                let (near, far) = if gap < 0.0 {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                self.range(i, radius, dist, near, rd, offsets, out);
+                let before = offsets[dim];
+                let after = gap.abs().max(before);
+                let far_rd = rd - before * before + after * after;
+                let limit = radius * (1.0 + SLACK);
+                if far_rd <= limit * limit {
+                    offsets[dim] = after;
+                    self.range(i, radius, dist, far, far_rd, offsets, out);
+                    offsets[dim] = before;
+                }
+            }
+        }
+    }
 }
 
 /// The state of one nearest-neighbour descent.
@@ -331,6 +394,11 @@ mod tests {
                         .copied()
                         .take_while(|&(_, d)| d <= radius)
                         .collect();
+                    assert_eq!(
+                        tree.within(i, radius, euclid(&data)),
+                        expected,
+                        "n {n} dims {dims} row {i} k {k}"
+                    );
                     // One descent gives the same distance and the neighbours a sort keeps.
                     let (got_kth, got) = tree.neighbourhood(i, k, 1e-12, euclid(&data));
                     assert_eq!(got_kth.to_bits(), kth.to_bits());

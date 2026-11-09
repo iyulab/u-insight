@@ -30,6 +30,12 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   many columns, and one descent answers both; the scores are bit-for-bit the same (HDBSCAN's core distances take the
   tighter bound too). On 20,000 rows: 4 columns 0.72 s to 0.26 s, 8 columns 3.7 s to 1.0 s, 12 columns 5.4 s to
   2.4 s, 16 columns 5.7 s to 3.1 s — past about 12 columns the tree is little better than a full scan.
+- DBSCAN scanned every row to build each row's neighbour list and kept all the lists: `n²` time, and memory that
+  grew with how many rows lay within `epsilon` of one another (579 MB for 50,000 rows with a typical `epsilon`,
+  gigabytes past that). It asks a k-d tree for a row's neighbourhood when the row is first met and keeps nothing
+  but the queue, which holds each row once; the labels and core points are exactly the same (checked against the
+  scan over duplicates, ties and 1 to 16 columns, border points included). 50,000 rows by 2 columns: 21 s and
+  579 MB to 5.3 s and 9 MB; 20,000 rows by 4 / 8 / 16 / 200 columns: 2.9 / 3.5 / 6.4 / 75 s to 0.4 / 0.4 / 1.9 / 37 s.
 
 ## [0.42.0] - 2026-11-08
 

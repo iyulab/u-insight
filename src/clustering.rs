@@ -751,7 +751,9 @@ pub struct DbscanResult {
 /// "A Density-Based Algorithm for Discovering Clusters in Large Spatial
 /// Databases with Noise."
 ///
-/// Complexity: O(n²) with brute-force neighbor search.
+/// Complexity: one ε-neighbourhood query per point through a k-d tree — about
+/// `O(n log n)` in few dimensions, `O(n²)` in many or when ε reaches most of the
+/// points — and `O(n)` memory (the neighbour lists are not kept).
 ///
 /// # Arguments
 ///
@@ -818,26 +820,36 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
         }
     }
 
-    // Precompute distance matrix (O(n²) space + time)
-    // For moderate n this is acceptable and avoids repeated computation.
     let eps = config.epsilon;
     let min_pts = config.min_samples;
 
-    // Find neighbors for each point
-    let neighbors: Vec<Vec<usize>> = (0..n)
-        .map(|i| {
-            (0..n)
-                .filter(|&j| euclidean_dist(&data[i], &data[j]) <= eps)
-                .collect()
-        })
-        .collect();
-
-    // Identify core points
-    let core_points: Vec<bool> = neighbors.iter().map(|nb| nb.len() >= min_pts).collect();
+    // The ε-neighbourhood of a point (itself included), by ascending index —
+    // the order a scan of every row gives, which fixes which cluster claims a
+    // border point. A k-d tree answers it by visiting the cells within ε,
+    // and it is asked once per point, when the point is first met: no
+    // neighbour list is kept, so memory is `O(n)` however many points lie
+    // within ε of one another (the lists of every point at once were `n²`).
+    let tree = crate::knn::KdTree::new(data);
+    let dist = |i: usize, j: usize| euclidean_dist(&data[i], &data[j]);
+    let region = |i: usize| -> Vec<usize> {
+        let mut near: Vec<usize> = tree
+            .within(i, eps, dist)
+            .into_iter()
+            .map(|(j, _)| j)
+            .collect();
+        near.push(i);
+        near.sort_unstable();
+        near
+    };
 
     // DBSCAN main loop
+    let mut core_points = vec![false; n];
     let mut labels: Vec<Option<usize>> = vec![None; n];
     let mut visited = vec![false; n];
+    // Rows already in the queue: a row queued twice is handled at its first
+    // turn (it is labelled then), so the second entry changes nothing — leaving
+    // it out keeps the queue at `n` entries rather than one per neighbour.
+    let mut queued = vec![false; n];
     let mut cluster_id = 0;
 
     for i in 0..n {
@@ -846,6 +858,8 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
         }
         visited[i] = true;
 
+        let neighbours = region(i);
+        core_points[i] = neighbours.len() >= min_pts;
         if !core_points[i] {
             // Will be noise or border (assigned later if reachable from a core)
             continue;
@@ -856,8 +870,9 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
 
         // Expand cluster using iterative BFS
         let mut queue = std::collections::VecDeque::new();
-        for &nb in &neighbors[i] {
-            if nb != i {
+        for &nb in &neighbours {
+            if labels[nb].is_none() && !queued[nb] {
+                queued[nb] = true;
                 queue.push_back(nb);
             }
         }
@@ -872,10 +887,13 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
 
             if !visited[q] {
                 visited[q] = true;
+                let neighbours = region(q);
+                core_points[q] = neighbours.len() >= min_pts;
                 if core_points[q] {
                     // Expand from this core point too
-                    for &nb in &neighbors[q] {
-                        if labels[nb].is_none() {
+                    for &nb in &neighbours {
+                        if labels[nb].is_none() && !queued[nb] {
+                            queued[nb] = true;
                             queue.push_back(nb);
                         }
                     }
@@ -1507,8 +1525,9 @@ pub struct HdbscanResult {
 ///
 /// # Complexity
 ///
-/// Time: O(n²) — dominated by pairwise distance / MST construction.
-/// Space: O(n²) — full distance matrix.
+/// Time: O(n²) — dominated by the minimum spanning tree over the
+/// mutual-reachability graph (core distances come from a k-d tree).
+/// Space: O(n) — no distance matrix is kept.
 ///
 /// # References
 ///
@@ -3343,6 +3362,94 @@ mod tests {
     }
 
     // ── DBSCAN tests ─────────────────────────────────────────────
+
+    /// DBSCAN as it was written before the k-d tree: every row's neighbour list
+    /// by scanning all rows, all lists kept — the reference the tree must match.
+    fn dbscan_by_scanning_every_row(
+        data: &[Vec<f64>],
+        eps: f64,
+        min_pts: usize,
+    ) -> (Vec<Option<usize>>, Vec<bool>) {
+        let n = data.len();
+        let neighbors: Vec<Vec<usize>> = (0..n)
+            .map(|i| {
+                (0..n)
+                    .filter(|&j| euclidean_dist(&data[i], &data[j]) <= eps)
+                    .collect()
+            })
+            .collect();
+        let core: Vec<bool> = neighbors.iter().map(|nb| nb.len() >= min_pts).collect();
+        let mut labels: Vec<Option<usize>> = vec![None; n];
+        let mut visited = vec![false; n];
+        let mut cluster_id = 0;
+        for i in 0..n {
+            if visited[i] {
+                continue;
+            }
+            visited[i] = true;
+            if !core[i] {
+                continue;
+            }
+            labels[i] = Some(cluster_id);
+            let mut queue = std::collections::VecDeque::new();
+            for &nb in &neighbors[i] {
+                if nb != i {
+                    queue.push_back(nb);
+                }
+            }
+            while let Some(q) = queue.pop_front() {
+                if labels[q].is_some() {
+                    continue;
+                }
+                labels[q] = Some(cluster_id);
+                if !visited[q] {
+                    visited[q] = true;
+                    if core[q] {
+                        for &nb in &neighbors[q] {
+                            if labels[nb].is_none() {
+                                queue.push_back(nb);
+                            }
+                        }
+                    }
+                }
+            }
+            cluster_id += 1;
+        }
+        (labels, core)
+    }
+
+    /// The tree-backed DBSCAN labels every row, and marks every core point,
+    /// exactly as the scan of all rows does — border points included (which
+    /// cluster claims one depends on the order the neighbours are met in),
+    /// over duplicates, grid ties, several widths and ε from «all noise» to
+    /// «one cluster».
+    #[test]
+    fn dbscan_matches_scanning_every_row() {
+        let mut state = 11_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        for dims in [1_usize, 2, 3, 5, 9, 16] {
+            let data: Vec<Vec<f64>> = (0..260)
+                .map(|r| match r % 4 {
+                    0 => vec![(r % 6) as f64; dims], // duplicates on a grid
+                    1 => (0..dims).map(|d| (d as f64) + next() * 0.8).collect(),
+                    _ => (0..dims).map(|_| next() * 6.0).collect(),
+                })
+                .collect();
+            for eps in [0.05, 0.4, 1.0, 2.5, 50.0] {
+                for min_pts in [2, 4, 9] {
+                    let got = dbscan(&data, &DbscanConfig::new(eps, min_pts)).unwrap();
+                    let (labels, core) = dbscan_by_scanning_every_row(&data, eps, min_pts);
+                    assert_eq!(got.labels, labels, "dims {dims} eps {eps} min {min_pts}");
+                    assert_eq!(got.core_points, core, "dims {dims} eps {eps} min {min_pts}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn dbscan_two_clusters_with_noise() {
