@@ -17,6 +17,9 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
   and distances to the last bit: the rows are kept in one array in the order of the tree's leaves, and a row's distance is
   given up as soon as the coordinates seen so far put it past the current k-th distance. On 20,000 uniform rows `lof` takes
   0.35 s → 0.23 s in 4 columns, 2.8 s → 0.7 s in 8, 25 s → 3.2 s in 12 and 31 s → 8.1 s in 16.
+- `hdbscan`: the minimum spanning tree of the mutual-reachability graph is 1.3 to 1.6 times faster, with the same tree edge for
+  edge: Prim's rounds visit only the vertices not yet in the tree, one pass both updates their cheapest edges and finds the
+  next vertex, and the rows are read from one array. 20,000 rows: 3.1 s → 2.3 s in 4 columns, 6.7 s → 4.2 s in 16.
 
 ## [0.43.0] - 2026-11-10
 

@@ -1644,7 +1644,6 @@ fn mutual_reachability_mst(data: &[Vec<f64>], min_samples: usize) -> Vec<(usize,
     // other point (the nearest when min_samples is 1) -- through a k-d tree.
     // No n x n matrix is kept: at 50,000 points two of them were ~40 GB.
     let k = min_samples.min(n);
-    let dist = |i: usize, j: usize| euclidean_dist(&data[i], &data[j]);
     let core_dists: Vec<f64> = if n < 2 {
         vec![0.0; n]
     } else {
@@ -1655,10 +1654,17 @@ fn mutual_reachability_mst(data: &[Vec<f64>], min_samples: usize) -> Vec<(usize,
     };
 
     // Phase 2: mutual reachability distance, computed when an edge is looked
-    // at: d_mreach(a, b) = max(core(a), core(b), d(a, b)).
+    // at: d_mreach(a, b) = max(core(a), core(b), d(a, b)). The rows are copied
+    // into one array: Prim reads one row against all the others, `n` times.
+    let dims = data.first().map_or(0, Vec::len);
+    let flat: Vec<f64> = data.iter().flatten().copied().collect();
     let mreach = |i: usize, j: usize| {
-        let (lo, hi) = if i < j { (i, j) } else { (j, i) };
-        dist(lo, hi).max(core_dists[lo]).max(core_dists[hi])
+        let d = crate::distance::squared_euclidean(
+            &flat[i * dims..(i + 1) * dims],
+            &flat[j * dims..(j + 1) * dims],
+        )
+        .sqrt();
+        d.max(core_dists[i]).max(core_dists[j])
     };
 
     // Phase 3: MST via Prim's algorithm on mutual reachability graph
@@ -1667,42 +1673,36 @@ fn mutual_reachability_mst(data: &[Vec<f64>], min_samples: usize) -> Vec<(usize,
 
 /// Prim's minimum spanning tree of the complete graph on `n` vertices whose
 /// edge weights `weight(i, j)` gives: `O(n²)` time, `O(n)` memory.
+///
+/// One pass over the vertices not yet in the tree does both jobs of a round: it
+/// brings each one's cheapest edge up to date with the vertex just added and,
+/// as it goes, finds the next vertex to add (the lowest weight, then the lowest
+/// index -- the choice a scan of every vertex in index order makes). The tree
+/// vertices are not visited again, so a round costs the vertices left, not `n`.
 fn prim_mst(weight: impl Fn(usize, usize) -> f64, n: usize) -> Vec<(usize, usize, f64)> {
-    let mut in_mst = vec![false; n];
     let mut min_edge = vec![(f64::INFINITY, 0_usize); n]; // (weight, from)
-    let mut edges = Vec::with_capacity(n - 1);
-
-    // Start from vertex 0
-    in_mst[0] = true;
-    for (j, edge) in min_edge.iter_mut().enumerate().skip(1) {
-        *edge = (weight(0, j), 0); // dist from vertex 0
-    }
-
-    for _ in 0..(n - 1) {
-        // Find minimum edge from MST to non-MST vertex
-        let mut best_v = 0;
-        let mut best_w = f64::INFINITY;
-        for v in 0..n {
-            if !in_mst[v] && min_edge[v].0 < best_w {
-                best_w = min_edge[v].0;
-                best_v = v;
+    let mut edges = Vec::with_capacity(n.saturating_sub(1));
+    // The vertices not in the tree, in ascending order: the rows, cores and edges
+    // they index are then read front to back.
+    let mut remaining: Vec<usize> = (1..n).collect();
+    let mut added = 0; // the tree starts at vertex 0
+    while !remaining.is_empty() {
+        let mut best = (f64::INFINITY, usize::MAX, 0_usize); // (weight, vertex, position)
+        for (position, &v) in remaining.iter().enumerate() {
+            let d = weight(added, v);
+            if d < min_edge[v].0 {
+                min_edge[v] = (d, added);
+            }
+            let w = min_edge[v].0;
+            if w < best.0 || (w == best.0 && v < best.1) {
+                best = (w, v, position);
             }
         }
-
-        in_mst[best_v] = true;
-        edges.push((min_edge[best_v].1, best_v, best_w));
-
-        // Update min edges
-        for v in 0..n {
-            if !in_mst[v] {
-                let d = weight(best_v, v);
-                if d < min_edge[v].0 {
-                    min_edge[v] = (d, best_v);
-                }
-            }
-        }
+        let (w, v, position) = best;
+        remaining.remove(position);
+        edges.push((min_edge[v].1, v, w));
+        added = v;
     }
-
     edges
 }
 
@@ -2781,7 +2781,51 @@ mod tests {
                 mreach[j * n + i] = d;
             }
         }
-        prim_mst(|i, j| mreach[i * n + j], n)
+        prim_mst_reference(|i, j| mreach[i * n + j], n)
+    }
+
+    /// Prim as it was written first: a scan of every vertex in index order to
+    /// find the next one, another to update the edges.
+    fn prim_mst_reference(
+        weight: impl Fn(usize, usize) -> f64,
+        n: usize,
+    ) -> Vec<(usize, usize, f64)> {
+        let mut in_mst = vec![false; n];
+        let mut min_edge = vec![(f64::INFINITY, 0_usize); n]; // (weight, from)
+        let mut edges = Vec::with_capacity(n - 1);
+
+        // Start from vertex 0
+        in_mst[0] = true;
+        for (j, edge) in min_edge.iter_mut().enumerate().skip(1) {
+            *edge = (weight(0, j), 0); // dist from vertex 0
+        }
+
+        for _ in 0..(n - 1) {
+            // Find minimum edge from MST to non-MST vertex
+            let mut best_v = 0;
+            let mut best_w = f64::INFINITY;
+            for v in 0..n {
+                if !in_mst[v] && min_edge[v].0 < best_w {
+                    best_w = min_edge[v].0;
+                    best_v = v;
+                }
+            }
+
+            in_mst[best_v] = true;
+            edges.push((min_edge[best_v].1, best_v, best_w));
+
+            // Update min edges
+            for v in 0..n {
+                if !in_mst[v] {
+                    let d = weight(best_v, v);
+                    if d < min_edge[v].0 {
+                        min_edge[v] = (d, best_v);
+                    }
+                }
+            }
+        }
+
+        edges
     }
 
     #[test]
