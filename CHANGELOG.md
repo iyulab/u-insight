@@ -13,6 +13,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 - Requires u-analytics 0.35, which requires u-numflow 0.16.3 and fixes the median-rank regression
   (identical failure times were told apart by rounding noise), the beta fit's log-likelihood at large shapes and the Weibull
   percentile life at ppm-level failure fractions.
+- The nearest-neighbour search beneath `lof`, `dbscan` and `hdbscan` is faster (`lof` measured, 1.5 to 8 times), with the same neighbours
+  and distances to the last bit: the rows are kept in one array in the order of the tree's leaves, and a row's distance is
+  given up as soon as the coordinates seen so far put it past the current k-th distance. On 20,000 uniform rows `lof` takes
+  0.35 s → 0.23 s in 4 columns, 2.8 s → 0.7 s in 8, 25 s → 3.2 s in 12 and 31 s → 8.1 s in 16.
 
 ## [0.43.0] - 2026-11-10
 

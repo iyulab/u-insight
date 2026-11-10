@@ -189,9 +189,8 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
     let mut k_distances = vec![0.0_f64; n];
     let mut k_neighbors: Vec<Vec<(usize, f64)>> = Vec::with_capacity(n);
     let tree = crate::knn::KdTree::new(data);
-    let dist = |i: usize, j: usize| euclidean_distance(&data[i], &data[j]);
     for (i, k_dist) in k_distances.iter_mut().enumerate() {
-        let (kth, neighbours) = tree.neighbourhood(i, k, 1e-12, dist);
+        let (kth, neighbours) = tree.neighbourhood(i, k, 1e-12);
         *k_dist = kth;
         k_neighbors.push(neighbours);
     }
@@ -258,7 +257,8 @@ pub fn lof(data: &[Vec<f64>], config: &LofConfig) -> Result<LofResult, InsightEr
     })
 }
 
-/// Euclidean distance between two points.
+/// Euclidean distance between two points (the brute-force reference of the tests).
+#[cfg(test)]
 fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
     crate::distance::squared_euclidean(a, b).sqrt()
 }

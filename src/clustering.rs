@@ -794,13 +794,8 @@ pub fn dbscan(data: &[Vec<f64>], config: &DbscanConfig) -> Result<DbscanResult, 
     // neighbour list is kept, so memory is `O(n)` however many points lie
     // within ε of one another (the lists of every point at once were `n²`).
     let tree = crate::knn::KdTree::new(data);
-    let dist = |i: usize, j: usize| euclidean_dist(&data[i], &data[j]);
     let region = |i: usize| -> Vec<usize> {
-        let mut near: Vec<usize> = tree
-            .within(i, eps, dist)
-            .into_iter()
-            .map(|(j, _)| j)
-            .collect();
+        let mut near: Vec<usize> = tree.within(i, eps).into_iter().map(|(j, _)| j).collect();
         near.push(i);
         near.sort_unstable();
         near
@@ -1655,7 +1650,7 @@ fn mutual_reachability_mst(data: &[Vec<f64>], min_samples: usize) -> Vec<(usize,
     } else {
         let tree = crate::knn::KdTree::new(data);
         (0..n)
-            .map(|i| tree.kth_distance(i, k.saturating_sub(1).max(1), dist))
+            .map(|i| tree.kth_distance(i, k.saturating_sub(1).max(1)))
             .collect()
     };
 
