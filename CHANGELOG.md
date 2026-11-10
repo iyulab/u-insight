@@ -8,9 +8,13 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-10
+
+Depends on u-analytics 0.34 and u-numflow 0.16.3. The .NET client is `UInsight` 0.43.0.
+
 ### Changed
 
-- Requires u-numflow 0.16.2, whose Frobenius norm and symmetric eigen solver are independent of the unit: principal components and the outlier scores built on a covariance in 1e-100 or 1e100 units were wrong with 0.16.1.
+- Requires u-numflow 0.16.3, which keeps the digits of the t, F and chi-squared tails and quantiles for a small probability (the p-values and critical values behind the tests) and of the normal tails. It carries 0.16.2's fix too: the Frobenius norm and the symmetric eigen solver are independent of the unit, where principal components and the outlier scores built on a covariance in 1e-100 or 1e100 units were wrong with 0.16.1.
 
 ### Fixed
 
