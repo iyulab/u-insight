@@ -8,6 +8,12 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- Requires u-analytics 0.35, which requires u-numflow 0.16.3 and fixes the median-rank regression
+  (identical failure times were told apart by rounding noise), the beta fit's log-likelihood at large shapes and the Weibull
+  percentile life at ppm-level failure fractions.
+
 ## [0.43.0] - 2026-11-10
 
 Depends on u-analytics 0.34 and u-numflow 0.16.3. The .NET client is `UInsight` 0.43.0.
