@@ -8,6 +8,8 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-11-14
+
 ### Changed
 
 - Requires u-analytics 0.35, which requires u-numflow 0.16.3 and fixes the median-rank regression
