@@ -8,6 +8,10 @@ Maintained from 0.11.0 onward; earlier entries list release dates only (see git 
 
 ## [Unreleased]
 
+### Changed
+
+- Requires u-analytics 0.36 (short-run control charts, a fixed centre for the individuals chart); nothing u-insight uses changed.
+
 ## [0.43.1] - 2026-11-14
 
 ### Changed
